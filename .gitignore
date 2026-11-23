@@ -1,0 +1,43 @@
+# Build artifacts
+bin/
+obj/
+out/
+artifacts/
+
+# Visual Studio / IDE
+.vs/
+.vscode/
+*.user
+*.suo
+*.userosscache
+*.sln.docstates
+*.DotSettings.user
+
+# Local environment & secrets
+appsettings.Development.json
+.env
+*.local.json
+secrets.json
+
+# Test & coverage
+TestResults/
+coverage/
+*.trx
+*.coverage
+
+# Backup verification outputs
+backups/
+*.enc
+*.dump
+*.bak
+
+# Local databases, certificates & logs
+*.db
+*.db-*
+*.sqlite
+*.sqlite3
+*.lcbackup
+*.pfx
+*.cer
+*.key
+*.log

@@ -1,0 +1,196 @@
+# Occlusa — Malaysian Dental Practice Management Software
+
+> A .NET 8 dental clinic operations platform for multi-branch Malaysian practices combining a zero-scrollbar WPF desktop client (`Occlusa.Desktop`), an ASP.NET Core 8 Web API & SignalR backend (`Occlusa.Api`), pure domain contracts/helpers (`Occlusa.Shared`), and Supabase PostgreSQL Row-Level Security (`Occlusa.Tests` verified).
+
+---
+
+## Table of Contents
+- [Architecture Overview](#architecture-overview)
+- [Project Structure](#project-structure)
+- [Core Architectural Invariants](#core-architectural-invariants)
+- [Features](#features)
+- [Prerequisites](#prerequisites)
+- [Getting Started & Quick Start](#getting-started--quick-start-zero-config-local-mode--0-cost)
+- [Running Tests](#running-tests)
+- [Production Configuration Guide](#production-configuration-guide)
+
+---
+
+## Architecture Overview
+
+```mermaid
+graph TD
+    Desktop["Occlusa.Desktop (WPF / MVVM)"] -->|REST & SignalR /hubs/queue| Api["Occlusa.Api (ASP.NET Core 8)"]
+    Desktop -->|Auto-starts on localhost:5188| Api
+    Desktop --> Shared["Occlusa.Shared (DTOs, Billing, MyKad, Calendar)"]
+    Api --> Shared
+    Api --> Repo["Repository Layer (Npgsql / In-Memory Fallback)"]
+    Repo --> DB[(Supabase PostgreSQL + RLS)]
+```
+
+| Component | Path | Purpose |
+| :--- | :--- | :--- |
+| **Shared Domain & Math** | `src/Occlusa.Shared` | Cross-platform `net8.0` DTOs, enums, `AppointmentCalendarHelper` (calendar grids, slot availability, treatment capability & flexible patient matching), deterministic `BillingCalculator`, Malaysian `MyKadParser`, and `EmergencyTriageClassifier`. |
+| **Web API & SignalR Hub** | `src/Occlusa.Api` | ASP.NET Core 8 REST API, SignalR `/hubs/queue`, `InMemoryOcclusaRepository` (0-config fallback) / `NpgsqlSupabaseRepository`, and WhatsApp AI Receptionist. |
+| **Native WPF Desktop** | `src/Occlusa.Desktop` | `net8.0-windows` desktop client with uniform 3–4 column paged tables (zero scrollbars, zero ellipsis truncation), 1080p/1440p responsiveness, `LocalApiHostService` auto-start API host, true modal dialogs with unsaved-changes guard, pinned medical alerts, FDI 32-tooth odontogram, 4-step Appointments scheduling workspace, and PC/SC MyKad reader. |
+| **xUnit Test Suite** | `src/Occlusa.Tests` | 69 deterministic unit and Kestrel HTTP pipeline tests covering appointments, treatment capability filtering, patient lookup, billing, NRIC parsing, and WhatsApp emergency triage. |
+| **Supabase Schema & RLS** | `supabase/migrations/` | PostgreSQL schema migrations (`001` core schema & RLS, `002` dentists/treatments/appointments relations, `003` dentist treatment capabilities) with clinic-group clinical sharing, branch-isolated financials, and immutable append-only audit logs. |
+| **Architecture Docs** | `docs/` | UI uniformity rules (`docs/UI_UNIFORMITY_RULES.md`) and Appointments scheduling specification (`docs/architecture/APPOINTMENTS_SCHEDULING.md`). |
+| **Backup Verification** | `scripts/verify-daily-backup.ps1` | Daily AES-256 encrypted `pg_dump` / dry-run archive verification with SHA-256 checksums and API logging. |
+
+---
+
+## Project Structure
+
+```text
+├── docs/
+│   ├── architecture/
+│   │   └── APPOINTMENTS_SCHEDULING.md # Relational calendar & 4-step booking architecture
+│   └── UI_UNIFORMITY_RULES.md         # Zero-scrollbar / zero-ellipsis desktop UI contract
+├── scripts/
+│   └── verify-daily-backup.ps1        # Encrypted backup verification runner
+├── src/
+│   ├── Occlusa.Api/                   # ASP.NET Core 8 REST API & SignalR hub
+│   │   ├── Controllers/
+│   │   ├── Hubs/
+│   │   ├── Models/
+│   │   ├── Options/
+│   │   ├── Properties/
+│   │   ├── Repositories/
+│   │   ├── Security/
+│   │   └── Services/
+│   ├── Occlusa.Desktop/               # Native WPF desktop client (MVVM)
+│   │   ├── Controls/
+│   │   ├── Services/
+│   │   ├── Themes/
+│   │   ├── ViewModels/
+│   │   └── Views/
+│   ├── Occlusa.Shared/                # Pure domain models & scheduling/billing helpers
+│   │   ├── Models/
+│   │   └── Services/
+│   └── Occlusa.Tests/                 # xUnit verification suite (69 tests)
+├── supabase/
+│   └── migrations/
+│       ├── 001_occlusa_tier1_tier2_schema_rls.sql
+│       ├── 002_appointments_dentists_treatments.sql
+│       └── 003_dentist_treatment_capabilities.sql
+├── CHANGELOG.md                       # SemVer release history
+├── Directory.Build.props              # Synchronized SemVer version metadata
+├── Occlusa.sln                        # Visual Studio / .NET solution
+└── README.md                          # Project overview & setup guide
+```
+
+---
+
+## Core Architectural Invariants
+
+1. **Zero Scrollbars & Zero Ellipsis Truncation:** Desktop views and modals paginate cleanly (`UniformPagedGrid`, auto-sized for 1920x1080 and 2560x1440) with 3–4 focused columns and double-click modal popups (`ModalDialogShell` with `HasUnsavedChanges` guard).
+2. **Clinical Sharing vs. Financial Isolation (RLS):** Clinical data (`patients`, `medical_alerts`, `odontogram_entries`, `soap_notes`) is shared across branches within the same `clinic_group_id` (`OCCLUSA-MY`), while financial records (`invoices`, `invoice_lines`, `payments`, `daily_sales_reconciliations`, `audit_logs`) are strictly isolated by `branch_id = ANY(auth_allowed_branches())`.
+3. **Immutable History (Soft-Delete / Void Only):** Hard `DELETE` is prohibited on `invoices`, `invoice_lines`, `payments`, `soap_notes`, `daily_sales_reconciliations`, `patients`, and `audit_logs`. Voiding an invoice preserves the record and appends an immutable `AuditLogDto`.
+4. **Odontogram-to-Invoice Synchronization:** Marking an FDI tooth treatment stage as `Completed` automatically creates or updates the corresponding line item on the patient's active draft invoice and broadcasts `InvoiceUpdated` over SignalR.
+5. **WhatsApp AI Receptionist Guardrails:**
+   - Every AI-created booking enters the queue as `QueueStatus.AiBookedPending` for front-desk approval.
+   - Routine scope only (hours, clinic locations, standard Consultation/Scaling/Filling rates & slots). Complex/surgical requests (implants, wisdom tooth surgery, full-mouth rehab, braces, sedation) are blocked from self-booking and routed to front-desk callback.
+   - Emergency red-flag symptoms (severe pain, facial swelling, uncontrolled bleeding, trauma, airway/swallowing difficulty) immediately halt booking, set `IsEmergencyEscalated = true`, and emit `EmergencyEscalated` via SignalR.
+6. **Treatment-Driven 4-Step Front-Desk Appointment Booking:** Appointments match front-desk workflow order (`Treatment` -> eligible `Dentist` via `SupportedTreatmentIds` -> target `Date` & 3x3 hourly slot availability grid -> flexible `IC`/`Name`/`Phone` auto-suggest lookup with inline new-patient registration), keeping `MedicalAlertsBanner` hidden on the main Appointments overview until a specific patient is selected inside a modal or clinical workspace.
+
+---
+
+## Features
+
+- [x] **Appointments Calendar & Table:** Day View (`Full Day` / `AM` / `PM` 9-slot grid across eligible dentists), Week View, Month View, and 4-column paged Table synced with Live Queue (`IsTodayForLiveQueue`).
+- [x] **4-Step Booking & Inline Registration:** Treatment-to-dentist capability filtering, hourly slot availability lookup, dash-tolerant IC / name / phone search, and atomic `POST /api/appointments/register-and-book`.
+- [x] **FDI 32-Tooth Odontogram & Billing:** Split-payment invoices, panel/TPA deductions, practitioner commission calculations, and auto-invoicing on completed procedures.
+- [x] **Malaysian MyKad PC/SC Reader:** Hardware USB smartcard parsing via `winscard.dll` plus built-in **Simulate MyKad Insert** for testing.
+- [x] **WhatsApp AI Receptionist & Emergency Triage:** Guardrailed booking flow with front-desk approval and SignalR emergency escalation.
+- [x] **Zero-Config Local Mode & Embedded API Host:** `Occlusa.Desktop` automatically launches `Occlusa.Api` on `http://localhost:5188` when not already running.
+
+---
+
+## Prerequisites
+
+- [.NET 8 SDK](https://dotnet.microsoft.com/download/dotnet/8.0) or newer (Windows required for building/running `Occlusa.Desktop`)
+- PowerShell 5.1+ or PowerShell 7+ (for backup verification script)
+
+---
+
+## Getting Started & Quick Start (Zero-Config Local Mode — $0 Cost)
+
+When `Supabase:ConnectionString`, `Gemini:ApiKey`, and `WhatsApp:AccessToken` are left empty, Occlusa runs completely locally using pre-seeded Malaysian dental clinic data (`HQ-KL` and `PJ-SS2`), a deterministic AI receptionist fallback, and simulated/PC/SC MyKad reading.
+
+1. **Clone the repository:**
+   ```powershell
+   git clone https://github.com/badrolazim/Occlusa.git
+   cd Occlusa
+   ```
+
+2. **Build the solution:**
+   ```powershell
+   dotnet build Occlusa.sln
+   ```
+
+3. **Run the WPF Desktop Client (`Occlusa.Api` auto-starts on `http://localhost:5188` via `LocalApiHostService`):**
+   ```powershell
+   dotnet run --project src\Occlusa.Desktop\Occlusa.Desktop.csproj
+   ```
+
+   *(Optional)* Run the API and Desktop client in separate terminals if developing backend changes independently:
+   ```powershell
+   # Terminal 1: Start API on http://localhost:5188
+   dotnet run --project src\Occlusa.Api\Occlusa.Api.csproj
+
+   # Terminal 2: Start WPF Desktop Client
+   dotnet run --project src\Occlusa.Desktop\Occlusa.Desktop.csproj
+   ```
+
+---
+
+## Running Tests
+
+Run the full automated verification suite (`69` xUnit tests):
+
+```powershell
+dotnet test src\Occlusa.Tests\Occlusa.Tests.csproj --logger "console;verbosity=normal"
+```
+
+---
+
+## Production Configuration Guide
+
+Never commit real credentials. Configure secrets using `src/Occlusa.Api/appsettings.Development.json` (gitignored), `dotnet user-secrets`, or environment variables.
+
+### 1. Supabase Pro PostgreSQL + RLS
+1. Run the SQL migrations in order in the Supabase SQL Editor or via Supabase CLI (`supabase db push`):
+   1. `supabase/migrations/001_occlusa_tier1_tier2_schema_rls.sql`
+   2. `supabase/migrations/002_appointments_dentists_treatments.sql`
+   3. `supabase/migrations/003_dentist_treatment_capabilities.sql`
+2. Set `Supabase:ConnectionString` (Transaction/Session Pooler connection string) in `appsettings.Development.json` or environment variable `Supabase__ConnectionString`.
+3. Ensure your authentication JWTs include `clinic_group_id` (e.g. `"OCCLUSA-MY"`) and `allowed_branches` (e.g. `["HQ-KL"]`). `Occlusa.Api` automatically calls `set_config('request.jwt.claims', ...)` per transaction.
+
+### 2. Meta WhatsApp Cloud API
+Configure:
+- `WhatsApp:VerifyToken` — token verified on `GET /api/webhooks/whatsapp`
+- `WhatsApp:AccessToken` — Meta Cloud API permanent/system user token
+- `WhatsApp:PhoneNumberId` — WhatsApp Business Phone Number ID
+- Point your Meta App Webhook callback to `https://<your-domain>/api/webhooks/whatsapp`.
+
+### 3. Google Gemini API (AI Receptionist Function Calling)
+Configure:
+- `Gemini:ApiKey` — Google AI Studio / Gemini API key
+- `Gemini:Model` — e.g. `gemini-2.5-flash` (default)
+
+### 4. Malaysian MyKad PC/SC Reader
+- Plug in any Windows PC/SC-compatible USB smartcard reader (e.g., ACS ACR38U / ACR39U). `Occlusa.Desktop` uses native `winscard.dll` P/Invoke to detect card insertion and issue JPN MyKad APDUs parsed via `MyKadParser`.
+- If no physical hardware reader is connected, use the built-in **Simulate MyKad Insert** button in the Patients view for instant zero-typo testing.
+
+### 5. Automated Daily Backup Verification
+Run a dry-run local verification or a live Supabase `pg_dump` AES-256 verification:
+```powershell
+# Dry-run check (posts verification record to running Occlusa.Api)
+.\scripts\verify-daily-backup.ps1 -DryRun -ApiBaseUrl http://localhost:5188
+
+# Live encrypted pg_dump verification
+$env:OCCLUSA_SUPABASE_CONNECTION_STRING = "postgresql://postgres.<ref>:<password>@aws-0-ap-southeast-1.pooler.supabase.com:5432/postgres"
+$env:OCCLUSA_BACKUP_PASSPHRASE = "<strong-passphrase>"
+.\scripts\verify-daily-backup.ps1 -ApiBaseUrl http://localhost:5188
+```

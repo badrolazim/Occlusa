@@ -1,0 +1,182 @@
+<Window x:Class="Occlusa.Desktop.Views.DailyReconciliationModal"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:Occlusa.Desktop.Controls"
+        Title="End-of-Day Reconciliation &amp; Backup Verification"
+        Width="1140"
+        Height="820"
+        MinWidth="980"
+        MinHeight="740"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="{StaticResource SurfaceCanvasBrush}"
+        ScrollViewer.VerticalScrollBarVisibility="Disabled"
+        ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+
+    <controls:ModalDialogShell Title="{Binding ModalTitle}"
+                               Subtitle="{Binding ModalSubtitle}"
+                               BadgeText="{Binding BalancedBadgeText}">
+
+        <controls:ModalDialogShell.DialogContent>
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="12" />
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="12" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <!-- Top Financial KPI Summary (Pixel-Equal 5-Column Grids) -->
+                <Border Grid.Row="0" Style="{StaticResource UniformCardBorderStyle}">
+                    <StackPanel>
+                        <DockPanel Margin="0,0,0,12" LastChildFill="False">
+                            <TextBlock DockPanel.Dock="Left"
+                                       Text="End-of-Day Sales &amp; Commission Summary"
+                                       Style="{StaticResource UniformSectionTitleTextStyle}"
+                                       VerticalAlignment="Center" />
+                            <Button DockPanel.Dock="Right"
+                                    Content="Recompute EOD Summary"
+                                    Command="{Binding RunReconciliationCommand}"
+                                    Style="{StaticResource UniformPrimaryButtonStyle}" />
+                        </DockPanel>
+
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="8" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="8" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="8" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="8" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Border Grid.Column="0" Style="{StaticResource UniformSubtleCardBorderStyle}">
+                                <StackPanel>
+                                    <TextBlock Text="Gross Revenue" Style="{StaticResource UniformLabelTextStyle}" />
+                                    <TextBlock Text="{Binding Summary.GrossRevenue, StringFormat='RM {0:N2}'}" Style="{StaticResource UniformSectionTitleTextStyle}" Margin="0,3,0,0" />
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Column="2" Style="{StaticResource UniformSubtleCardBorderStyle}">
+                                <StackPanel>
+                                    <TextBlock Text="Discounts" Style="{StaticResource UniformLabelTextStyle}" />
+                                    <TextBlock Text="{Binding Summary.TotalDiscounts, StringFormat='RM {0:N2}'}" Style="{StaticResource UniformSectionTitleTextStyle}" Margin="0,3,0,0" />
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Column="4" Style="{StaticResource UniformSubtleCardBorderStyle}">
+                                <StackPanel>
+                                    <TextBlock Text="Panel Claims" Style="{StaticResource UniformLabelTextStyle}" />
+                                    <TextBlock Text="{Binding Summary.TotalPanelClaims, StringFormat='RM {0:N2}'}" Style="{StaticResource UniformSectionTitleTextStyle}" Foreground="{StaticResource BrandSecondaryBrush}" Margin="0,3,0,0" />
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Column="6" Style="{StaticResource UniformSubtleCardBorderStyle}">
+                                <StackPanel>
+                                    <TextBlock Text="Doctor Commissions" Style="{StaticResource UniformLabelTextStyle}" />
+                                    <TextBlock Text="{Binding Summary.TotalDoctorCommissions, StringFormat='RM {0:N2}'}" Style="{StaticResource UniformSectionTitleTextStyle}" Margin="0,3,0,0" />
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Column="8" Style="{StaticResource UniformSubtleCardBorderStyle}">
+                                <StackPanel>
+                                    <TextBlock Text="Net Collected" Style="{StaticResource UniformLabelTextStyle}" />
+                                    <TextBlock Text="{Binding Summary.NetCollected, StringFormat='RM {0:N2}'}" Style="{StaticResource UniformSectionTitleTextStyle}" Foreground="{StaticResource SuccessBrush}" Margin="0,3,0,0" />
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="8" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="8" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="8" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="8" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <Border Grid.Column="0" Style="{StaticResource UniformSubtleCardBorderStyle}">
+                                <StackPanel>
+                                    <TextBlock Text="Cash Collected" Style="{StaticResource UniformLabelTextStyle}" />
+                                    <TextBlock Text="{Binding Summary.TotalCashCollected, StringFormat='RM {0:N2}'}" Style="{StaticResource UniformBodyTextStyle}" FontWeight="SemiBold" Margin="0,2,0,0" />
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Column="2" Style="{StaticResource UniformSubtleCardBorderStyle}">
+                                <StackPanel>
+                                    <TextBlock Text="Card Collected" Style="{StaticResource UniformLabelTextStyle}" />
+                                    <TextBlock Text="{Binding Summary.TotalCardCollected, StringFormat='RM {0:N2}'}" Style="{StaticResource UniformBodyTextStyle}" FontWeight="SemiBold" Margin="0,2,0,0" />
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Column="4" Style="{StaticResource UniformSubtleCardBorderStyle}">
+                                <StackPanel>
+                                    <TextBlock Text="QR / Transfer" Style="{StaticResource UniformLabelTextStyle}" />
+                                    <TextBlock Text="{Binding Summary.TotalQrCollected, StringFormat='RM {0:N2}'}" Style="{StaticResource UniformBodyTextStyle}" FontWeight="SemiBold" Margin="0,2,0,0" />
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Column="6" Style="{StaticResource UniformSubtleCardBorderStyle}">
+                                <StackPanel>
+                                    <TextBlock Text="Active Invoices" Style="{StaticResource UniformLabelTextStyle}" />
+                                    <TextBlock Text="{Binding Summary.TotalInvoicesCount}" Style="{StaticResource UniformBodyTextStyle}" FontWeight="SemiBold" Margin="0,2,0,0" />
+                                </StackPanel>
+                            </Border>
+                            <Border Grid.Column="8" Style="{StaticResource UniformSubtleCardBorderStyle}">
+                                <StackPanel>
+                                    <TextBlock Text="Voided Count" Style="{StaticResource UniformLabelTextStyle}" />
+                                    <TextBlock Text="{Binding Summary.VoidedInvoicesCount}" Style="{StaticResource UniformBodyTextStyle}" FontWeight="SemiBold" Foreground="{StaticResource DangerBrush}" Margin="0,2,0,0" />
+                                </StackPanel>
+                            </Border>
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- Middle: Paged Immutable Audit Trail (4 Columns, Zero Scrollbars) -->
+                <controls:UniformPagedGrid Grid.Row="2"
+                                           Title="Branch Immutable Audit Trail"
+                                           Subtitle="4 Columns · Soft-Void &amp; Clinical Event Log"
+                                           EmptyMessage="No audit log events recorded for this branch yet."
+                                           ItemsSource="{Binding AuditRows}"
+                                           AutoPageSize="False"
+                                           PageSize="4">
+                    <controls:UniformColumnDef Header="Time" BindingPath="TimestampDisplay" WidthRatio="0.8" IsMonospace="True" />
+                    <controls:UniformColumnDef Header="Action" BindingPath="Action" WidthRatio="1.3" IsBold="True" />
+                    <controls:UniformColumnDef Header="Entity &amp; User" BindingPath="EntityDisplay" WidthRatio="1.4" />
+                    <controls:UniformColumnDef Header="Detail" BindingPath="DetailDisplay" WidthRatio="2.2" />
+                </controls:UniformPagedGrid>
+
+                <!-- Bottom: Daily Database Backup Verification Card -->
+                <Border Grid.Row="4" Style="{StaticResource UniformCardBorderStyle}">
+                    <DockPanel LastChildFill="True">
+                        <Button DockPanel.Dock="Right"
+                                Content="Verify Daily Database Backup"
+                                Command="{Binding VerifyBackupCommand}"
+                                Style="{StaticResource UniformSecondaryButtonStyle}"
+                                VerticalAlignment="Center"
+                                Margin="16,0,0,0" />
+                        <StackPanel VerticalAlignment="Center">
+                            <TextBlock Text="Automated Daily Encrypted Database Backup &amp; Restore Verification"
+                                       Style="{StaticResource UniformSectionTitleTextStyle}" />
+                            <TextBlock Text="{Binding BackupStatusText}"
+                                       Style="{StaticResource UniformBodyTextStyle}"
+                                       Margin="0,4,0,2" />
+                            <TextBlock Text="{Binding BackupChecksumText, StringFormat='SHA-256: {0}'}"
+                                       Style="{StaticResource UniformMonoTextStyle}"
+                                       Foreground="{StaticResource TextSecondaryBrush}" />
+                        </StackPanel>
+                    </DockPanel>
+                </Border>
+            </Grid>
+        </controls:ModalDialogShell.DialogContent>
+
+        <controls:ModalDialogShell.FooterLeftContent>
+            <TextBlock Text="{Binding StatusMessage}"
+                       Style="{StaticResource UniformBodyTextStyle}"
+                       Foreground="{StaticResource BrandPrimaryBrush}"
+                       FontWeight="SemiBold"
+                       VerticalAlignment="Center" />
+        </controls:ModalDialogShell.FooterLeftContent>
+    </controls:ModalDialogShell>
+</Window>

@@ -1,0 +1,346 @@
+<Window x:Class="Occlusa.Desktop.Views.OdontogramModal"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:Occlusa.Desktop.Controls"
+        Title="Interactive 32-Tooth FDI Odontogram"
+        Width="1200"
+        Height="820"
+        MinWidth="1060"
+        MinHeight="740"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="{StaticResource SurfaceCanvasBrush}"
+        ScrollViewer.VerticalScrollBarVisibility="Disabled"
+        ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+
+    <Window.Resources>
+        <DataTemplate x:Key="ToothCellTemplate">
+            <Button Command="{Binding DataContext.SelectToothCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    CommandParameter="{Binding ToothNumber}"
+                    Background="{Binding Condition, Converter={StaticResource ToothConditionToBrushConverter}}"
+                    Margin="2"
+                    Padding="4,5"
+                    Height="72"
+                    Cursor="Hand">
+                <Button.Style>
+                    <Style TargetType="Button">
+                        <Setter Property="BorderBrush" Value="{StaticResource BorderStrongBrush}" />
+                        <Setter Property="BorderThickness" Value="1" />
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="Button">
+                                    <Border x:Name="ToothBorder"
+                                            Background="{TemplateBinding Background}"
+                                            BorderBrush="{TemplateBinding BorderBrush}"
+                                            BorderThickness="{TemplateBinding BorderThickness}"
+                                            CornerRadius="6"
+                                            Padding="{TemplateBinding Padding}">
+                                        <StackPanel VerticalAlignment="Center" HorizontalAlignment="Center">
+                                            <TextBlock Text="{Binding ToothNumber}"
+                                                       FontFamily="Consolas"
+                                                       FontSize="13"
+                                                       FontWeight="Bold"
+                                                       Foreground="{StaticResource TextPrimaryBrush}"
+                                                       HorizontalAlignment="Center"
+                                                       TextTrimming="None" />
+                                            <TextBlock Text="{Binding ConditionCode}"
+                                                       FontSize="10.5"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                                       HorizontalAlignment="Center"
+                                                       Margin="0,2,0,3"
+                                                       TextTrimming="None" />
+                                            <Border Background="#F1F5F9"
+                                                    BorderBrush="#CBD5E1"
+                                                    BorderThickness="1"
+                                                    CornerRadius="4"
+                                                    Padding="5,1"
+                                                    HorizontalAlignment="Center">
+                                                <TextBlock Text="{Binding StageCode}"
+                                                           FontSize="9.5"
+                                                           FontWeight="Bold"
+                                                           Foreground="{StaticResource BrandPrimaryBrush}"
+                                                           TextTrimming="None" />
+                                            </Border>
+                                        </StackPanel>
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="ToothBorder" Property="BorderBrush" Value="{StaticResource BrandPrimaryBrush}" />
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                <Setter Property="BorderBrush" Value="{StaticResource BrandPrimaryBrush}" />
+                                <Setter Property="BorderThickness" Value="2" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Button.Style>
+            </Button>
+        </DataTemplate>
+    </Window.Resources>
+
+    <controls:ModalDialogShell Title="{Binding ModalTitle}"
+                               Subtitle="{Binding ModalSubtitle}"
+                               BadgeText="FDI 11-48"
+                               HasUnsavedChanges="{Binding HasUnsavedChanges, Mode=TwoWay}"
+                               SaveCommand="{Binding SaveCurrentToothCommand}"
+                               UnsavedPromptTitle="Unsaved Odontogram Edit"
+                               UnsavedPromptMessage="You have unsaved changes for the selected tooth. Save before closing?">
+
+        <controls:ModalDialogShell.DialogContent>
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <!-- Pinned Clinical Safety Banner -->
+                <controls:MedicalAlertsBanner Grid.Row="0"
+                                              Margin="0,0,0,12"
+                                              PatientName="{Binding Patient.FullName}"
+                                              IcNumber="{Binding Patient.IcNumber}"
+                                              IsMyKadVerified="{Binding Patient.IsMyKadVerified}"
+                                              Allergies="{Binding Patient.MedicalAlerts.Allergies}"
+                                              OnAnticoagulants="{Binding Patient.MedicalAlerts.OnAnticoagulants}"
+                                              HasDiabetes="{Binding Patient.MedicalAlerts.HasDiabetes}"
+                                              IsPregnant="{Binding Patient.MedicalAlerts.IsPregnant}"
+                                              AlertNotes="{Binding Patient.MedicalAlerts.Notes}" />
+
+                <!-- Interactive 32-Tooth FDI Arch Grid -->
+                <Border Grid.Row="1" Style="{StaticResource UniformCardBorderStyle}" Margin="0,0,0,12">
+                    <StackPanel>
+                        <DockPanel Margin="0,0,0,10" LastChildFill="False">
+                            <TextBlock DockPanel.Dock="Left"
+                                       Text="32-Tooth FDI Dental Chart"
+                                       Style="{StaticResource UniformSectionTitleTextStyle}"
+                                       VerticalAlignment="Center" />
+
+                            <!-- Condition Color Legend -->
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Border Width="10" Height="10" CornerRadius="2" Background="{StaticResource ToothHealthyBrush}" BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1" Margin="0,0,4,0" VerticalAlignment="Center" />
+                                <TextBlock Text="Healthy" Style="{StaticResource UniformMutedTextStyle}" Margin="0,0,10,0" VerticalAlignment="Center" />
+
+                                <Border Width="10" Height="10" CornerRadius="2" Background="{StaticResource ToothCariesBrush}" BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1" Margin="0,0,4,0" VerticalAlignment="Center" />
+                                <TextBlock Text="Caries" Style="{StaticResource UniformMutedTextStyle}" Margin="0,0,10,0" VerticalAlignment="Center" />
+
+                                <Border Width="10" Height="10" CornerRadius="2" Background="{StaticResource ToothFillingBrush}" BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1" Margin="0,0,4,0" VerticalAlignment="Center" />
+                                <TextBlock Text="Filling" Style="{StaticResource UniformMutedTextStyle}" Margin="0,0,10,0" VerticalAlignment="Center" />
+
+                                <Border Width="10" Height="10" CornerRadius="2" Background="{StaticResource ToothCrownBrush}" BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1" Margin="0,0,4,0" VerticalAlignment="Center" />
+                                <TextBlock Text="Crown" Style="{StaticResource UniformMutedTextStyle}" Margin="0,0,10,0" VerticalAlignment="Center" />
+
+                                <Border Width="10" Height="10" CornerRadius="2" Background="{StaticResource ToothRootCanalBrush}" BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1" Margin="0,0,4,0" VerticalAlignment="Center" />
+                                <TextBlock Text="RCT" Style="{StaticResource UniformMutedTextStyle}" Margin="0,0,10,0" VerticalAlignment="Center" />
+
+                                <Border Width="10" Height="10" CornerRadius="2" Background="{StaticResource ToothExtractionBrush}" BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1" Margin="0,0,4,0" VerticalAlignment="Center" />
+                                <TextBlock Text="Extract" Style="{StaticResource UniformMutedTextStyle}" Margin="0,0,10,0" VerticalAlignment="Center" />
+
+                                <Border Width="10" Height="10" CornerRadius="2" Background="{StaticResource ToothMissingBrush}" BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1" Margin="0,0,4,0" VerticalAlignment="Center" />
+                                <TextBlock Text="Missing" Style="{StaticResource UniformMutedTextStyle}" Margin="0,0,10,0" VerticalAlignment="Center" />
+
+                                <Border Width="10" Height="10" CornerRadius="2" Background="{StaticResource ToothImplantBrush}" BorderBrush="{StaticResource BorderStrongBrush}" BorderThickness="1" Margin="0,0,4,0" VerticalAlignment="Center" />
+                                <TextBlock Text="Implant" Style="{StaticResource UniformMutedTextStyle}" VerticalAlignment="Center" />
+                            </StackPanel>
+                        </DockPanel>
+
+                        <!-- Upper Arch Labels & Teeth -->
+                        <Grid Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="18" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="Q1 · Upper Right (18–11)" Style="{StaticResource UniformLabelTextStyle}" FontSize="11" Margin="2,0,0,0" />
+                            <TextBlock Grid.Column="2" Text="Q2 · Upper Left (21–28)" Style="{StaticResource UniformLabelTextStyle}" FontSize="11" HorizontalAlignment="Right" Margin="0,0,2,0" />
+                        </Grid>
+
+                        <Grid Margin="0,0,0,8">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="18" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <ItemsControl Grid.Column="0"
+                                          ItemsSource="{Binding UpperRightTeeth}"
+                                          ItemTemplate="{StaticResource ToothCellTemplate}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <UniformGrid Columns="8" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                            </ItemsControl>
+                            <Border Grid.Column="1" Width="2" Background="{StaticResource BorderStrongBrush}" HorizontalAlignment="Center" />
+                            <ItemsControl Grid.Column="2"
+                                          ItemsSource="{Binding UpperLeftTeeth}"
+                                          ItemTemplate="{StaticResource ToothCellTemplate}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <UniformGrid Columns="8" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                            </ItemsControl>
+                        </Grid>
+
+                        <!-- Lower Arch Teeth & Labels -->
+                        <Grid Margin="0,0,0,4">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="18" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <ItemsControl Grid.Column="0"
+                                          ItemsSource="{Binding LowerRightTeeth}"
+                                          ItemTemplate="{StaticResource ToothCellTemplate}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <UniformGrid Columns="8" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                            </ItemsControl>
+                            <Border Grid.Column="1" Width="2" Background="{StaticResource BorderStrongBrush}" HorizontalAlignment="Center" />
+                            <ItemsControl Grid.Column="2"
+                                          ItemsSource="{Binding LowerLeftTeeth}"
+                                          ItemTemplate="{StaticResource ToothCellTemplate}">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <UniformGrid Columns="8" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                            </ItemsControl>
+                        </Grid>
+
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="18" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <TextBlock Grid.Column="0" Text="Q4 · Lower Right (48–41)" Style="{StaticResource UniformLabelTextStyle}" FontSize="11" Margin="2,0,0,0" />
+                            <TextBlock Grid.Column="2" Text="Q3 · Lower Left (31–38)" Style="{StaticResource UniformLabelTextStyle}" FontSize="11" HorizontalAlignment="Right" Margin="0,0,2,0" />
+                        </Grid>
+                    </StackPanel>
+                </Border>
+
+                <!-- Tooth Treatment Editor & 3-Button Staging -->
+                <Border Grid.Row="2" Style="{StaticResource UniformCardBorderStyle}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <DockPanel Grid.Row="0" Margin="0,0,0,10" LastChildFill="False">
+                            <TextBlock DockPanel.Dock="Left"
+                                       Text="{Binding SelectedToothNumber, StringFormat='Selected Tooth: FDI #{0}'}"
+                                       Style="{StaticResource UniformSectionTitleTextStyle}"
+                                       VerticalAlignment="Center" />
+                            <TextBlock DockPanel.Dock="Right"
+                                       Text="Stages: Proposed → Accepted → Completed (Auto-pushes to Billing)"
+                                       Style="{StaticResource UniformMutedTextStyle}"
+                                       VerticalAlignment="Center" />
+                        </DockPanel>
+
+                        <Grid Grid.Row="1" Margin="0,0,0,10">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="190" />
+                                <ColumnDefinition Width="10" />
+                                <ColumnDefinition Width="1.5*" />
+                                <ColumnDefinition Width="10" />
+                                <ColumnDefinition Width="130" />
+                                <ColumnDefinition Width="10" />
+                                <ColumnDefinition Width="190" />
+                            </Grid.ColumnDefinitions>
+
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Tooth Condition" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,4" />
+                                <ComboBox ItemsSource="{Binding Conditions}"
+                                          SelectedItem="{Binding SelectedCondition}"
+                                          Style="{StaticResource UniformComboBoxStyle}" />
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="Treatment Procedure" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,4" />
+                                <TextBox Text="{Binding ProcedureName, UpdateSourceTrigger=PropertyChanged}"
+                                         Style="{StaticResource UniformInputTextBoxStyle}" />
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="4">
+                                <TextBlock Text="Fee (RM)" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,4" />
+                                <TextBox Text="{Binding FeeInput, UpdateSourceTrigger=PropertyChanged}"
+                                         Style="{StaticResource UniformInputTextBoxStyle}" />
+                            </StackPanel>
+
+                            <StackPanel Grid.Column="6">
+                                <TextBlock Text="Clinician" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,4" />
+                                <TextBox Text="{Binding DoctorName, UpdateSourceTrigger=PropertyChanged}"
+                                         Style="{StaticResource UniformInputTextBoxStyle}" />
+                            </StackPanel>
+                        </Grid>
+
+                        <!-- Quick Procedure Presets -->
+                        <DockPanel Grid.Row="2" Margin="0,0,0,10" LastChildFill="True">
+                            <TextBlock DockPanel.Dock="Left"
+                                       Text="Quick Procedures:"
+                                       Style="{StaticResource UniformLabelTextStyle}"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,10,0" />
+                            <ItemsControl ItemsSource="{Binding ProcedurePresets}" VerticalAlignment="Center">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate>
+                                        <WrapPanel Orientation="Horizontal" />
+                                    </ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Button Content="{Binding}"
+                                                Command="{Binding DataContext.ApplyProcedurePresetCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding}"
+                                                Style="{StaticResource UniformChipButtonStyle}"
+                                                Margin="0,0,6,2" />
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </DockPanel>
+
+                        <!-- 3-Button Staging Bar -->
+                        <StackPanel Grid.Row="3"
+                                    Orientation="Horizontal"
+                                    HorizontalAlignment="Right"
+                                    VerticalAlignment="Bottom">
+                            <Button Content="1. Mark Proposed"
+                                    Command="{Binding StageAndSaveCommand}"
+                                    CommandParameter="Proposed"
+                                    Style="{StaticResource UniformSecondaryButtonStyle}"
+                                    Margin="0,0,8,0" />
+                            <Button Content="2. Mark Accepted"
+                                    Command="{Binding StageAndSaveCommand}"
+                                    CommandParameter="Accepted"
+                                    Style="{StaticResource UniformSecondaryButtonStyle}"
+                                    Margin="0,0,8,0" />
+                            <Button Content="3. Mark Completed (Push to Billing)"
+                                    Command="{Binding StageAndSaveCommand}"
+                                    CommandParameter="Completed"
+                                    Style="{StaticResource UniformPrimaryButtonStyle}" />
+                        </StackPanel>
+                    </Grid>
+                </Border>
+            </Grid>
+        </controls:ModalDialogShell.DialogContent>
+
+        <controls:ModalDialogShell.FooterLeftContent>
+            <TextBlock Text="{Binding StatusMessage}"
+                       Style="{StaticResource UniformBodyTextStyle}"
+                       Foreground="{StaticResource BrandPrimaryBrush}"
+                       FontWeight="SemiBold"
+                       VerticalAlignment="Center" />
+        </controls:ModalDialogShell.FooterLeftContent>
+    </controls:ModalDialogShell>
+</Window>

@@ -33,7 +33,7 @@ graph TD
 | **Shared Domain & Math** | `src/Occlusa.Shared` | Cross-platform `net8.0` DTOs, enums, `AppointmentCalendarHelper` (calendar grids, slot availability, treatment capability & flexible patient matching), deterministic `BillingCalculator`, Malaysian `MyKadParser`, and `EmergencyTriageClassifier`. |
 | **Web API & SignalR Hub** | `src/Occlusa.Api` | ASP.NET Core 8 REST API, SignalR `/hubs/queue`, `InMemoryOcclusaRepository` (0-config fallback) / `NpgsqlSupabaseRepository`, and WhatsApp AI Receptionist. |
 | **Native WPF Desktop** | `src/Occlusa.Desktop` | `net8.0-windows` desktop client with uniform 3–5 column paged tables (zero scrollbars, zero ellipsis truncation), 1080p/1440p responsiveness, `LocalApiHostService` embedded in-process Kestrel host with auto-recovery, true modal dialogs with unsaved-changes guard, pinned medical alerts, unified Live Queue with shared Walk-In intake & Active Staff attribution, FDI 32-tooth odontogram, 15-minute proportional Appointments timeline with drag-and-drop rescheduling, and PC/SC MyKad reader. |
-| **xUnit Test Suite** | `src/Occlusa.Tests` | 79 deterministic unit and Kestrel HTTP pipeline tests covering Live Queue sorting, Walk-In slot blocking, staff attribution, appointments, 15-minute timeline layout & overlap splitting, dentist-locked drag rescheduling, treatment capability filtering, patient lookup, billing, NRIC parsing, and WhatsApp emergency triage. |
+| **xUnit Test Suite** | `src/Occlusa.Tests` | 81 deterministic unit and Kestrel HTTP pipeline tests covering Live Queue sorting, reception note formatting & walk-in note lifecycle persistence, Walk-In slot blocking, staff attribution, appointments, 15-minute timeline layout & overlap splitting, dentist-locked drag rescheduling, treatment capability filtering, patient lookup, billing, NRIC parsing, and WhatsApp emergency triage. |
 | **Supabase Schema & RLS** | `supabase/migrations/` | PostgreSQL schema migrations (`001` core schema & RLS, `002` dentists/treatments/appointments relations, `003` dentist treatment capabilities, `004` live queue walk-ins & staff attribution) with clinic-group clinical sharing, branch-isolated financials, and immutable append-only audit logs. |
 | **Architecture Docs** | `docs/` | UI uniformity rules (`docs/UI_UNIFORMITY_RULES.md`) and Appointments scheduling specification (`docs/architecture/APPOINTMENTS_SCHEDULING.md`). |
 | **Backup Verification** | `scripts/verify-daily-backup.ps1` | Daily AES-256 encrypted `pg_dump` / dry-run archive verification with SHA-256 checksums and API logging. |
@@ -68,7 +68,7 @@ graph TD
 │   ├── Occlusa.Shared/                # Pure domain models & scheduling/billing helpers
 │   │   ├── Models/
 │   │   └── Services/
-│   └── Occlusa.Tests/                 # xUnit verification suite (79 tests)
+│   └── Occlusa.Tests/                 # xUnit verification suite (81 tests)
 ├── supabase/
 │   └── migrations/
 │       ├── 001_occlusa_tier1_tier2_schema_rls.sql
@@ -99,7 +99,7 @@ graph TD
 
 ## Features
 
-- [x] **Unified Live Queue, Shared Walk-Ins & Staff Attribution:** Single today roster (`Appt Time` | `Arrived / Walk-In` | `Patient` | `Doctor & Room` | `Status`) with status-pill-only colors, live 30s wait/chair timers (`Waiting · Xm` ≥ 30m highlight), merged `Waiting` state (`Arrived` normalized), `+ Walk-In` intake synced to today's Appointments calendar & availability grid, smart MyKad check-in, and `ACTIVE STAFF` attribution trails (`ActivityLog` + `X-Occlusa-User`).
+- [x] **Unified Live Queue, Shared Walk-Ins & Staff Attribution:** Single today roster (`Appt Time` | `Arrived / Walk-In` | `Status` | `Patient` | `Doctor & Room`) with uniform right-aligned status pills beside patient names, compact Reception Note subtitles under patient names (collapsed when empty), live 30s wait/chair timers (`Waiting · Xm` ≥ 30m highlight), merged `Waiting` state (`Arrived` normalized), `+ Walk-In` intake synced to today's Appointments calendar & availability grid, smart MyKad check-in, `ACTIVE STAFF` attribution trails (`ActivityLog` + `X-Occlusa-User`), and a fixed-height zero-shift `MedicalAlertsBanner`.
 - [x] **Appointments Calendar & Table:** 15-minute proportional timeline (`4 rows/hour`) in **Day View** and **Week View** (`Full Day` / `AM` / `PM`) with overlap lane splitting and dentist-locked cross-date drag-and-drop rescheduling, plus **Month View** and 4-column paged Table synced with Live Queue (`IsTodayForLiveQueue`).
 - [x] **4-Step Booking & Inline Registration:** Treatment-to-dentist capability filtering, hourly slot availability lookup, dash-tolerant IC / name / phone search, and atomic `POST /api/appointments/register-and-book`.
 - [x] **FDI 32-Tooth Odontogram & Billing:** Split-payment invoices, panel/TPA deductions, practitioner commission calculations, and auto-invoicing on completed procedures.
@@ -149,7 +149,7 @@ When `Supabase:ConnectionString`, `Gemini:ApiKey`, and `WhatsApp:AccessToken` ar
 
 ## Running Tests
 
-Run the full automated verification suite (`79` xUnit tests):
+Run the full automated verification suite (`81` xUnit tests):
 
 ```powershell
 dotnet test src\Occlusa.Tests\Occlusa.Tests.csproj --logger "console;verbosity=normal"

@@ -1055,7 +1055,7 @@ public partial class AppointmentDetailViewModel : ObservableObject
 
         Notes = string.Empty;
         StatusMessage = _isWalkInMode
-            ? "Walk-In arrives now (No Appointment Time) · Pick treatment & dentist to place on today's floor & calendar."
+            ? "Walk-In arrives now (No Appointment Time) · Pick treatment, dentist & optional reception note."
             : IsRegisterNewPatientMode
                 ? "1. Choose treatment & dentist · 2. Pick date/slot · 3. Enter new patient details."
                 : "1. Choose treatment & dentist · 2. Pick open slot · 3. Search patient IC, name, or phone.";

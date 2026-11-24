@@ -6,6 +6,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-24
+### Added
+- Compact single-line **Reception Note** display beneath the patient name in Today's Live Queue (`AppointmentCalendarHelper.FormatCompactReceptionNote`, `QueueRowItem.ReceptionNoteDisplay` / `HasReceptionNote`) rendered in smaller muted typography (`10.5px` vs. `12px` patient name) and collapsing cleanly when empty so zero vertical space remains under the name.
+- Opt-in `AllowAutoRowHeight` mode (`MinHeight="36"`, `Height="Auto"`, DPI-safe auto page sizing) and column-header `HorizontalAlignment` propagation (`HeaderStyle`) in `UniformPagedGrid`.
+- 2 new xUnit tests (`81` total tests in `Occlusa.Tests`) covering `FormatCompactReceptionNote` whitespace/word-boundary compaction (zero ellipsis) and end-to-end HTTP lifecycle persistence of Walk-In and appointment reception notes (create, queue status transitions, inline register-and-book walk-in, update, and clear).
+
+### Changed
+- Reordered Live Queue columns to `Appt Time` | `Arrived / Walk-In` | `Status` | `Patient` | `Doctor & Room`, right-aligning both the `Status` column header and uniform-size (`136x24`) status pills flush beside the patient name.
+- Renamed `"Reception / Clinical Notes"` to `"Reception Note"` (with a `"Shown under patient name in Live Queue"` hint) across `AppointmentDetailModal` (New Appointment, Edit Appointment Details, and all Walk-In patient intake flows), updated the walk-in guidance prompt, and relabeled row hover tooltips to `Reception Note:`.
+
+### Fixed
+- Eliminated vertical layout shift (table rows jumping up/down) when clicking between patients with and without clinical safety alerts by locking `MedicalAlertsBanner` to a constant `62px` height across Idle, Clear, and Alert states, replacing `<WrapPanel>` with a single-line horizontal `<StackPanel>` for alert flag pills, and permanently reserving the single-line Row 1 safety note slot with word-boundary compaction and full-text hover tooltips.
+
 ## [0.3.0] - 2026-11-24
 ### Added
 - Unified **Today's Live Queue** 5-column paged floor board (`Appt Time` | `Arrived / Walk-In` | `Patient` | `Doctor & Room` | `Status`) with separated appointment vs. arrival/walk-in times (`No Appointment` for walk-ins), status-pill-only color badges, live 30-second wait/chair timers (`Waiting · Xm` with ≥ 30m long-wait highlight, `In Chair · Xm`), and `UniformColumnDef.CellTemplate` support in `UniformPagedGrid`.

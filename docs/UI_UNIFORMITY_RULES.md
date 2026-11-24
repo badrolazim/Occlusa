@@ -80,6 +80,7 @@ Merge `Themes/UniformTheme.xaml` inside `App.xaml`:
   - `EmptyMessage` (`string`)
   - `PageSize` (`int`, default `11`; auto-switches `11` @ 1080p / `17` @ 1440p unless explicitly overridden in XAML or `AutoPageSize="False"`)
   - `AutoPageSize` (`bool`, default `true`)
+  - `AllowAutoRowHeight` (`bool`, default `false` — opt-in variable row height with `MinHeight="36"` and viewport-capped auto page sizing)
   - `CurrentPage` (`int`, TwoWay)
   - `TotalPages` (`int`)
   - `TotalItems` (`int`)
@@ -94,7 +95,7 @@ Merge `Themes/UniformTheme.xaml` inside `App.xaml`:
   - `BindingPath` (`string`)
   - `StarWidth` (`double`, default `1.0`; alias `WidthRatio`)
   - `StringFormat` (`string?`)
-  - `HorizontalAlignment` (`HorizontalAlignment`)
+  - `HorizontalAlignment` (`HorizontalAlignment` — also propagated to the column `HeaderStyle`)
   - `IsMonospace` (`bool`)
   - `IsBold` (`bool`)
   - `MinWidth` (`double`, default `70`)
@@ -110,6 +111,7 @@ Merge `Themes/UniformTheme.xaml` inside `App.xaml`:
   - `HasDiabetes` (`bool`)
   - `IsPregnant` (`bool`)
   - `AlertNotes` (`string`)
+- **Layout Stability:** Locked to a fixed `62px` height (`Height="62"`) across Idle, Clear, and Alert states, with single-line non-wrapping alert pills and a permanently reserved Row 1 safety-note slot (with full-text tooltips) to eliminate vertical layout shift.
 
 ### C. `ModalDialogShell`
 

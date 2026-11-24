@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -86,6 +87,18 @@ public partial class MedicalAlertsBanner : UserControl
 
     public static readonly DependencyProperty FormattedAlertNotesTextProperty = DependencyProperty.Register(
         nameof(FormattedAlertNotesText), typeof(string), typeof(MedicalAlertsBanner), new PropertyMetadata(string.Empty));
+
+    public static readonly DependencyProperty AlertNotesForegroundProperty = DependencyProperty.Register(
+        nameof(AlertNotesForeground), typeof(Brush), typeof(MedicalAlertsBanner), new PropertyMetadata(CreateBrush(100, 116, 139)));
+
+    public static readonly DependencyProperty AlertNotesFontWeightProperty = DependencyProperty.Register(
+        nameof(AlertNotesFontWeight), typeof(FontWeight), typeof(MedicalAlertsBanner), new PropertyMetadata(FontWeights.Normal));
+
+    public static readonly DependencyProperty FullAlertNotesToolTipProperty = DependencyProperty.Register(
+        nameof(FullAlertNotesToolTip), typeof(string), typeof(MedicalAlertsBanner), new PropertyMetadata((string?)null));
+
+    public static readonly DependencyProperty FullAllergyToolTipProperty = DependencyProperty.Register(
+        nameof(FullAllergyToolTip), typeof(string), typeof(MedicalAlertsBanner), new PropertyMetadata((string?)null));
 
     public static readonly DependencyProperty MyKadBadgeTextProperty = DependencyProperty.Register(
         nameof(MyKadBadgeText), typeof(string), typeof(MedicalAlertsBanner), new PropertyMetadata("Manual IC"));
@@ -216,6 +229,30 @@ public partial class MedicalAlertsBanner : UserControl
         private set => SetValue(FormattedAlertNotesTextProperty, value);
     }
 
+    public Brush AlertNotesForeground
+    {
+        get => (Brush)GetValue(AlertNotesForegroundProperty);
+        private set => SetValue(AlertNotesForegroundProperty, value);
+    }
+
+    public FontWeight AlertNotesFontWeight
+    {
+        get => (FontWeight)GetValue(AlertNotesFontWeightProperty);
+        private set => SetValue(AlertNotesFontWeightProperty, value);
+    }
+
+    public string? FullAlertNotesToolTip
+    {
+        get => (string?)GetValue(FullAlertNotesToolTipProperty);
+        private set => SetValue(FullAlertNotesToolTipProperty, value);
+    }
+
+    public string? FullAllergyToolTip
+    {
+        get => (string?)GetValue(FullAllergyToolTipProperty);
+        private set => SetValue(FullAllergyToolTipProperty, value);
+    }
+
     public string MyKadBadgeText
     {
         get => (string)GetValue(MyKadBadgeTextProperty);
@@ -281,11 +318,11 @@ public partial class MedicalAlertsBanner : UserControl
                           && !trimmedAllergy.Equals("-", StringComparison.OrdinalIgnoreCase);
 
         HasAllergies = hasAllergy;
-        FormattedAllergyText = hasAllergy ? $"ALLERGY: {trimmedAllergy}" : string.Empty;
+        FormattedAllergyText = hasAllergy ? $"ALLERGY: {CompactSingleLine(trimmedAllergy, 36)}" : string.Empty;
+        FullAllergyToolTip = hasAllergy ? $"ALLERGY: {trimmedAllergy}" : null;
 
         string trimmedNotes = (AlertNotes ?? string.Empty).Trim();
         HasAlertNotes = hasPatient && !string.IsNullOrWhiteSpace(trimmedNotes);
-        FormattedAlertNotesText = HasAlertNotes ? $"Clinical Safety Note: {trimmedNotes}" : string.Empty;
 
         if (IsMyKadVerified)
         {
@@ -305,6 +342,10 @@ public partial class MedicalAlertsBanner : UserControl
         if (!hasPatient)
         {
             ShowClearBadge = false;
+            FormattedAlertNotesText = string.Empty;
+            FullAlertNotesToolTip = null;
+            AlertNotesForeground = CreateBrush(100, 116, 139);
+            AlertNotesFontWeight = FontWeights.Normal;
             BannerBackground = CreateBrush(248, 250, 252);
             BannerBorderBrush = CreateBrush(216, 225, 234);
             BannerAccentBrush = CreateBrush(148, 163, 184);
@@ -313,6 +354,28 @@ public partial class MedicalAlertsBanner : UserControl
 
         bool anyCriticalAlert = hasAllergy || OnAnticoagulants || HasDiabetes || IsPregnant || HasAlertNotes;
         ShowClearBadge = !anyCriticalAlert;
+
+        if (HasAlertNotes)
+        {
+            FormattedAlertNotesText = $"Clinical Safety Note: {CompactSingleLine(trimmedNotes, 130)}";
+            FullAlertNotesToolTip = $"Clinical Safety Note: {trimmedNotes}";
+            AlertNotesForeground = CreateBrush(153, 27, 27);
+            AlertNotesFontWeight = FontWeights.SemiBold;
+        }
+        else if (anyCriticalAlert)
+        {
+            FormattedAlertNotesText = "Clinical Safety Note: Review highlighted medical alert flags above before treatment.";
+            FullAlertNotesToolTip = null;
+            AlertNotesForeground = CreateBrush(153, 27, 27);
+            AlertNotesFontWeight = FontWeights.Normal;
+        }
+        else
+        {
+            FormattedAlertNotesText = "Clinical Safety Note: None recorded — standard clinical precautions apply.";
+            FullAlertNotesToolTip = null;
+            AlertNotesForeground = CreateBrush(21, 128, 61);
+            AlertNotesFontWeight = FontWeights.Normal;
+        }
 
         if (anyCriticalAlert)
         {
@@ -326,6 +389,39 @@ public partial class MedicalAlertsBanner : UserControl
             BannerBorderBrush = CreateBrush(134, 239, 172);
             BannerAccentBrush = CreateBrush(15, 118, 110);
         }
+    }
+
+    private static string CompactSingleLine(string text, int maxLength)
+    {
+        var words = text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        var normalized = string.Join(' ', words);
+        int limit = Math.Max(8, maxLength);
+        if (normalized.Length <= limit)
+        {
+            return normalized;
+        }
+
+        var built = new List<string>();
+        int currentLen = 0;
+
+        foreach (var word in words)
+        {
+            int addedLen = built.Count == 0 ? word.Length : word.Length + 1;
+            if (currentLen + addedLen > limit)
+            {
+                break;
+            }
+
+            built.Add(word);
+            currentLen += addedLen;
+        }
+
+        return built.Count > 0 ? string.Join(' ', built) : words[0][..limit];
     }
 
     private static SolidColorBrush CreateBrush(byte r, byte g, byte b)

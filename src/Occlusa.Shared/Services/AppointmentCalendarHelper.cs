@@ -391,6 +391,48 @@ public static class AppointmentCalendarHelper
     }
 
     /// <summary>
+    /// Formats a reception note into a single clean line trimmed on word boundaries without ellipsis
+    /// for compact display beneath the patient name in Live Queue.
+    /// </summary>
+    public static string FormatCompactReceptionNote(string? notes, int maxLength = 48)
+    {
+        if (string.IsNullOrWhiteSpace(notes))
+        {
+            return string.Empty;
+        }
+
+        var words = notes.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+        if (words.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        var normalized = string.Join(' ', words);
+        int limit = Math.Max(8, maxLength);
+        if (normalized.Length <= limit)
+        {
+            return normalized;
+        }
+
+        var built = new List<string>();
+        int currentLen = 0;
+
+        foreach (var word in words)
+        {
+            int addedLen = built.Count == 0 ? word.Length : word.Length + 1;
+            if (currentLen + addedLen > limit)
+            {
+                break;
+            }
+
+            built.Add(word);
+            currentLen += addedLen;
+        }
+
+        return built.Count > 0 ? string.Join(' ', built) : words[0][..limit];
+    }
+
+    /// <summary>
     /// Normalizes legacy <see cref="QueueStatus.Arrived"/> into <see cref="QueueStatus.Waiting"/>.
     /// </summary>
     public static QueueStatus NormalizeQueueStatus(QueueStatus status) =>

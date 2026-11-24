@@ -1270,5 +1270,168 @@ public class AppointmentSchedulingTests
             await app.StopAsync();
         }
     }
+
+    [Fact]
+    public void FormatCompactReceptionNote_CollapsesWhitespaceAndCompactsOnWordBoundariesWithoutEllipsis()
+    {
+        Assert.Equal(string.Empty, AppointmentCalendarHelper.FormatCompactReceptionNote(null));
+        Assert.Equal(string.Empty, AppointmentCalendarHelper.FormatCompactReceptionNote(""));
+        Assert.Equal(string.Empty, AppointmentCalendarHelper.FormatCompactReceptionNote("   \r\n\t  "));
+
+        Assert.Equal(
+            "Prefers female dentist",
+            AppointmentCalendarHelper.FormatCompactReceptionNote("Prefers female dentist"));
+
+        Assert.Equal(
+            "Needs translator for BM & Mandarin",
+            AppointmentCalendarHelper.FormatCompactReceptionNote("  Needs   translator\r\n\tfor   BM & Mandarin  "));
+
+        var longNote = "Patient requested afternoon confirmation call before scaling and polishing session";
+        var compacted = AppointmentCalendarHelper.FormatCompactReceptionNote(longNote, maxLength: 48);
+        Assert.True(compacted.Length <= 48);
+        Assert.DoesNotContain("...", compacted, StringComparison.Ordinal);
+        Assert.Equal("Patient requested afternoon confirmation call", compacted);
+
+        var singleToken = new string('X', 60);
+        Assert.Equal(48, AppointmentCalendarHelper.FormatCompactReceptionNote(singleToken, maxLength: 48).Length);
+        Assert.Equal(8, AppointmentCalendarHelper.FormatCompactReceptionNote(singleToken, maxLength: 2).Length);
+    }
+
+    [Fact]
+    public async Task HttpPipeline_WalkInAndAppointmentReceptionNotes_PersistThroughQueueLifecycle()
+    {
+        await using var app = OcclusaApiApplicationFactory.BuildApplication(
+            urls: "http://127.0.0.1:0",
+            environmentName: "Development");
+        await app.StartAsync();
+
+        try
+        {
+            var baseAddress = app.Urls.First();
+            using var http = new HttpClient { BaseAddress = new Uri(baseAddress) };
+            http.DefaultRequestHeaders.TryAddWithoutValidation("X-Occlusa-User", "Siti (Reception)");
+            http.DefaultRequestHeaders.TryAddWithoutValidation("X-Occlusa-Allowed-Branches", "HQ-KL,PJ-SS2");
+
+            var jsonOpts = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+            {
+                PropertyNameCaseInsensitive = true
+            };
+            jsonOpts.Converters.Add(new JsonStringEnumConverter());
+
+            var snapshot = await http.GetFromJsonAsync<ClinicDashboardSnapshotDto>(
+                "/api/dashboard/snapshot?branchId=HQ-KL",
+                jsonOpts);
+            Assert.NotNull(snapshot);
+
+            var walkInResp = await http.PostAsJsonAsync("/api/appointments", new CreateAppointmentRequest
+            {
+                BranchId = "HQ-KL",
+                PatientId = snapshot!.Patients[0].Id,
+                DentistId = snapshot.Dentists[0].Id,
+                DoctorName = snapshot.Dentists[0].FullName,
+                TreatmentId = snapshot.Treatments[0].Id,
+                RoomName = snapshot.Dentists[0].DefaultRoom,
+                ScheduledAt = DateTimeOffset.Now,
+                DurationMinutes = 30,
+                ProcedureSummary = snapshot.Treatments[0].Name,
+                Notes = "Walk-in: swelling lower right, prefers Dr. Aina",
+                Status = QueueStatus.Waiting,
+                VisitType = VisitType.WalkIn,
+                CreatedBy = "Siti (Reception)"
+            }, jsonOpts);
+            Assert.Equal(HttpStatusCode.Created, walkInResp.StatusCode);
+            var walkIn = await walkInResp.Content.ReadFromJsonAsync<AppointmentQueueItemDto>(jsonOpts);
+            Assert.NotNull(walkIn);
+            Assert.Equal("Walk-in: swelling lower right, prefers Dr. Aina", walkIn!.Notes);
+
+            var patchResp = await http.PatchAsJsonAsync($"/api/queue/{walkIn.Id}/status", new UpdateQueueStatusRequest
+            {
+                NewStatus = QueueStatus.InChair,
+                RoomName = walkIn.RoomName,
+                UpdatedBy = "Nurse Farah (Assistant)"
+            }, jsonOpts);
+            Assert.Equal(HttpStatusCode.OK, patchResp.StatusCode);
+            var seated = await patchResp.Content.ReadFromJsonAsync<AppointmentQueueItemDto>(jsonOpts);
+            Assert.NotNull(seated);
+            Assert.Equal("Walk-in: swelling lower right, prefers Dr. Aina", seated!.Notes);
+
+            var regResp = await http.PostAsJsonAsync("/api/appointments/register-and-book", new RegisterPatientAndAppointmentRequest
+            {
+                Patient = new UpsertPatientRequest
+                {
+                    FullName = "Walk-In Test Patient",
+                    IcNumber = "950101-14-5001",
+                    DateOfBirth = new DateOnly(1995, 1, 1),
+                    Gender = "Female",
+                    Phone = "+6012-1112223",
+                    PrimaryBranchId = "HQ-KL"
+                },
+                Appointment = new CreateAppointmentRequest
+                {
+                    BranchId = "HQ-KL",
+                    DentistId = snapshot.Dentists[0].Id,
+                    DoctorName = snapshot.Dentists[0].FullName,
+                    TreatmentId = snapshot.Treatments[0].Id,
+                    RoomName = snapshot.Dentists[0].DefaultRoom,
+                    ScheduledAt = DateTimeOffset.Now,
+                    DurationMinutes = 30,
+                    ProcedureSummary = snapshot.Treatments[0].Name,
+                    Notes = "Walk-in new registration: mild toothache",
+                    Status = QueueStatus.Waiting,
+                    VisitType = VisitType.WalkIn,
+                    CreatedBy = "Siti (Reception)"
+                }
+            }, jsonOpts);
+            Assert.Equal(HttpStatusCode.Created, regResp.StatusCode);
+            var registered = await regResp.Content.ReadFromJsonAsync<RegisterPatientAndAppointmentResponse>(jsonOpts);
+            Assert.NotNull(registered);
+            Assert.Equal(VisitType.WalkIn, registered!.Appointment.VisitType);
+            Assert.Equal("Walk-in new registration: mild toothache", registered.Appointment.Notes);
+
+            var updateResp = await http.PutAsJsonAsync($"/api/appointments/{walkIn.Id}", new UpdateAppointmentRequest
+            {
+                PatientId = walkIn.PatientId,
+                DentistId = walkIn.DentistId,
+                DoctorName = walkIn.DoctorName,
+                TreatmentId = walkIn.TreatmentId,
+                ProcedureSummary = walkIn.ProcedureSummary,
+                RoomName = walkIn.RoomName,
+                ScheduledAt = walkIn.ScheduledAt,
+                DurationMinutes = walkIn.DurationMinutes,
+                Status = seated.Status,
+                VisitType = walkIn.VisitType,
+                Notes = "Updated reception note",
+                UpdatedBy = "Aisyah (Reception)"
+            }, jsonOpts);
+            Assert.Equal(HttpStatusCode.OK, updateResp.StatusCode);
+            var updated = await updateResp.Content.ReadFromJsonAsync<AppointmentQueueItemDto>(jsonOpts);
+            Assert.NotNull(updated);
+            Assert.Equal("Updated reception note", updated!.Notes);
+
+            var clearResp = await http.PutAsJsonAsync($"/api/appointments/{walkIn.Id}", new UpdateAppointmentRequest
+            {
+                PatientId = walkIn.PatientId,
+                DentistId = walkIn.DentistId,
+                DoctorName = walkIn.DoctorName,
+                TreatmentId = walkIn.TreatmentId,
+                ProcedureSummary = walkIn.ProcedureSummary,
+                RoomName = walkIn.RoomName,
+                ScheduledAt = walkIn.ScheduledAt,
+                DurationMinutes = walkIn.DurationMinutes,
+                Status = updated.Status,
+                VisitType = walkIn.VisitType,
+                Notes = string.Empty,
+                UpdatedBy = "Aisyah (Reception)"
+            }, jsonOpts);
+            Assert.Equal(HttpStatusCode.OK, clearResp.StatusCode);
+            var cleared = await clearResp.Content.ReadFromJsonAsync<AppointmentQueueItemDto>(jsonOpts);
+            Assert.NotNull(cleared);
+            Assert.Equal(string.Empty, cleared!.Notes);
+        }
+        finally
+        {
+            await app.StopAsync();
+        }
+    }
 }
 

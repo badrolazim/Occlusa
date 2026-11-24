@@ -499,16 +499,23 @@
                                           Style="{StaticResource UniformComboBoxStyle}" />
                             </StackPanel>
 
-                            <!-- Reception / Clinical Notes -->
+                            <!-- Reception Note -->
                             <Grid Grid.Row="3">
                                 <Grid.RowDefinitions>
                                     <RowDefinition Height="Auto" />
                                     <RowDefinition Height="*" />
                                 </Grid.RowDefinitions>
-                                <TextBlock Grid.Row="0"
-                                           Text="Reception / Clinical Notes"
-                                           Style="{StaticResource UniformLabelTextStyle}"
-                                           Margin="0,0,0,3" />
+                                <DockPanel Grid.Row="0" LastChildFill="False" Margin="0,0,0,3">
+                                    <TextBlock DockPanel.Dock="Left"
+                                               Text="Reception Note"
+                                               Style="{StaticResource UniformLabelTextStyle}"
+                                               VerticalAlignment="Center" />
+                                    <TextBlock DockPanel.Dock="Right"
+                                               Text="Shown under patient name in Live Queue"
+                                               Style="{StaticResource UniformMutedTextStyle}"
+                                               FontSize="10.5"
+                                               VerticalAlignment="Center" />
+                                </DockPanel>
                                 <TextBox Grid.Row="1"
                                          Text="{Binding Notes, UpdateSourceTrigger=PropertyChanged}"
                                          Style="{StaticResource UniformMultiLineTextBoxStyle}"

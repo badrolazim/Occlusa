@@ -67,6 +67,8 @@ public sealed partial class QueueRowItem : ObservableObject
 
         TimeDisplay = IsWalkIn ? ArrivalTimeDisplay : ApptTimeDisplay;
         PatientNameDisplay = source.PatientName;
+        ReceptionNoteDisplay = AppointmentCalendarHelper.FormatCompactReceptionNote(source.Notes);
+        HasReceptionNote = !string.IsNullOrWhiteSpace(ReceptionNoteDisplay);
         HasCriticalAlert = source.HasCriticalMedicalAlert;
         PatientDisplay = HasCriticalAlert
             ? $"{source.PatientName} [ALERT]"
@@ -88,6 +90,8 @@ public sealed partial class QueueRowItem : ObservableObject
     public string ArrivalTimeDisplay { get; }
     public bool HasArrivalTime { get; }
     public string PatientNameDisplay { get; }
+    public string ReceptionNoteDisplay { get; }
+    public bool HasReceptionNote { get; }
     public bool HasCriticalAlert { get; }
     public string PatientDisplay { get; }
     public string DoctorRoomDisplay { get; }
@@ -168,7 +172,7 @@ public sealed partial class QueueRowItem : ObservableObject
 
         if (!string.IsNullOrWhiteSpace(Source.Notes))
         {
-            lines.Add($"Notes: {Source.Notes}");
+            lines.Add($"Reception Note: {Source.Notes}");
         }
 
         var attribution = new List<string>();

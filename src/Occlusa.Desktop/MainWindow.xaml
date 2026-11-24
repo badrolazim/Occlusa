@@ -833,6 +833,7 @@
                                            Subtitle="{Binding QueuePulseSummary}"
                                            EmptyMessage="No patients in today's queue yet — click + Walk-In or scan a MyKad."
                                            EnforceColumnLimit="False"
+                                           AllowAutoRowHeight="True"
                                            ItemsSource="{Binding QueueRows}"
                                            SelectedItem="{Binding SelectedQueueRow, Mode=TwoWay}"
                                            RowDoubleClicked="QueuePagedGrid_RowDoubleClicked">
@@ -903,39 +904,87 @@
                         </controls:UniformColumnDef.CellTemplate>
                     </controls:UniformColumnDef>
 
-                    <controls:UniformColumnDef Header="Patient" WidthRatio="2.1" MinWidth="220">
+                    <controls:UniformColumnDef Header="Status" WidthRatio="0.85" MinWidth="160" HorizontalAlignment="Right">
                         <controls:UniformColumnDef.CellTemplate>
                             <DataTemplate>
-                                <StackPanel Orientation="Horizontal"
-                                            Margin="10,0"
-                                            Background="Transparent"
-                                            VerticalAlignment="Center"
-                                            Opacity="{Binding RowContentOpacity}"
-                                            ToolTip="{Binding ToolTipText}">
-                                    <TextBlock Text="{Binding PatientNameDisplay}"
-                                               FontFamily="{StaticResource FontFamilyPrimary}"
-                                               FontSize="12"
-                                               FontWeight="SemiBold"
-                                               Foreground="{StaticResource TextPrimaryBrush}"
-                                               VerticalAlignment="Center"
-                                               TextWrapping="NoWrap"
-                                               TextTrimming="None" />
-                                    <Border Visibility="{Binding HasCriticalAlert, Converter={StaticResource BoolToVisibilityConverter}}"
-                                            Background="#FEF2F2"
-                                            BorderBrush="#FECACA"
+                                <Grid Margin="10,0"
+                                      Background="Transparent"
+                                      ToolTip="{Binding ToolTipText}">
+                                    <Border Background="{Binding StatusBadgeBackground}"
+                                            BorderBrush="{Binding StatusBadgeBorder}"
                                             BorderThickness="1"
-                                            CornerRadius="4"
-                                            Padding="5,1"
-                                            Margin="8,0,0,0"
+                                            CornerRadius="12"
+                                            Width="136"
+                                            Height="24"
+                                            Padding="8,0"
+                                            HorizontalAlignment="Right"
                                             VerticalAlignment="Center">
-                                        <TextBlock Text="ALERT"
-                                                   FontSize="9.5"
-                                                   FontWeight="Bold"
-                                                   Foreground="#DC2626"
+                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                            <Ellipse Width="6"
+                                                     Height="6"
+                                                     Fill="{Binding StatusDotBrush}"
+                                                     VerticalAlignment="Center"
+                                                     Margin="0,0,6,0" />
+                                            <TextBlock Text="{Binding StatusDisplay}"
+                                                       FontFamily="{StaticResource FontFamilyPrimary}"
+                                                       FontSize="11.5"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{Binding StatusBadgeForeground}"
+                                                       VerticalAlignment="Center"
+                                                       TextWrapping="NoWrap"
+                                                       TextTrimming="None" />
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                            </DataTemplate>
+                        </controls:UniformColumnDef.CellTemplate>
+                    </controls:UniformColumnDef>
+
+                    <controls:UniformColumnDef Header="Patient" WidthRatio="2.45" MinWidth="220">
+                        <controls:UniformColumnDef.CellTemplate>
+                            <DataTemplate>
+                                <Grid Background="Transparent"
+                                      Opacity="{Binding RowContentOpacity}"
+                                      ToolTip="{Binding ToolTipText}">
+                                    <StackPanel Orientation="Vertical"
+                                                Margin="10,4"
+                                                VerticalAlignment="Center">
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding PatientNameDisplay}"
+                                                       FontFamily="{StaticResource FontFamilyPrimary}"
+                                                       FontSize="12"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{StaticResource TextPrimaryBrush}"
+                                                       VerticalAlignment="Center"
+                                                       TextWrapping="NoWrap"
+                                                       TextTrimming="None" />
+                                            <Border Visibility="{Binding HasCriticalAlert, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                    Background="#FEF2F2"
+                                                    BorderBrush="#FECACA"
+                                                    BorderThickness="1"
+                                                    CornerRadius="4"
+                                                    Padding="5,1"
+                                                    Margin="8,0,0,0"
+                                                    VerticalAlignment="Center">
+                                                <TextBlock Text="ALERT"
+                                                           FontSize="9.5"
+                                                           FontWeight="Bold"
+                                                           Foreground="#DC2626"
+                                                           TextWrapping="NoWrap"
+                                                           TextTrimming="None" />
+                                            </Border>
+                                        </StackPanel>
+                                        <TextBlock Text="{Binding ReceptionNoteDisplay}"
+                                                   Visibility="{Binding HasReceptionNote, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                   FontFamily="{StaticResource FontFamilyPrimary}"
+                                                   FontSize="10.5"
+                                                   FontWeight="Normal"
+                                                   Foreground="{StaticResource TextMutedBrush}"
+                                                   Margin="0,1,0,0"
                                                    TextWrapping="NoWrap"
                                                    TextTrimming="None" />
-                                    </Border>
-                                </StackPanel>
+                                    </StackPanel>
+                                </Grid>
                             </DataTemplate>
                         </controls:UniformColumnDef.CellTemplate>
                     </controls:UniformColumnDef>
@@ -954,41 +1003,6 @@
                                                VerticalAlignment="Center"
                                                TextWrapping="NoWrap"
                                                TextTrimming="None" />
-                                </Grid>
-                            </DataTemplate>
-                        </controls:UniformColumnDef.CellTemplate>
-                    </controls:UniformColumnDef>
-
-                    <controls:UniformColumnDef Header="Status" WidthRatio="1.35" MinWidth="160">
-                        <controls:UniformColumnDef.CellTemplate>
-                            <DataTemplate>
-                                <Grid Margin="10,0"
-                                      Background="Transparent"
-                                      ToolTip="{Binding ToolTipText}">
-                                    <Border Background="{Binding StatusBadgeBackground}"
-                                            BorderBrush="{Binding StatusBadgeBorder}"
-                                            BorderThickness="1"
-                                            CornerRadius="12"
-                                            Height="24"
-                                            Padding="9,0"
-                                            HorizontalAlignment="Left"
-                                            VerticalAlignment="Center">
-                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                            <Ellipse Width="6"
-                                                     Height="6"
-                                                     Fill="{Binding StatusDotBrush}"
-                                                     VerticalAlignment="Center"
-                                                     Margin="0,0,6,0" />
-                                            <TextBlock Text="{Binding StatusDisplay}"
-                                                       FontFamily="{StaticResource FontFamilyPrimary}"
-                                                       FontSize="11.5"
-                                                       FontWeight="SemiBold"
-                                                       Foreground="{Binding StatusBadgeForeground}"
-                                                       VerticalAlignment="Center"
-                                                       TextWrapping="NoWrap"
-                                                       TextTrimming="None" />
-                                        </StackPanel>
-                                    </Border>
                                 </Grid>
                             </DataTemplate>
                         </controls:UniformColumnDef.CellTemplate>

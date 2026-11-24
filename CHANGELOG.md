@@ -6,6 +6,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-11-24
+### Added
+- 15-minute proportional Appointments schedule timeline (`4 rows/hour` across `Full Day` `09:00`-`18:00` = `36` rows, `AM` `09:00`-`13:30` = `18` rows, and `PM` `13:30`-`18:00` = `18` rows; 2-hour bookings consume `8` rows) across **Day View** and **Week View** via `ScheduleTimelinePanel`, `TimelineBackdropControl`, and `AppointmentCalendarHelper.ComputeTimelineLayout`.
+- Automatic side-by-side overlap lane splitting with back-to-back lane reuse and `+{N} more` overflow routing for concurrent appointments within the same column.
+- Cross-date drag-and-drop rescheduling across **Week View** day lanes, **Day View** 7-day quick-date pills (plus intra-column 15-minute time rescheduling), and **Month View** cells locked strictly to the appointment's original dentist (`IsSameDentist`, `BuildDragRescheduleRequest`).
+- Reusable `OcclusaApiApplicationFactory` in `Occlusa.Api` enabling shared builder configuration for both standalone execution and embedded hosting.
+- Automated verification expanded by 5 new xUnit tests (`74` total tests in `Occlusa.Tests`) covering embedded host HTTP mutations, proportional row spans, overlap lane splitting, concurrency overflow, and dentist-locked drag rescheduling.
+
+### Changed
+- Redesigned **Day View** and **Week View** into a serene, gridless floating-column canvas with faint inset hour/half-hour rhythm guides, dentist-coded pastel card palettes, adaptive card density, hover quick-book hints, and a live current-time line (zero scrollbars, zero ellipsis).
+- Enabled `Full Day` / `AM` / `PM` session zoom across both **Day View** and **Week View** (`IsTimelineCalendarView`).
+- Upgraded `LocalApiHostService` in `Occlusa.Desktop` to an embedded in-process ASP.NET Core Kestrel host with external-API `/api/health` verification reuse, automatic ephemeral loopback port fallback (`http://127.0.0.1:0`) on port conflict, and off-UI-thread shutdown disposal.
+
+### Fixed
+- Resolved `"Cannot reach Occlusa API"` appointment save errors via transparent `HttpRequestException` recovery (`ExecuteWithRecoveryAsync`), dynamic base URL rotation (`UpdateBaseUrl`), and loopback SignalR proxy bypass in `OcclusaApiClient`, surfacing real active base URL and error details in `AppointmentDetailViewModel` and `MainViewModel`.
+
 ## [0.1.0] - 2026-11-23
 ### Added
 - Core multi-branch Malaysian dental practice platform (`Occlusa.Shared`, `Occlusa.Api`, `Occlusa.Desktop`, `Occlusa.Tests`) with Supabase PostgreSQL RLS (`001_occlusa_tier1_tier2_schema_rls.sql`), deterministic `BillingCalculator`, PC/SC Malaysian `MyKadParser`, WhatsApp AI Receptionist with `EmergencyTriageClassifier`, FDI 32-tooth odontogram-to-invoice sync, and `scripts/verify-daily-backup.ps1`.

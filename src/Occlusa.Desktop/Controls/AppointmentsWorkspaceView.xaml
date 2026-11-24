@@ -7,29 +7,183 @@
              ScrollViewer.HorizontalScrollBarVisibility="Disabled">
 
     <UserControl.Resources>
-        <DataTemplate x:Key="CalendarEventCardTemplate">
-            <Button Style="{StaticResource UniformCalendarEventButtonStyle}"
+        <DataTemplate x:Key="TimelineBlockCardTemplate">
+            <Button Style="{StaticResource UniformTimelineCardButtonStyle}"
+                    Background="{Binding CardBackground}"
+                    BorderBrush="{Binding CardBorderBrush}"
+                    BorderThickness="1"
                     Command="{Binding DataContext.OpenAppointmentCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                     CommandParameter="{Binding Source}"
                     ToolTip="{Binding ToolTipText}"
-                    Margin="0,0,0,3">
-                <StackPanel>
-                    <TextBlock Text="{Binding PrimaryLine}"
-                               FontSize="11.5"
-                               FontWeight="SemiBold"
-                               Foreground="{StaticResource TextPrimaryBrush}"
-                               TextWrapping="NoWrap"
-                               TextTrimming="None" />
-                    <TextBlock Text="{Binding SecondaryLine}"
-                               Visibility="{Binding HasSecondaryLine, Converter={StaticResource BoolToVisibilityConverter}}"
-                               FontSize="11"
-                               Foreground="{StaticResource TextSecondaryBrush}"
-                               TextWrapping="NoWrap"
-                               TextTrimming="None"
-                               Margin="0,1,0,0" />
-                </StackPanel>
+                    PreviewMouseLeftButtonDown="AppointmentCard_PreviewMouseLeftButtonDown"
+                    PreviewMouseMove="AppointmentCard_PreviewMouseMove"
+                    PreviewMouseLeftButtonUp="AppointmentCard_PreviewMouseLeftButtonUp">
+                <Grid ClipToBounds="True">
+                    <Grid.Style>
+                        <Style TargetType="Grid">
+                            <Setter Property="Opacity" Value="1" />
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding IsCancelled}" Value="True">
+                                    <Setter Property="Opacity" Value="0.65" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </Grid.Style>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <Border Grid.Column="0"
+                            Width="3.5"
+                            CornerRadius="2"
+                            Background="{Binding AccentBrush}"
+                            Margin="2,3,0,3" />
+
+                    <!-- Ultra-compact 1-row (15m) inline layout -->
+                    <DockPanel Grid.Column="1"
+                               Visibility="{Binding IsUltraCompact, Converter={StaticResource BoolToVisibilityConverter}}"
+                               VerticalAlignment="Center"
+                               Margin="5,0,5,0"
+                               LastChildFill="True">
+                        <Ellipse DockPanel.Dock="Right"
+                                 Width="6"
+                                 Height="6"
+                                 Fill="{StaticResource DangerBrush}"
+                                 Visibility="{Binding HasCriticalAlert, Converter={StaticResource BoolToVisibilityConverter}}"
+                                 VerticalAlignment="Center"
+                                 Margin="4,0,0,0" />
+                        <TextBlock Text="{Binding PatientDisplay}"
+                                   FontSize="10.5"
+                                   FontWeight="SemiBold"
+                                   Foreground="{Binding PrimaryTextBrush}"
+                                   VerticalAlignment="Center"
+                                   TextWrapping="NoWrap"
+                                   TextTrimming="None" />
+                    </DockPanel>
+
+                    <!-- Multi-row (30m - 120m+) proportional layout -->
+                    <StackPanel Grid.Column="1"
+                                Visibility="{Binding IsUltraCompact, Converter={StaticResource InverseBoolToVisibilityConverter}}"
+                                Margin="7,4,6,3"
+                                VerticalAlignment="Top">
+                        <DockPanel Visibility="{Binding ShowHeaderRow, Converter={StaticResource BoolToVisibilityConverter}}"
+                                   LastChildFill="False"
+                                   Margin="0,0,0,2">
+                            <TextBlock DockPanel.Dock="Left"
+                                       Text="{Binding TimeRangeLabel}"
+                                       FontFamily="{StaticResource FontFamilyMono}"
+                                       FontSize="10"
+                                       FontWeight="SemiBold"
+                                       Foreground="{Binding SecondaryTextBrush}"
+                                       VerticalAlignment="Center"
+                                       TextWrapping="NoWrap"
+                                       TextTrimming="None" />
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Ellipse Width="6"
+                                         Height="6"
+                                         Fill="{StaticResource DangerBrush}"
+                                         Visibility="{Binding HasCriticalAlert, Converter={StaticResource BoolToVisibilityConverter}}"
+                                         VerticalAlignment="Center"
+                                         Margin="4,0,0,0" />
+                                <Border Visibility="{Binding ShowStatusBadge, Converter={StaticResource BoolToVisibilityConverter}}"
+                                        Background="{Binding BadgeBackground}"
+                                        CornerRadius="8"
+                                        Padding="5,1"
+                                        Margin="4,0,0,0">
+                                    <TextBlock Text="{Binding StatusBadgeText}"
+                                               FontSize="9.5"
+                                               FontWeight="SemiBold"
+                                               Foreground="{Binding BadgeForeground}"
+                                               TextWrapping="NoWrap"
+                                               TextTrimming="None" />
+                                </Border>
+                            </StackPanel>
+                        </DockPanel>
+
+                        <DockPanel LastChildFill="True">
+                            <Ellipse DockPanel.Dock="Right"
+                                     Width="6"
+                                     Height="6"
+                                     Fill="{StaticResource DangerBrush}"
+                                     VerticalAlignment="Center"
+                                     Margin="4,0,0,0">
+                                <Ellipse.Style>
+                                    <Style TargetType="Ellipse">
+                                        <Setter Property="Visibility" Value="Collapsed" />
+                                        <Style.Triggers>
+                                            <MultiDataTrigger>
+                                                <MultiDataTrigger.Conditions>
+                                                    <Condition Binding="{Binding HasCriticalAlert}" Value="True" />
+                                                    <Condition Binding="{Binding ShowHeaderRow}" Value="False" />
+                                                </MultiDataTrigger.Conditions>
+                                                <Setter Property="Visibility" Value="Visible" />
+                                            </MultiDataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Ellipse.Style>
+                            </Ellipse>
+                            <TextBlock Text="{Binding PatientDisplay}"
+                                       FontSize="11.5"
+                                       FontWeight="Bold"
+                                       Foreground="{Binding PrimaryTextBrush}"
+                                       TextWrapping="NoWrap"
+                                       TextTrimming="None" />
+                        </DockPanel>
+
+                        <TextBlock Text="{Binding SecondaryDisplay}"
+                                   Visibility="{Binding ShowSecondaryLine, Converter={StaticResource BoolToVisibilityConverter}}"
+                                   FontSize="10.5"
+                                   FontWeight="Medium"
+                                   Foreground="{Binding SecondaryTextBrush}"
+                                   TextWrapping="NoWrap"
+                                   TextTrimming="None"
+                                   Margin="0,1,0,0" />
+
+                        <TextBlock Text="{Binding TertiaryDisplay}"
+                                   Visibility="{Binding ShowTertiaryLine, Converter={StaticResource BoolToVisibilityConverter}}"
+                                   FontSize="10"
+                                   Foreground="{Binding SecondaryTextBrush}"
+                                   Opacity="0.88"
+                                   TextWrapping="NoWrap"
+                                   TextTrimming="None"
+                                   Margin="0,2,0,0" />
+                    </StackPanel>
+                </Grid>
             </Button>
         </DataTemplate>
+
+        <DataTemplate x:Key="TimelineHourMarkTemplate">
+            <TextBlock Text="{Binding Label}"
+                       FontFamily="{StaticResource FontFamilyMono}"
+                       FontSize="10.5"
+                       HorizontalAlignment="Right"
+                       VerticalAlignment="Top"
+                       Margin="0,1,8,0"
+                       TextWrapping="NoWrap"
+                       TextTrimming="None">
+                <TextBlock.Style>
+                    <Style TargetType="TextBlock">
+                        <Setter Property="Foreground" Value="{StaticResource TextMutedBrush}" />
+                        <Setter Property="FontWeight" Value="Medium" />
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsFullHour}" Value="True">
+                                <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+                                <Setter Property="FontWeight" Value="SemiBold" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </TextBlock.Style>
+            </TextBlock>
+        </DataTemplate>
+
+        <Style x:Key="TimelineBlockItemContainerStyle" TargetType="ContentPresenter">
+            <Setter Property="controls:ScheduleTimelinePanel.StartRow" Value="{Binding StartRow}" />
+            <Setter Property="controls:ScheduleTimelinePanel.RowSpan" Value="{Binding RowSpan}" />
+            <Setter Property="controls:ScheduleTimelinePanel.LaneIndex" Value="{Binding LaneIndex}" />
+            <Setter Property="controls:ScheduleTimelinePanel.LaneSpan" Value="{Binding LaneSpan}" />
+            <Setter Property="controls:ScheduleTimelinePanel.LaneCount" Value="{Binding LaneCount}" />
+        </Style>
 
         <DataTemplate x:Key="MonthChipCardTemplate">
             <Button Style="{StaticResource UniformCalendarEventButtonStyle}"
@@ -37,6 +191,9 @@
                     Command="{Binding DataContext.OpenAppointmentCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                     CommandParameter="{Binding Source}"
                     ToolTip="{Binding ToolTipText}"
+                    PreviewMouseLeftButtonDown="AppointmentCard_PreviewMouseLeftButtonDown"
+                    PreviewMouseMove="AppointmentCard_PreviewMouseMove"
+                    PreviewMouseLeftButtonUp="AppointmentCard_PreviewMouseLeftButtonUp"
                     Margin="0,0,0,3">
                 <TextBlock Text="{Binding PrimaryLine}"
                            FontSize="10.5"
@@ -67,40 +224,35 @@
         </controls:UniformPagedGrid>
 
         <!-- ================================================================
-             MODE B1: CALENDAR DAY VIEW (Dentist Columns x 9 Fixed Time Rows)
+             MODE B1: CALENDAR DAY VIEW (Floating Dentist Lanes | 4 Rows/Hr)
              ================================================================ -->
-        <Border Style="{StaticResource UniformCardBorderStyle}"
-                Padding="0"
+        <Border Background="#F6F8FB"
+                BorderBrush="{StaticResource BorderHairlineBrush}"
+                BorderThickness="1"
+                CornerRadius="8"
+                Padding="6,6,8,0"
                 Visibility="{Binding IsDayCalendarView, Converter={StaticResource BoolToVisibilityConverter}}">
             <Grid>
                 <Grid.RowDefinitions>
                     <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
                     <RowDefinition Height="*" />
                 </Grid.RowDefinitions>
 
-                <!-- Column Headers: Time + Active Dentist Columns -->
+                <!-- Quick-Date Pill Strip (Click to switch day, or Drop appointment to move to date) -->
                 <Border Grid.Row="0"
-                        Background="{StaticResource SurfaceSubtleBrush}"
-                        BorderBrush="{StaticResource BorderHairlineBrush}"
-                        BorderThickness="0,0,0,1"
-                        CornerRadius="8,8,0,0">
-                    <Grid>
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="72" />
-                            <ColumnDefinition Width="*" />
-                        </Grid.ColumnDefinitions>
-
-                        <Border Grid.Column="0"
-                                BorderBrush="{StaticResource BorderHairlineBrush}"
-                                BorderThickness="0,0,1,0"
-                                Padding="8,10">
-                            <TextBlock Text="Time"
-                                       Style="{StaticResource UniformLabelTextStyle}"
-                                       HorizontalAlignment="Center"
-                                       VerticalAlignment="Center" />
-                        </Border>
-
-                        <ItemsControl Grid.Column="1" ItemsSource="{Binding DayDentistHeaders}">
+                        Background="{StaticResource SurfaceCardBrush}"
+                        CornerRadius="8"
+                        Padding="8,5"
+                        Margin="4,2,4,8">
+                    <DockPanel LastChildFill="True">
+                        <TextBlock DockPanel.Dock="Right"
+                                   Text="Drag appointment onto another date pill to move (same dentist)"
+                                   FontSize="10.5"
+                                   Foreground="{StaticResource TextMutedBrush}"
+                                   VerticalAlignment="Center"
+                                   Margin="12,0,4,0" />
+                        <ItemsControl ItemsSource="{Binding DayQuickDates}">
                             <ItemsControl.ItemsPanel>
                                 <ItemsPanelTemplate>
                                     <UniformGrid Rows="1" />
@@ -108,159 +260,315 @@
                             </ItemsControl.ItemsPanel>
                             <ItemsControl.ItemTemplate>
                                 <DataTemplate>
-                                    <Border BorderBrush="{StaticResource BorderHairlineBrush}"
-                                            BorderThickness="0,0,1,0"
-                                            Padding="12,8">
-                                        <DockPanel LastChildFill="False">
-                                            <StackPanel DockPanel.Dock="Left" VerticalAlignment="Center">
+                                    <Border CornerRadius="15"
+                                            BorderThickness="1"
+                                            Margin="2,0"
+                                            AllowDrop="True"
+                                            Tag="{Binding}"
+                                            DragOver="QuickDatePill_DragOver"
+                                            DragLeave="QuickDatePill_DragLeave"
+                                            Drop="QuickDatePill_Drop">
+                                        <Border.Style>
+                                            <Style TargetType="Border">
+                                                <Setter Property="Background" Value="Transparent" />
+                                                <Setter Property="BorderBrush" Value="Transparent" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsToday}" Value="True">
+                                                        <Setter Property="Background" Value="#EDF7F5" />
+                                                        <Setter Property="BorderBrush" Value="#CBEAE4" />
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                        <Setter Property="Background" Value="{StaticResource BrandPrimaryBrush}" />
+                                                        <Setter Property="BorderBrush" Value="{StaticResource BrandPrimaryBrush}" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </Border.Style>
+                                        <Button Command="{Binding DataContext.JumpToDayCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                CommandParameter="{Binding Date}"
+                                                Style="{StaticResource UniformQuickDatePillStyle}"
+                                                Height="28"
+                                                Padding="8,0"
+                                                ToolTip="Switch to this date or drop an appointment here to reschedule">
+                                            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding PillTitle}"
+                                                           TextWrapping="NoWrap"
+                                                           TextTrimming="None">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="FontSize" Value="11.5" />
+                                                            <Setter Property="FontWeight" Value="SemiBold" />
+                                                            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsToday}" Value="True">
+                                                                    <Setter Property="Foreground" Value="{StaticResource BrandPrimaryBrush}" />
+                                                                </DataTrigger>
+                                                                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                                    <Setter Property="Foreground" Value="{StaticResource TextInverseBrush}" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                                <Border Visibility="{Binding HasCount, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                        CornerRadius="8"
+                                                        Padding="5,0"
+                                                        Margin="5,0,0,0">
+                                                    <Border.Style>
+                                                        <Style TargetType="Border">
+                                                            <Setter Property="Background" Value="#E2E8F0" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                                    <Setter Property="Background" Value="#115E59" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </Border.Style>
+                                                    <TextBlock Text="{Binding CountText}"
+                                                               FontSize="10"
+                                                               FontWeight="SemiBold">
+                                                        <TextBlock.Style>
+                                                            <Style TargetType="TextBlock">
+                                                                <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+                                                                <Style.Triggers>
+                                                                    <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                                                        <Setter Property="Foreground" Value="{StaticResource TextInverseBrush}" />
+                                                                    </DataTrigger>
+                                                                </Style.Triggers>
+                                                            </Style>
+                                                        </TextBlock.Style>
+                                                    </TextBlock>
+                                                </Border>
+                                            </StackPanel>
+                                        </Button>
+                                    </Border>
+                                </DataTemplate>
+                            </ItemsControl.ItemTemplate>
+                        </ItemsControl>
+                    </DockPanel>
+                </Border>
+
+                <!-- Floating Dentist Column Headers -->
+                <Grid Grid.Row="1" Margin="0,0,0,6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="56" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Column="0"
+                               Text="TIME"
+                               FontSize="10"
+                               FontWeight="Bold"
+                               Foreground="{StaticResource TextMutedBrush}"
+                               HorizontalAlignment="Right"
+                               VerticalAlignment="Center"
+                               Margin="0,0,8,0" />
+
+                    <ItemsControl Grid.Column="1" ItemsSource="{Binding DayDentistColumns}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <UniformGrid Rows="1" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="{StaticResource SurfaceCardBrush}"
+                                        CornerRadius="8"
+                                        Padding="12,7"
+                                        Margin="5,0">
+                                    <DockPanel LastChildFill="False">
+                                        <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Ellipse Width="8"
+                                                     Height="8"
+                                                     Fill="{Binding AccentBrush}"
+                                                     VerticalAlignment="Center"
+                                                     Margin="0,0,8,0" />
+                                            <StackPanel VerticalAlignment="Center">
                                                 <TextBlock Text="{Binding FullName}"
                                                            FontSize="12.5"
                                                            FontWeight="SemiBold"
                                                            Foreground="{StaticResource TextPrimaryBrush}" />
                                                 <TextBlock Text="{Binding Subtitle}"
-                                                           FontSize="11"
+                                                           FontSize="10.5"
                                                            Foreground="{StaticResource TextMutedBrush}" />
                                             </StackPanel>
-                                            <Border DockPanel.Dock="Right"
-                                                    Background="{StaticResource BrandPrimarySoftBrush}"
-                                                    CornerRadius="10"
-                                                    Padding="8,2"
-                                                    VerticalAlignment="Center">
-                                                <TextBlock Text="{Binding CountLabel}"
-                                                           FontSize="11"
+                                        </StackPanel>
+                                        <Border DockPanel.Dock="Right"
+                                                Background="#F1F5F9"
+                                                CornerRadius="10"
+                                                Padding="8,2"
+                                                VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding CountLabel}"
+                                                       FontSize="10.5"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{StaticResource TextSecondaryBrush}" />
+                                        </Border>
+                                    </DockPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Grid>
+
+                <!-- Proportional Timeline Canvas (Time Gutter + Floating Dentist Lanes) -->
+                <Grid Grid.Row="2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="56" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <ItemsControl Grid.Column="0"
+                                  Margin="0,0,0,8"
+                                  ItemsSource="{Binding TimelineHourMarks}"
+                                  ItemTemplate="{StaticResource TimelineHourMarkTemplate}"
+                                  ItemContainerStyle="{StaticResource TimelineBlockItemContainerStyle}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <controls:ScheduleTimelinePanel TotalRows="{Binding TimelineTotalRows}"
+                                                                HorizontalInset="0"
+                                                                VerticalInset="0" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                    </ItemsControl>
+
+                    <ItemsControl Grid.Column="1" ItemsSource="{Binding DayDentistColumns}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <UniformGrid Rows="1" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border Background="{StaticResource SurfaceCardBrush}"
+                                        CornerRadius="8"
+                                        Margin="5,0,5,8"
+                                        ClipToBounds="True">
+                                    <Grid AllowDrop="True"
+                                          Background="Transparent"
+                                          Tag="{Binding}"
+                                          MouseMove="TimelineColumn_MouseMove"
+                                          MouseLeave="TimelineColumn_MouseLeave"
+                                          MouseLeftButtonUp="TimelineColumn_MouseLeftButtonUp"
+                                          DragOver="TimelineColumn_DragOver"
+                                          DragLeave="TimelineColumn_DragLeave"
+                                          Drop="TimelineColumn_Drop">
+                                        <controls:TimelineBackdropControl TotalRows="{Binding TotalRows}"
+                                                                          RowsPerHour="4"
+                                                                          HourOffsetRows="{Binding HourOffsetRows}"
+                                                                          ShowCurrentTimeLine="{Binding ShowCurrentTimeLine}"
+                                                                          CurrentTimeRowFraction="{Binding CurrentTimeRowFraction}" />
+
+                                        <Canvas IsHitTestVisible="False" ClipToBounds="True">
+                                            <Border x:Name="HoverSlotIndicator"
+                                                    Visibility="Collapsed"
+                                                    Background="#F0FDFA"
+                                                    BorderBrush="#99F6E4"
+                                                    BorderThickness="1"
+                                                    CornerRadius="5"
+                                                    Padding="8,0">
+                                                <TextBlock x:Name="HoverSlotText"
+                                                           FontSize="10"
                                                            FontWeight="SemiBold"
-                                                           Foreground="{StaticResource BrandPrimaryBrush}" />
+                                                           Foreground="{StaticResource BrandPrimaryBrush}"
+                                                           VerticalAlignment="Center"
+                                                           TextWrapping="NoWrap"
+                                                           TextTrimming="None" />
                                             </Border>
-                                        </DockPanel>
-                                    </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
-                    </Grid>
-                </Border>
 
-                <!-- 9 Fixed Non-Scrolling Time Rows -->
-                <ItemsControl Grid.Row="1" ItemsSource="{Binding DayTimeRows}">
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <UniformGrid Columns="1" Rows="9" />
-                        </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate>
-                            <Border BorderBrush="{StaticResource BorderHairlineBrush}"
-                                    BorderThickness="0,0,0,1">
-                                <Grid>
-                                    <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="72" />
-                                        <ColumnDefinition Width="*" />
-                                    </Grid.ColumnDefinitions>
+                                            <Border x:Name="DropGhostIndicator"
+                                                    Visibility="Collapsed"
+                                                    Background="#CCFBF1"
+                                                    BorderBrush="#0F766E"
+                                                    BorderThickness="1.5"
+                                                    CornerRadius="7"
+                                                    Opacity="0.92"
+                                                    Padding="8,4">
+                                                <TextBlock x:Name="DropGhostText"
+                                                           FontSize="10.5"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="#0F3D39"
+                                                           VerticalAlignment="Top"
+                                                           TextWrapping="NoWrap"
+                                                           TextTrimming="None" />
+                                            </Border>
+                                        </Canvas>
 
-                                    <Border Grid.Column="0"
-                                            Background="{StaticResource SurfaceSubtleBrush}"
-                                            BorderBrush="{StaticResource BorderHairlineBrush}"
-                                            BorderThickness="0,0,1,0">
-                                        <TextBlock Text="{Binding TimeLabel}"
-                                                   Style="{StaticResource UniformMonoTextStyle}"
-                                                   FontWeight="SemiBold"
-                                                   Foreground="{StaticResource TextSecondaryBrush}"
-                                                   HorizontalAlignment="Center"
-                                                   VerticalAlignment="Center" />
-                                    </Border>
+                                        <ItemsControl ItemsSource="{Binding Blocks}"
+                                                      ItemTemplate="{StaticResource TimelineBlockCardTemplate}"
+                                                      ItemContainerStyle="{StaticResource TimelineBlockItemContainerStyle}">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <controls:ScheduleTimelinePanel TotalRows="{Binding TotalRows}" />
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                        </ItemsControl>
 
-                                    <ItemsControl Grid.Column="1" ItemsSource="{Binding Cells}">
-                                        <ItemsControl.ItemsPanel>
-                                            <ItemsPanelTemplate>
-                                                <UniformGrid Rows="1" />
-                                            </ItemsPanelTemplate>
-                                        </ItemsControl.ItemsPanel>
-                                        <ItemsControl.ItemTemplate>
-                                            <DataTemplate>
-                                                <Border BorderBrush="{StaticResource BorderHairlineBrush}"
-                                                        BorderThickness="0,0,1,0"
-                                                        Background="{StaticResource SurfaceCardBrush}">
-                                                    <Grid>
-                                                        <!-- Empty/Background Slot Quick-Book Trigger -->
-                                                        <Button Style="{StaticResource UniformCalendarSlotButtonStyle}"
-                                                                Command="{Binding DataContext.QuickBookFromDayCellCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                                CommandParameter="{Binding}"
-                                                                ToolTip="Click empty slot to book appointment">
-                                                            <TextBlock Text="+ Book"
-                                                                       FontSize="11"
-                                                                       Foreground="{StaticResource BorderStrongBrush}"
-                                                                       HorizontalAlignment="Center"
-                                                                       VerticalAlignment="Center"
-                                                                       Visibility="{Binding IsEmpty, Converter={StaticResource BoolToVisibilityConverter}}" />
-                                                        </Button>
-
-                                                        <!-- Appointment Cards + Optional Overflow Pill -->
-                                                        <StackPanel Margin="4,3" VerticalAlignment="Center">
-                                                            <ItemsControl ItemsSource="{Binding VisibleCards}"
-                                                                          ItemTemplate="{StaticResource CalendarEventCardTemplate}" />
-                                                            <Button Content="{Binding OverflowLabel}"
-                                                                    Visibility="{Binding HasOverflow, Converter={StaticResource BoolToVisibilityConverter}}"
-                                                                    Command="{Binding DataContext.ShowSlotOverflowInTableCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                                                    CommandParameter="{Binding}"
-                                                                    Style="{StaticResource UniformCalendarOverflowButtonStyle}" />
-                                                        </StackPanel>
-                                                    </Grid>
-                                                </Border>
-                                            </DataTemplate>
-                                        </ItemsControl.ItemTemplate>
-                                    </ItemsControl>
-                                </Grid>
-                            </Border>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
+                                        <Button Content="{Binding OverflowLabel}"
+                                                Visibility="{Binding HasOverflow, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                Command="{Binding DataContext.ShowDentistDayOverflowInTableCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                CommandParameter="{Binding}"
+                                                Style="{StaticResource UniformCalendarOverflowButtonStyle}"
+                                                HorizontalAlignment="Right"
+                                                VerticalAlignment="Bottom"
+                                                Margin="0,0,6,6" />
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Grid>
             </Grid>
         </Border>
 
         <!-- ================================================================
-             MODE B2: CALENDAR WEEK VIEW (7 Columns Mon-Sun, Zero Scrollbars)
+             MODE B2: CALENDAR WEEK VIEW (Floating Day Lanes | 4 Rows/Hr)
              ================================================================ -->
-        <Border Style="{StaticResource UniformCardBorderStyle}"
-                Padding="0"
+        <Border Background="#F6F8FB"
+                BorderBrush="{StaticResource BorderHairlineBrush}"
+                BorderThickness="1"
+                CornerRadius="8"
+                Padding="6,8,8,0"
                 Visibility="{Binding IsWeekCalendarView, Converter={StaticResource BoolToVisibilityConverter}}">
-            <ItemsControl ItemsSource="{Binding WeekDayColumns}">
-                <ItemsControl.ItemsPanel>
-                    <ItemsPanelTemplate>
-                        <UniformGrid Rows="1" Columns="7" />
-                    </ItemsPanelTemplate>
-                </ItemsControl.ItemsPanel>
-                <ItemsControl.ItemTemplate>
-                    <DataTemplate>
-                        <Border BorderBrush="{StaticResource BorderHairlineBrush}"
-                                BorderThickness="0,0,1,0">
-                            <Border.Style>
-                                <Style TargetType="Border">
-                                    <Setter Property="Background" Value="{StaticResource SurfaceCardBrush}" />
-                                    <Style.Triggers>
-                                        <DataTrigger Binding="{Binding IsSunday}" Value="True">
-                                            <Setter Property="Background" Value="{StaticResource SurfaceSubtleBrush}" />
-                                        </DataTrigger>
-                                        <DataTrigger Binding="{Binding IsToday}" Value="True">
-                                            <Setter Property="Background" Value="#F0FDFA" />
-                                        </DataTrigger>
-                                    </Style.Triggers>
-                                </Style>
-                            </Border.Style>
-                            <Grid>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="*" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
 
-                                <!-- Day Column Header (Click Date -> Day View, Click + -> Book) -->
-                                <Border Grid.Row="0"
-                                        BorderBrush="{StaticResource BorderHairlineBrush}"
-                                        BorderThickness="0,0,0,1"
-                                        Padding="8,8">
+                <!-- Floating Day Headers (Mon - Sun) -->
+                <Grid Grid.Row="0" Margin="0,0,0,6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="56" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Grid.Column="0"
+                               Text="TIME"
+                               FontSize="10"
+                               FontWeight="Bold"
+                               Foreground="{StaticResource TextMutedBrush}"
+                               HorizontalAlignment="Right"
+                               VerticalAlignment="Center"
+                               Margin="0,0,8,0" />
+
+                    <ItemsControl Grid.Column="1" ItemsSource="{Binding WeekTimelineColumns}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <UniformGrid Rows="1" Columns="7" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border CornerRadius="8"
+                                        Padding="8,5"
+                                        Margin="3,0">
                                     <Border.Style>
                                         <Style TargetType="Border">
-                                            <Setter Property="Background" Value="{StaticResource SurfaceSubtleBrush}" />
+                                            <Setter Property="Background" Value="{StaticResource SurfaceCardBrush}" />
                                             <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsSunday}" Value="True">
+                                                    <Setter Property="Background" Value="#FAFBFD" />
+                                                </DataTrigger>
                                                 <DataTrigger Binding="{Binding IsToday}" Value="True">
                                                     <Setter Property="Background" Value="{StaticResource BrandPrimarySoftBrush}" />
                                                 </DataTrigger>
@@ -272,15 +580,25 @@
                                                 Command="{Binding DataContext.JumpToDayCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                 CommandParameter="{Binding Date}"
                                                 Style="{StaticResource UniformGhostButtonStyle}"
-                                                Height="28"
+                                                Height="26"
                                                 Padding="4,0"
                                                 ToolTip="Open Day View">
                                             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
                                                 <TextBlock Text="{Binding DayNameLabel}"
                                                            FontSize="12"
                                                            FontWeight="Bold"
-                                                           Foreground="{StaticResource TextPrimaryBrush}"
-                                                           Margin="0,0,5,0" />
+                                                           Margin="0,0,5,0">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsToday}" Value="True">
+                                                                    <Setter Property="Foreground" Value="{StaticResource BrandPrimaryBrush}" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
                                                 <TextBlock Text="{Binding DateLabel}"
                                                            FontSize="11.5"
                                                            Foreground="{StaticResource TextSecondaryBrush}" />
@@ -289,12 +607,10 @@
 
                                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                                             <Border Visibility="{Binding HasCount, Converter={StaticResource BoolToVisibilityConverter}}"
-                                                    Background="{StaticResource SurfaceCardBrush}"
-                                                    BorderBrush="{StaticResource BorderHairlineBrush}"
-                                                    BorderThickness="1"
+                                                    Background="#F1F5F9"
                                                     CornerRadius="9"
                                                     Padding="6,1"
-                                                    Margin="0,0,4,0">
+                                                    Margin="0,0,3,0">
                                                 <TextBlock Text="{Binding CountLabel}"
                                                            FontSize="10.5"
                                                            FontWeight="SemiBold"
@@ -304,37 +620,145 @@
                                                     Command="{Binding DataContext.QuickBookFromDateCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
                                                     CommandParameter="{Binding Date}"
                                                     Style="{StaticResource UniformGhostButtonStyle}"
-                                                    Width="24"
-                                                    Height="24"
+                                                    Width="22"
+                                                    Height="22"
                                                     Padding="0"
                                                     ToolTip="Book on this day" />
                                         </StackPanel>
                                     </DockPanel>
                                 </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Grid>
 
-                                <!-- Stacked Appointment Cards (Viewport Capped, No Scrollbars) -->
-                                <ItemsControl Grid.Row="1"
-                                              ItemsSource="{Binding VisibleCards}"
-                                              ItemTemplate="{StaticResource CalendarEventCardTemplate}"
-                                              Margin="6,6,6,0" />
+                <!-- Proportional Timeline Canvas (Time Gutter + 7 Floating Day Lanes) -->
+                <Grid Grid.Row="1">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="56" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
 
-                                <!-- Overflow Jump to Day View -->
-                                <Button Grid.Row="2"
-                                        Content="{Binding OverflowLabel}"
-                                        Visibility="{Binding HasOverflow, Converter={StaticResource BoolToVisibilityConverter}}"
-                                        Command="{Binding DataContext.JumpToDayCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
-                                        CommandParameter="{Binding Date}"
-                                        Style="{StaticResource UniformCalendarOverflowButtonStyle}"
-                                        Margin="6,4,6,8" />
-                            </Grid>
-                        </Border>
-                    </DataTemplate>
-                </ItemsControl.ItemTemplate>
-            </ItemsControl>
+                    <ItemsControl Grid.Column="0"
+                                  Margin="0,0,0,8"
+                                  ItemsSource="{Binding TimelineHourMarks}"
+                                  ItemTemplate="{StaticResource TimelineHourMarkTemplate}"
+                                  ItemContainerStyle="{StaticResource TimelineBlockItemContainerStyle}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <controls:ScheduleTimelinePanel TotalRows="{Binding TimelineTotalRows}"
+                                                                HorizontalInset="0"
+                                                                VerticalInset="0" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                    </ItemsControl>
+
+                    <ItemsControl Grid.Column="1" ItemsSource="{Binding WeekTimelineColumns}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <UniformGrid Rows="1" Columns="7" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Border CornerRadius="8"
+                                        Margin="3,0,3,8"
+                                        ClipToBounds="True">
+                                    <Border.Style>
+                                        <Style TargetType="Border">
+                                            <Setter Property="Background" Value="{StaticResource SurfaceCardBrush}" />
+                                            <Setter Property="BorderThickness" Value="0" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsSunday}" Value="True">
+                                                    <Setter Property="Background" Value="#FAFBFD" />
+                                                </DataTrigger>
+                                                <DataTrigger Binding="{Binding IsToday}" Value="True">
+                                                    <Setter Property="Background" Value="#F4FBF9" />
+                                                    <Setter Property="BorderThickness" Value="1" />
+                                                    <Setter Property="BorderBrush" Value="#CBEAE4" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </Border.Style>
+                                    <Grid AllowDrop="True"
+                                          Background="Transparent"
+                                          Tag="{Binding}"
+                                          MouseMove="TimelineColumn_MouseMove"
+                                          MouseLeave="TimelineColumn_MouseLeave"
+                                          MouseLeftButtonUp="TimelineColumn_MouseLeftButtonUp"
+                                          DragOver="TimelineColumn_DragOver"
+                                          DragLeave="TimelineColumn_DragLeave"
+                                          Drop="TimelineColumn_Drop">
+                                        <controls:TimelineBackdropControl TotalRows="{Binding TotalRows}"
+                                                                          RowsPerHour="4"
+                                                                          HourOffsetRows="{Binding HourOffsetRows}"
+                                                                          ShowCurrentTimeLine="{Binding ShowCurrentTimeLine}"
+                                                                          CurrentTimeRowFraction="{Binding CurrentTimeRowFraction}" />
+
+                                        <Canvas IsHitTestVisible="False" ClipToBounds="True">
+                                            <Border x:Name="HoverSlotIndicator"
+                                                    Visibility="Collapsed"
+                                                    Background="#F0FDFA"
+                                                    BorderBrush="#99F6E4"
+                                                    BorderThickness="1"
+                                                    CornerRadius="5"
+                                                    Padding="6,0">
+                                                <TextBlock x:Name="HoverSlotText"
+                                                           FontSize="9.5"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{StaticResource BrandPrimaryBrush}"
+                                                           VerticalAlignment="Center"
+                                                           TextWrapping="NoWrap"
+                                                           TextTrimming="None" />
+                                            </Border>
+
+                                            <Border x:Name="DropGhostIndicator"
+                                                    Visibility="Collapsed"
+                                                    Background="#CCFBF1"
+                                                    BorderBrush="#0F766E"
+                                                    BorderThickness="1.5"
+                                                    CornerRadius="7"
+                                                    Opacity="0.92"
+                                                    Padding="6,4">
+                                                <TextBlock x:Name="DropGhostText"
+                                                           FontSize="10"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="#0F3D39"
+                                                           VerticalAlignment="Top"
+                                                           TextWrapping="NoWrap"
+                                                           TextTrimming="None" />
+                                            </Border>
+                                        </Canvas>
+
+                                        <ItemsControl ItemsSource="{Binding Blocks}"
+                                                      ItemTemplate="{StaticResource TimelineBlockCardTemplate}"
+                                                      ItemContainerStyle="{StaticResource TimelineBlockItemContainerStyle}">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <controls:ScheduleTimelinePanel TotalRows="{Binding TotalRows}" />
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                        </ItemsControl>
+
+                                        <Button Content="{Binding OverflowLabel}"
+                                                Visibility="{Binding HasOverflow, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                Command="{Binding DataContext.JumpToDayCommand, RelativeSource={RelativeSource AncestorType=UserControl}}"
+                                                CommandParameter="{Binding Date}"
+                                                Style="{StaticResource UniformCalendarOverflowButtonStyle}"
+                                                HorizontalAlignment="Right"
+                                                VerticalAlignment="Bottom"
+                                                Margin="0,0,4,6" />
+                                    </Grid>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </Grid>
+            </Grid>
         </Border>
 
         <!-- ================================================================
-             MODE B3: CALENDAR MONTH VIEW (7 Columns x 5/6 Rows, Zero Scrollbars)
+             MODE B3: CALENDAR MONTH VIEW (7 Columns x 5/6 Rows, Drag-Drop Ready)
              ================================================================ -->
         <Border Style="{StaticResource UniformCardBorderStyle}"
                 Padding="0"
@@ -348,7 +772,7 @@
                 <!-- Weekday Header Bar -->
                 <Border Grid.Row="0"
                         Background="{StaticResource SurfaceSubtleBrush}"
-                        BorderBrush="{StaticResource BorderHairlineBrush}"
+                        BorderBrush="#EEF2F6"
                         BorderThickness="0,0,0,1"
                         CornerRadius="8,8,0,0"
                         Padding="0,7">
@@ -381,12 +805,17 @@
                     </ItemsControl.ItemsPanel>
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <Border BorderBrush="{StaticResource BorderHairlineBrush}"
-                                    BorderThickness="0,0,1,1"
-                                    Padding="5,4">
+                            <Border BorderThickness="0,0,1,1"
+                                    Padding="5,4"
+                                    AllowDrop="True"
+                                    Tag="{Binding}"
+                                    DragOver="MonthCell_DragOver"
+                                    DragLeave="MonthCell_DragLeave"
+                                    Drop="MonthCell_Drop">
                                 <Border.Style>
                                     <Style TargetType="Border">
                                         <Setter Property="Background" Value="{StaticResource SurfaceCardBrush}" />
+                                        <Setter Property="BorderBrush" Value="#EEF2F6" />
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding IsCurrentMonth}" Value="False">
                                                 <Setter Property="Background" Value="{StaticResource SurfaceSubtleBrush}" />
@@ -463,4 +892,3 @@
         </Border>
     </Grid>
 </UserControl>
-

@@ -713,10 +713,10 @@ public partial class AppointmentDetailViewModel : ObservableObject
             _onSaved?.Invoke(saved);
             RequestCloseApproved?.Invoke();
         }
-        catch (HttpRequestException)
+        catch (HttpRequestException ex)
         {
             IsStatusError = true;
-            StatusMessage = "Cannot reach Occlusa API (http://localhost:5188). Click Sync Workspace or restart Occlusa.";
+            StatusMessage = $"Cannot reach Occlusa API ({_apiClient.BaseUrl}): {ex.Message}";
         }
         catch (Exception ex)
         {
@@ -744,10 +744,10 @@ public partial class AppointmentDetailViewModel : ObservableObject
             StatusMessage = $"AI-Booked appointment approved for {approved.PatientName}.";
             _onSaved?.Invoke(approved);
         }
-        catch (HttpRequestException)
+        catch (HttpRequestException ex)
         {
             IsStatusError = true;
-            StatusMessage = "Cannot reach Occlusa API (http://localhost:5188).";
+            StatusMessage = $"Cannot reach Occlusa API ({_apiClient.BaseUrl}): {ex.Message}";
         }
         catch (Exception ex)
         {
@@ -798,10 +798,10 @@ public partial class AppointmentDetailViewModel : ObservableObject
             _onSaved?.Invoke(updated);
             RequestCloseApproved?.Invoke();
         }
-        catch (HttpRequestException)
+        catch (HttpRequestException ex)
         {
             IsStatusError = true;
-            StatusMessage = "Cannot reach Occlusa API (http://localhost:5188).";
+            StatusMessage = $"Cannot reach Occlusa API ({_apiClient.BaseUrl}): {ex.Message}";
         }
         catch (Exception ex)
         {

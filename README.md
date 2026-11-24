@@ -21,7 +21,7 @@
 ```mermaid
 graph TD
     Desktop["Occlusa.Desktop (WPF / MVVM)"] -->|REST & SignalR /hubs/queue| Api["Occlusa.Api (ASP.NET Core 8)"]
-    Desktop -->|Auto-starts on localhost:5188| Api
+    Desktop -->|Embedded Kestrel / Auto-Recovery| Api
     Desktop --> Shared["Occlusa.Shared (DTOs, Billing, MyKad, Calendar)"]
     Api --> Shared
     Api --> Repo["Repository Layer (Npgsql / In-Memory Fallback)"]
@@ -32,8 +32,8 @@ graph TD
 | :--- | :--- | :--- |
 | **Shared Domain & Math** | `src/Occlusa.Shared` | Cross-platform `net8.0` DTOs, enums, `AppointmentCalendarHelper` (calendar grids, slot availability, treatment capability & flexible patient matching), deterministic `BillingCalculator`, Malaysian `MyKadParser`, and `EmergencyTriageClassifier`. |
 | **Web API & SignalR Hub** | `src/Occlusa.Api` | ASP.NET Core 8 REST API, SignalR `/hubs/queue`, `InMemoryOcclusaRepository` (0-config fallback) / `NpgsqlSupabaseRepository`, and WhatsApp AI Receptionist. |
-| **Native WPF Desktop** | `src/Occlusa.Desktop` | `net8.0-windows` desktop client with uniform 3–4 column paged tables (zero scrollbars, zero ellipsis truncation), 1080p/1440p responsiveness, `LocalApiHostService` auto-start API host, true modal dialogs with unsaved-changes guard, pinned medical alerts, FDI 32-tooth odontogram, 4-step Appointments scheduling workspace, and PC/SC MyKad reader. |
-| **xUnit Test Suite** | `src/Occlusa.Tests` | 69 deterministic unit and Kestrel HTTP pipeline tests covering appointments, treatment capability filtering, patient lookup, billing, NRIC parsing, and WhatsApp emergency triage. |
+| **Native WPF Desktop** | `src/Occlusa.Desktop` | `net8.0-windows` desktop client with uniform 3–4 column paged tables (zero scrollbars, zero ellipsis truncation), 1080p/1440p responsiveness, `LocalApiHostService` embedded in-process Kestrel host with auto-recovery, true modal dialogs with unsaved-changes guard, pinned medical alerts, FDI 32-tooth odontogram, 15-minute proportional Appointments timeline with drag-and-drop rescheduling, and PC/SC MyKad reader. |
+| **xUnit Test Suite** | `src/Occlusa.Tests` | 74 deterministic unit and Kestrel HTTP pipeline tests covering appointments, 15-minute timeline layout & overlap splitting, dentist-locked drag rescheduling, treatment capability filtering, patient lookup, billing, NRIC parsing, and WhatsApp emergency triage. |
 | **Supabase Schema & RLS** | `supabase/migrations/` | PostgreSQL schema migrations (`001` core schema & RLS, `002` dentists/treatments/appointments relations, `003` dentist treatment capabilities) with clinic-group clinical sharing, branch-isolated financials, and immutable append-only audit logs. |
 | **Architecture Docs** | `docs/` | UI uniformity rules (`docs/UI_UNIFORMITY_RULES.md`) and Appointments scheduling specification (`docs/architecture/APPOINTMENTS_SCHEDULING.md`). |
 | **Backup Verification** | `scripts/verify-daily-backup.ps1` | Daily AES-256 encrypted `pg_dump` / dry-run archive verification with SHA-256 checksums and API logging. |
@@ -68,7 +68,7 @@ graph TD
 │   ├── Occlusa.Shared/                # Pure domain models & scheduling/billing helpers
 │   │   ├── Models/
 │   │   └── Services/
-│   └── Occlusa.Tests/                 # xUnit verification suite (69 tests)
+│   └── Occlusa.Tests/                 # xUnit verification suite (74 tests)
 ├── supabase/
 │   └── migrations/
 │       ├── 001_occlusa_tier1_tier2_schema_rls.sql
@@ -98,12 +98,12 @@ graph TD
 
 ## Features
 
-- [x] **Appointments Calendar & Table:** Day View (`Full Day` / `AM` / `PM` 9-slot grid across eligible dentists), Week View, Month View, and 4-column paged Table synced with Live Queue (`IsTodayForLiveQueue`).
+- [x] **Appointments Calendar & Table:** 15-minute proportional timeline (`4 rows/hour`) in **Day View** and **Week View** (`Full Day` / `AM` / `PM`) with overlap lane splitting and dentist-locked cross-date drag-and-drop rescheduling, plus **Month View** and 4-column paged Table synced with Live Queue (`IsTodayForLiveQueue`).
 - [x] **4-Step Booking & Inline Registration:** Treatment-to-dentist capability filtering, hourly slot availability lookup, dash-tolerant IC / name / phone search, and atomic `POST /api/appointments/register-and-book`.
 - [x] **FDI 32-Tooth Odontogram & Billing:** Split-payment invoices, panel/TPA deductions, practitioner commission calculations, and auto-invoicing on completed procedures.
 - [x] **Malaysian MyKad PC/SC Reader:** Hardware USB smartcard parsing via `winscard.dll` plus built-in **Simulate MyKad Insert** for testing.
 - [x] **WhatsApp AI Receptionist & Emergency Triage:** Guardrailed booking flow with front-desk approval and SignalR emergency escalation.
-- [x] **Zero-Config Local Mode & Embedded API Host:** `Occlusa.Desktop` automatically launches `Occlusa.Api` on `http://localhost:5188` when not already running.
+- [x] **Zero-Config Local Mode & Embedded API Host:** `Occlusa.Desktop` probes `http://localhost:5188/api/health` for an external API or hosts `Occlusa.Api` in-process on Kestrel with ephemeral loopback port fallback (`http://127.0.0.1:0`) and transparent `HttpRequestException` recovery.
 
 ---
 
@@ -129,7 +129,7 @@ When `Supabase:ConnectionString`, `Gemini:ApiKey`, and `WhatsApp:AccessToken` ar
    dotnet build Occlusa.sln
    ```
 
-3. **Run the WPF Desktop Client (`Occlusa.Api` auto-starts on `http://localhost:5188` via `LocalApiHostService`):**
+3. **Run the WPF Desktop Client (`LocalApiHostService` reuses a running API on `http://localhost:5188` or hosts `Occlusa.Api` in-process via Kestrel):**
    ```powershell
    dotnet run --project src\Occlusa.Desktop\Occlusa.Desktop.csproj
    ```
@@ -147,7 +147,7 @@ When `Supabase:ConnectionString`, `Gemini:ApiKey`, and `WhatsApp:AccessToken` ar
 
 ## Running Tests
 
-Run the full automated verification suite (`69` xUnit tests):
+Run the full automated verification suite (`74` xUnit tests):
 
 ```powershell
 dotnet test src\Occlusa.Tests\Occlusa.Tests.csproj --logger "console;verbosity=normal"

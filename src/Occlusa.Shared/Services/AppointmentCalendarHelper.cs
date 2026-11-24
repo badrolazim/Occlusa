@@ -8,6 +8,29 @@ namespace Occlusa.Shared.Services;
 public sealed record DayTimeSlot(TimeOnly Start, TimeOnly End, string Label);
 
 /// <summary>
+/// Represents the discrete 15-minute or 30-minute timeline window for proportional calendar rendering.
+/// </summary>
+public sealed record TimelineWindow(TimeOnly Start, TimeOnly End, int SlotMinutes, int TotalRows);
+
+/// <summary>
+/// Proportional row/lane placement for one appointment block inside a column timeline.
+/// </summary>
+public sealed record TimelineBlockLayout(
+    AppointmentQueueItemDto Appointment,
+    int StartRow,
+    int RowSpan,
+    int LaneIndex,
+    int LaneSpan,
+    int LaneCount);
+
+/// <summary>
+/// Computed visible blocks and overflow appointments for a single timeline column.
+/// </summary>
+public sealed record TimelineColumnLayout(
+    IReadOnlyList<TimelineBlockLayout> VisibleBlocks,
+    IReadOnlyList<AppointmentQueueItemDto> OverflowAppointments);
+
+/// <summary>
 /// Represents hourly dentist schedule availability for Step 2 of booking.
 /// </summary>
 public sealed record DentistSlotAvailability(
@@ -495,6 +518,231 @@ public static class AppointmentCalendarHelper
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Computes the timeline row window (default 15-minute increments = 4 rows per hour) for a session.
+    /// </summary>
+    public static TimelineWindow GetTimelineWindow(DaySlotSession session, int slotMinutes = 15)
+    {
+        int step = slotMinutes == 30 ? 30 : 15;
+        return session switch
+        {
+            DaySlotSession.Morning => new TimelineWindow(new TimeOnly(9, 0), new TimeOnly(13, 30), step, 270 / step),
+            DaySlotSession.Afternoon => new TimelineWindow(new TimeOnly(13, 30), new TimeOnly(18, 0), step, 270 / step),
+            _ => new TimelineWindow(new TimeOnly(9, 0), new TimeOnly(18, 0), step, 540 / step)
+        };
+    }
+
+    /// <summary>
+    /// Computes proportional row spans and non-overlapping side-by-side lane placement for concurrent appointments.
+    /// </summary>
+    public static TimelineColumnLayout ComputeTimelineLayout(
+        IEnumerable<AppointmentQueueItemDto> appointments,
+        DaySlotSession session,
+        TimeSpan localOffset,
+        int slotMinutes = 15,
+        int maxVisibleLanes = 0)
+    {
+        var window = GetTimelineWindow(session, slotMinutes);
+        int windowStartMinutes = window.Start.Hour * 60 + window.Start.Minute;
+        int windowTotalMinutes = window.TotalRows * window.SlotMinutes;
+
+        var entries = new List<(AppointmentQueueItemDto Appointment, int StartRow, int EndRow, int RowSpan)>();
+        foreach (var appt in appointments)
+        {
+            var localStart = appt.ScheduledAt.ToOffset(localOffset);
+            int startMin = (localStart.Hour * 60 + localStart.Minute) - windowStartMinutes;
+            int duration = Math.Max(window.SlotMinutes, appt.DurationMinutes);
+            int endMin = startMin + duration;
+
+            if (session != DaySlotSession.FullDay && (endMin <= 0 || startMin >= windowTotalMinutes))
+            {
+                continue;
+            }
+
+            int rawStartRow = (int)Math.Floor(startMin / (double)window.SlotMinutes);
+            int rawEndRow = (int)Math.Ceiling(endMin / (double)window.SlotMinutes);
+            int startRow = Math.Clamp(rawStartRow, 0, window.TotalRows - 1);
+            int endRow = Math.Clamp(rawEndRow, startRow + 1, window.TotalRows);
+            int rowSpan = Math.Max(1, endRow - startRow);
+
+            entries.Add((appt, startRow, endRow, rowSpan));
+        }
+
+        if (entries.Count == 0)
+        {
+            return new TimelineColumnLayout(
+                Array.Empty<TimelineBlockLayout>(),
+                Array.Empty<AppointmentQueueItemDto>());
+        }
+
+        var sorted = entries
+            .OrderBy(e => e.StartRow)
+            .ThenByDescending(e => e.RowSpan)
+            .ThenBy(e => e.Appointment.ScheduledAt)
+            .ThenBy(e => e.Appointment.Id)
+            .ToList();
+
+        var visibleBlocks = new List<TimelineBlockLayout>(sorted.Count);
+        var overflow = new List<AppointmentQueueItemDto>();
+
+        var cluster = new List<(AppointmentQueueItemDto Appointment, int StartRow, int EndRow, int RowSpan)>();
+        int clusterMaxEndRow = 0;
+
+        foreach (var entry in sorted)
+        {
+            if (cluster.Count == 0)
+            {
+                cluster.Add(entry);
+                clusterMaxEndRow = entry.EndRow;
+            }
+            else if (entry.StartRow < clusterMaxEndRow)
+            {
+                cluster.Add(entry);
+                if (entry.EndRow > clusterMaxEndRow)
+                {
+                    clusterMaxEndRow = entry.EndRow;
+                }
+            }
+            else
+            {
+                LayoutOverlapCluster(cluster, maxVisibleLanes, visibleBlocks, overflow);
+                cluster.Clear();
+                cluster.Add(entry);
+                clusterMaxEndRow = entry.EndRow;
+            }
+        }
+
+        if (cluster.Count > 0)
+        {
+            LayoutOverlapCluster(cluster, maxVisibleLanes, visibleBlocks, overflow);
+        }
+
+        return new TimelineColumnLayout(visibleBlocks, overflow);
+    }
+
+    private static void LayoutOverlapCluster(
+        List<(AppointmentQueueItemDto Appointment, int StartRow, int EndRow, int RowSpan)> cluster,
+        int maxVisibleLanes,
+        List<TimelineBlockLayout> visibleBlocks,
+        List<AppointmentQueueItemDto> overflow)
+    {
+        var laneEndRows = new List<int>();
+        var assigned = new List<((AppointmentQueueItemDto Appointment, int StartRow, int EndRow, int RowSpan) Entry, int Lane)>(cluster.Count);
+
+        foreach (var entry in cluster)
+        {
+            int chosenLane = -1;
+            for (int lane = 0; lane < laneEndRows.Count; lane++)
+            {
+                if (laneEndRows[lane] <= entry.StartRow)
+                {
+                    chosenLane = lane;
+                    laneEndRows[lane] = entry.EndRow;
+                    break;
+                }
+            }
+
+            if (chosenLane < 0)
+            {
+                chosenLane = laneEndRows.Count;
+                laneEndRows.Add(entry.EndRow);
+            }
+
+            assigned.Add((entry, chosenLane));
+        }
+
+        int clusterLaneCount = laneEndRows.Count;
+        int visibleLaneCount = maxVisibleLanes > 0 ? Math.Min(clusterLaneCount, maxVisibleLanes) : clusterLaneCount;
+
+        var visibleInCluster = assigned.Where(a => a.Lane < visibleLaneCount).ToList();
+        foreach (var hidden in assigned.Where(a => a.Lane >= visibleLaneCount))
+        {
+            overflow.Add(hidden.Entry.Appointment);
+        }
+
+        foreach (var item in visibleInCluster)
+        {
+            int laneSpan = 1;
+            while (item.Lane + laneSpan < visibleLaneCount)
+            {
+                int candidateLane = item.Lane + laneSpan;
+                bool occupied = visibleInCluster.Any(other =>
+                    other.Lane == candidateLane
+                    && other.Entry.StartRow < item.Entry.EndRow
+                    && item.Entry.StartRow < other.Entry.EndRow);
+
+                if (occupied)
+                {
+                    break;
+                }
+
+                laneSpan++;
+            }
+
+            visibleBlocks.Add(new TimelineBlockLayout(
+                item.Entry.Appointment,
+                item.Entry.StartRow,
+                item.Entry.RowSpan,
+                item.Lane,
+                laneSpan,
+                visibleLaneCount));
+        }
+    }
+
+    /// <summary>
+    /// Converts a timeline row index back into a snapped local start time.
+    /// </summary>
+    public static TimeOnly SnapRowToStartTime(TimelineWindow window, int rowIndex)
+    {
+        int clamped = Math.Clamp(rowIndex, 0, Math.Max(0, window.TotalRows - 1));
+        return window.Start.AddMinutes(clamped * window.SlotMinutes);
+    }
+
+    /// <summary>
+    /// Verifies that a target dentist column matches the appointment's assigned dentist (prevents cross-dentist drops).
+    /// </summary>
+    public static bool IsSameDentist(
+        AppointmentQueueItemDto appointment,
+        Guid? targetDentistId,
+        string? targetDentistName)
+    {
+        if (appointment.DentistId.HasValue && targetDentistId.HasValue)
+        {
+            return appointment.DentistId.Value == targetDentistId.Value;
+        }
+
+        return !string.IsNullOrWhiteSpace(appointment.DoctorName)
+            && !string.IsNullOrWhiteSpace(targetDentistName)
+            && string.Equals(appointment.DoctorName.Trim(), targetDentistName.Trim(), StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Builds an UpdateAppointmentRequest for drag-rescheduling that preserves dentist, patient, treatment, room, and notes.
+    /// </summary>
+    public static UpdateAppointmentRequest BuildDragRescheduleRequest(
+        AppointmentQueueItemDto appointment,
+        DateOnly targetDate,
+        TimeOnly targetStartTime,
+        TimeSpan localOffset,
+        string updatedBy = "Desktop Calendar Drag")
+    {
+        var scheduledAt = new DateTimeOffset(targetDate.ToDateTime(targetStartTime), localOffset);
+        return new UpdateAppointmentRequest
+        {
+            PatientId = appointment.PatientId,
+            DentistId = appointment.DentistId,
+            DoctorName = appointment.DoctorName,
+            TreatmentId = appointment.TreatmentId,
+            ProcedureSummary = appointment.ProcedureSummary,
+            RoomName = appointment.RoomName,
+            ScheduledAt = scheduledAt,
+            DurationMinutes = appointment.DurationMinutes,
+            Status = appointment.Status,
+            Notes = appointment.Notes,
+            UpdatedBy = updatedBy
+        };
     }
 }
 

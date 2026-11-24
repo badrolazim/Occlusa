@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
+using Occlusa.Api;
 using Occlusa.Api.Controllers;
 using Occlusa.Api.Hubs;
 using Occlusa.Api.Options;
@@ -677,6 +678,294 @@ public class AppointmentSchedulingTests
         var slot1400 = Assert.Single(slots, s => s.Start == new TimeOnly(14, 0));
         Assert.True(slot1400.IsAvailable);
         Assert.Equal(0, slot1400.BookedCount);
+    }
+
+    [Fact]
+    public async Task OcclusaApiApplicationFactory_EmbeddedHost_ServesHealthSnapshotAndAppointmentMutations()
+    {
+        await using var app = OcclusaApiApplicationFactory.BuildApplication(
+            urls: "http://127.0.0.1:0",
+            environmentName: "Development");
+        await app.StartAsync();
+
+        try
+        {
+            var baseAddress = app.Urls.First();
+            using var http = new HttpClient { BaseAddress = new Uri(baseAddress) };
+            http.DefaultRequestHeaders.TryAddWithoutValidation("X-Occlusa-User", "test-desktop");
+            http.DefaultRequestHeaders.TryAddWithoutValidation("X-Occlusa-Allowed-Branches", "HQ-KL,PJ-SS2");
+
+            var jsonOpts = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+            {
+                PropertyNameCaseInsensitive = true
+            };
+            jsonOpts.Converters.Add(new JsonStringEnumConverter());
+
+            var healthResp = await http.GetAsync("/api/health");
+            Assert.Equal(HttpStatusCode.OK, healthResp.StatusCode);
+            var health = await healthResp.Content.ReadFromJsonAsync<HealthStatusDto>(jsonOpts);
+            Assert.NotNull(health);
+            Assert.Equal("Healthy", health!.Status);
+            Assert.False(string.IsNullOrWhiteSpace(health.DatabaseMode));
+
+            var snapshot = await http.GetFromJsonAsync<ClinicDashboardSnapshotDto>(
+                "/api/dashboard/snapshot?branchId=HQ-KL",
+                jsonOpts);
+            Assert.NotNull(snapshot);
+            Assert.NotEmpty(snapshot!.Patients);
+            Assert.NotEmpty(snapshot.Dentists);
+            Assert.NotEmpty(snapshot.Treatments);
+
+            var createResp = await http.PostAsJsonAsync("/api/appointments", new CreateAppointmentRequest
+            {
+                BranchId = "HQ-KL",
+                PatientId = snapshot.Patients[0].Id,
+                DentistId = snapshot.Dentists[0].Id,
+                DoctorName = snapshot.Dentists[0].FullName,
+                TreatmentId = snapshot.Treatments[0].Id,
+                RoomName = snapshot.Dentists[0].DefaultRoom,
+                ScheduledAt = DateTimeOffset.Now.AddDays(2),
+                DurationMinutes = 30,
+                ProcedureSummary = snapshot.Treatments[0].Name,
+                Notes = string.Empty,
+                Status = QueueStatus.Scheduled
+            }, jsonOpts);
+            Assert.Equal(HttpStatusCode.Created, createResp.StatusCode);
+            var created = await createResp.Content.ReadFromJsonAsync<AppointmentQueueItemDto>(jsonOpts);
+            Assert.NotNull(created);
+
+            var updateResp = await http.PutAsJsonAsync($"/api/appointments/{created!.Id}", new UpdateAppointmentRequest
+            {
+                PatientId = snapshot.Patients[0].Id,
+                DentistId = snapshot.Dentists[0].Id,
+                DoctorName = snapshot.Dentists[0].FullName,
+                TreatmentId = snapshot.Treatments[0].Id,
+                ProcedureSummary = snapshot.Treatments[0].Name,
+                RoomName = snapshot.Dentists[0].DefaultRoom,
+                ScheduledAt = created.ScheduledAt.AddHours(1),
+                DurationMinutes = 45,
+                Status = QueueStatus.Scheduled,
+                Notes = "Rescheduled via embedded host",
+                UpdatedBy = "Desktop Reception"
+            }, jsonOpts);
+            Assert.Equal(HttpStatusCode.OK, updateResp.StatusCode);
+            var updated = await updateResp.Content.ReadFromJsonAsync<AppointmentQueueItemDto>(jsonOpts);
+            Assert.NotNull(updated);
+            Assert.Equal(45, updated!.DurationMinutes);
+
+            var regResp = await http.PostAsJsonAsync("/api/appointments/register-and-book", new RegisterPatientAndAppointmentRequest
+            {
+                Patient = new UpsertPatientRequest
+                {
+                    FullName = "Siti Hajar binti Azman",
+                    IcNumber = "950618-10-5124",
+                    DateOfBirth = new DateOnly(1995, 6, 18),
+                    Gender = "Female",
+                    Phone = "+6012-7788990",
+                    PrimaryBranchId = "HQ-KL"
+                },
+                Appointment = new CreateAppointmentRequest
+                {
+                    BranchId = "HQ-KL",
+                    DentistId = snapshot.Dentists[0].Id,
+                    DoctorName = snapshot.Dentists[0].FullName,
+                    TreatmentId = snapshot.Treatments[0].Id,
+                    RoomName = snapshot.Dentists[0].DefaultRoom,
+                    ScheduledAt = DateTimeOffset.Now.AddDays(3),
+                    DurationMinutes = 30,
+                    ProcedureSummary = snapshot.Treatments[0].Name,
+                    Notes = string.Empty,
+                    Status = QueueStatus.Scheduled
+                }
+            }, jsonOpts);
+            Assert.Equal(HttpStatusCode.Created, regResp.StatusCode);
+            var regResult = await regResp.Content.ReadFromJsonAsync<RegisterPatientAndAppointmentResponse>(jsonOpts);
+            Assert.NotNull(regResult);
+            Assert.Equal("Siti Hajar binti Azman", regResult!.Patient.FullName);
+        }
+        finally
+        {
+            await app.StopAsync();
+        }
+    }
+
+    [Fact]
+    public void ComputeTimelineLayout_FourRowsPerHour_TwoHourAppointmentConsumesEightRows()
+    {
+        var offset = TimeSpan.FromHours(8);
+        var appt = new AppointmentQueueItemDto
+        {
+            Id = Guid.NewGuid(),
+            PatientName = "Nurul Aisyah",
+            DoctorName = "Dr. Aina Rahman",
+            ScheduledAt = new DateTimeOffset(2026, 11, 24, 14, 0, 0, offset),
+            DurationMinutes = 120
+        };
+
+        var fullDayWindow = AppointmentCalendarHelper.GetTimelineWindow(DaySlotSession.FullDay, slotMinutes: 15);
+        Assert.Equal(36, fullDayWindow.TotalRows);
+
+        var fullDayLayout = AppointmentCalendarHelper.ComputeTimelineLayout(
+            [appt],
+            DaySlotSession.FullDay,
+            offset,
+            slotMinutes: 15);
+
+        var block = Assert.Single(fullDayLayout.VisibleBlocks);
+        Assert.Equal(20, block.StartRow); // (14:00 - 09:00) = 5h * 4 = 20
+        Assert.Equal(8, block.RowSpan);   // 2h * 4 = 8 rows
+        Assert.Equal(1, block.LaneCount);
+        Assert.Equal(0, block.LaneIndex);
+
+        var afternoonWindow = AppointmentCalendarHelper.GetTimelineWindow(DaySlotSession.Afternoon, slotMinutes: 15);
+        Assert.Equal(18, afternoonWindow.TotalRows);
+
+        var afternoonLayout = AppointmentCalendarHelper.ComputeTimelineLayout(
+            [appt],
+            DaySlotSession.Afternoon,
+            offset,
+            slotMinutes: 15);
+
+        var pmBlock = Assert.Single(afternoonLayout.VisibleBlocks);
+        Assert.Equal(2, pmBlock.StartRow); // (14:00 - 13:30) = 30m = 2 rows
+        Assert.Equal(8, pmBlock.RowSpan);
+    }
+
+    [Fact]
+    public void ComputeTimelineLayout_OverlappingAppointments_DivideColumnIntoTwoCleanLanes()
+    {
+        var offset = TimeSpan.FromHours(8);
+        var aMorning = new AppointmentQueueItemDto
+        {
+            Id = Guid.Parse("11111111-1111-1111-1111-111111111111"),
+            PatientName = "Ahmad Daniel",
+            ScheduledAt = new DateTimeOffset(2026, 11, 24, 10, 0, 0, offset),
+            DurationMinutes = 60
+        };
+        var bLong = new AppointmentQueueItemDto
+        {
+            Id = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+            PatientName = "Tan Wei Ming",
+            ScheduledAt = new DateTimeOffset(2026, 11, 24, 14, 0, 0, offset),
+            DurationMinutes = 120
+        };
+        var cOverlap = new AppointmentQueueItemDto
+        {
+            Id = Guid.Parse("33333333-3333-3333-3333-333333333333"),
+            PatientName = "Lim Mei Ling",
+            ScheduledAt = new DateTimeOffset(2026, 11, 24, 14, 30, 0, offset),
+            DurationMinutes = 60
+        };
+        var dBackToBack = new AppointmentQueueItemDto
+        {
+            Id = Guid.Parse("44444444-4444-4444-4444-444444444444"),
+            PatientName = "Siti Hajar",
+            ScheduledAt = new DateTimeOffset(2026, 11, 24, 15, 30, 0, offset),
+            DurationMinutes = 30
+        };
+
+        var layout = AppointmentCalendarHelper.ComputeTimelineLayout(
+            [aMorning, bLong, cOverlap, dBackToBack],
+            DaySlotSession.FullDay,
+            offset,
+            slotMinutes: 15);
+
+        Assert.Empty(layout.OverflowAppointments);
+        Assert.Equal(4, layout.VisibleBlocks.Count);
+
+        var morningBlock = Assert.Single(layout.VisibleBlocks, b => b.Appointment.Id == aMorning.Id);
+        Assert.Equal(1, morningBlock.LaneCount);
+        Assert.Equal(1, morningBlock.LaneSpan);
+
+        var longBlock = Assert.Single(layout.VisibleBlocks, b => b.Appointment.Id == bLong.Id);
+        var overlapBlock = Assert.Single(layout.VisibleBlocks, b => b.Appointment.Id == cOverlap.Id);
+        var tailBlock = Assert.Single(layout.VisibleBlocks, b => b.Appointment.Id == dBackToBack.Id);
+
+        Assert.Equal(2, longBlock.LaneCount);
+        Assert.Equal(2, overlapBlock.LaneCount);
+        Assert.Equal(2, tailBlock.LaneCount);
+        Assert.Equal(0, longBlock.LaneIndex);
+        Assert.Equal(1, overlapBlock.LaneIndex);
+        Assert.Equal(1, tailBlock.LaneIndex); // Back-to-back 15:30 reuses Lane 1 cleanly
+    }
+
+    [Fact]
+    public void ComputeTimelineLayout_MaxVisibleLanes_RoutesExtraConcurrentBookingsToOverflow()
+    {
+        var offset = TimeSpan.FromHours(8);
+        var start = new DateTimeOffset(2026, 11, 24, 11, 0, 0, offset);
+        var appts = Enumerable.Range(1, 4)
+            .Select(i => new AppointmentQueueItemDto
+            {
+                Id = Guid.NewGuid(),
+                PatientName = $"Patient {i}",
+                ScheduledAt = start,
+                DurationMinutes = 45
+            })
+            .ToList();
+
+        var layout = AppointmentCalendarHelper.ComputeTimelineLayout(
+            appts,
+            DaySlotSession.FullDay,
+            offset,
+            slotMinutes: 15,
+            maxVisibleLanes: 3);
+
+        Assert.Equal(3, layout.VisibleBlocks.Count);
+        Assert.Single(layout.OverflowAppointments);
+        Assert.All(layout.VisibleBlocks, b => Assert.Equal(3, b.LaneCount));
+    }
+
+    [Fact]
+    public async Task DragReschedule_PreservesDentistAndBlocksDifferentDentist()
+    {
+        var repo = CreateRepository();
+        var patients = await repo.GetPatientsAsync();
+        var dentists = await repo.GetDentistsAsync("HQ-KL");
+        var treatments = await repo.GetTreatmentsAsync();
+
+        var d1 = dentists[0];
+        var d2 = dentists[1];
+        var offset = TimeSpan.FromHours(8);
+        var originalDate = DateOnly.FromDateTime(DateTime.Today.AddDays(2));
+        var targetDate = originalDate.AddDays(2);
+
+        var created = await repo.CreateAppointmentAsync(new CreateAppointmentRequest
+        {
+            BranchId = "HQ-KL",
+            PatientId = patients[0].Id,
+            DentistId = d1.Id,
+            DoctorName = d1.FullName,
+            TreatmentId = treatments[0].Id,
+            RoomName = d1.DefaultRoom,
+            ScheduledAt = new DateTimeOffset(originalDate.ToDateTime(new TimeOnly(14, 0)), offset),
+            DurationMinutes = 120,
+            ProcedureSummary = treatments[0].Name,
+            Notes = "Keep dentist locked",
+            Status = QueueStatus.Scheduled
+        });
+
+        Assert.True(AppointmentCalendarHelper.IsSameDentist(created, d1.Id, d1.FullName));
+        Assert.False(AppointmentCalendarHelper.IsSameDentist(created, d2.Id, d2.FullName));
+
+        var window = AppointmentCalendarHelper.GetTimelineWindow(DaySlotSession.FullDay, slotMinutes: 15);
+        var snappedTime = AppointmentCalendarHelper.SnapRowToStartTime(window, 22); // 14:30
+        Assert.Equal(new TimeOnly(14, 30), snappedTime);
+
+        var updateReq = AppointmentCalendarHelper.BuildDragRescheduleRequest(
+            created,
+            targetDate,
+            snappedTime,
+            offset);
+
+        var (updated, error) = await repo.UpdateAppointmentAsync(created.Id, updateReq);
+        Assert.Null(error);
+        Assert.NotNull(updated);
+        Assert.Equal(d1.Id, updated!.DentistId);
+        Assert.Equal(d1.FullName, updated.DoctorName);
+        Assert.Equal(created.PatientId, updated.PatientId);
+        Assert.Equal(120, updated.DurationMinutes);
+        Assert.Equal(new DateTimeOffset(targetDate.ToDateTime(new TimeOnly(14, 30)), offset), updated.ScheduledAt);
     }
 }
 

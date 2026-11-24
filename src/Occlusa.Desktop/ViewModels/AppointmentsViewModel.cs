@@ -1,5 +1,6 @@
 using System.Collections.ObjectModel;
 using System.Globalization;
+using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Occlusa.Shared.Models;
@@ -16,6 +17,11 @@ public sealed record QuickBookSlotArgs(
     string? DoctorName,
     string? DefaultRoom,
     Guid? TreatmentId = null);
+
+public sealed record AppointmentRescheduleArgs(
+    AppointmentQueueItemDto Appointment,
+    DateOnly TargetDate,
+    TimeOnly TargetStartTime);
 
 public sealed class CalendarAppointmentCardVm
 {
@@ -41,10 +47,155 @@ public sealed class CalendarAppointmentCardVm
     public string ToolTipText { get; }
 }
 
-public sealed class DayDentistHeaderVm
+public sealed class TimelineHourMarkVm
 {
-    public DayDentistHeaderVm(Guid? dentistId, string fullName, string specialty, string defaultRoom, int dayCount)
+    public TimelineHourMarkVm(string label, int startRow, int rowSpan, bool isFullHour)
     {
+        Label = label;
+        StartRow = startRow;
+        RowSpan = rowSpan;
+        IsFullHour = isFullHour;
+    }
+
+    public string Label { get; }
+    public int StartRow { get; }
+    public int RowSpan { get; }
+    public int LaneIndex => 0;
+    public int LaneSpan => 1;
+    public int LaneCount => 1;
+    public bool IsFullHour { get; }
+}
+
+public sealed class DayQuickDatePillVm
+{
+    public DayQuickDatePillVm(
+        DateOnly date,
+        string dayLabel,
+        string dateNumLabel,
+        bool isSelected,
+        bool isToday,
+        int appointmentCount)
+    {
+        Date = date;
+        DayLabel = dayLabel;
+        DateNumLabel = dateNumLabel;
+        IsSelected = isSelected;
+        IsToday = isToday;
+        AppointmentCount = appointmentCount;
+    }
+
+    public DateOnly Date { get; }
+    public string DayLabel { get; }
+    public string DateNumLabel { get; }
+    public bool IsSelected { get; }
+    public bool IsToday { get; }
+    public int AppointmentCount { get; }
+    public bool HasCount => AppointmentCount > 0;
+    public string CountText => AppointmentCount == 0 ? string.Empty : AppointmentCount.ToString(CultureInfo.InvariantCulture);
+    public string PillTitle => $"{DayLabel} {DateNumLabel}";
+}
+
+public sealed class TimelineAppointmentBlockVm
+{
+    public TimelineAppointmentBlockVm(
+        AppointmentQueueItemDto source,
+        int startRow,
+        int rowSpan,
+        int laneIndex,
+        int laneSpan,
+        int laneCount,
+        string timeRangeLabel,
+        string patientDisplay,
+        string secondaryDisplay,
+        string tertiaryDisplay,
+        string statusBadgeText,
+        string toolTipText,
+        bool showHeaderRow,
+        bool showSecondaryLine,
+        bool showTertiaryLine,
+        bool showStatusBadge,
+        Brush cardBackground,
+        Brush cardBorderBrush,
+        Brush accentBrush,
+        Brush primaryTextBrush,
+        Brush secondaryTextBrush,
+        Brush badgeBackground,
+        Brush badgeForeground)
+    {
+        Source = source;
+        StartRow = startRow;
+        RowSpan = rowSpan;
+        LaneIndex = laneIndex;
+        LaneSpan = laneSpan;
+        LaneCount = laneCount;
+        TimeRangeLabel = timeRangeLabel;
+        PatientDisplay = patientDisplay;
+        SecondaryDisplay = secondaryDisplay;
+        TertiaryDisplay = tertiaryDisplay;
+        StatusBadgeText = statusBadgeText;
+        ToolTipText = toolTipText;
+        ShowHeaderRow = showHeaderRow;
+        ShowSecondaryLine = showSecondaryLine;
+        ShowTertiaryLine = showTertiaryLine;
+        ShowStatusBadge = showStatusBadge;
+        CardBackground = cardBackground;
+        CardBorderBrush = cardBorderBrush;
+        AccentBrush = accentBrush;
+        PrimaryTextBrush = primaryTextBrush;
+        SecondaryTextBrush = secondaryTextBrush;
+        BadgeBackground = badgeBackground;
+        BadgeForeground = badgeForeground;
+    }
+
+    public AppointmentQueueItemDto Source { get; }
+    public int StartRow { get; }
+    public int RowSpan { get; }
+    public int LaneIndex { get; }
+    public int LaneSpan { get; }
+    public int LaneCount { get; }
+
+    public string TimeRangeLabel { get; }
+    public string PatientDisplay { get; }
+    public string SecondaryDisplay { get; }
+    public string TertiaryDisplay { get; }
+    public string StatusBadgeText { get; }
+    public string ToolTipText { get; }
+
+    public bool IsUltraCompact => RowSpan <= 1;
+    public bool ShowHeaderRow { get; }
+    public bool ShowSecondaryLine { get; }
+    public bool ShowTertiaryLine { get; }
+    public bool ShowStatusBadge { get; }
+    public bool HasCriticalAlert => Source.HasCriticalMedicalAlert;
+    public bool IsCancelled => Source.Status == QueueStatus.Cancelled;
+
+    public Brush CardBackground { get; }
+    public Brush CardBorderBrush { get; }
+    public Brush AccentBrush { get; }
+    public Brush PrimaryTextBrush { get; }
+    public Brush SecondaryTextBrush { get; }
+    public Brush BadgeBackground { get; }
+    public Brush BadgeForeground { get; }
+}
+
+public sealed class DayDentistTimelineColumnVm
+{
+    public DayDentistTimelineColumnVm(
+        DateOnly date,
+        Guid? dentistId,
+        string fullName,
+        string specialty,
+        string defaultRoom,
+        int dayCount,
+        Brush accentBrush,
+        int totalRows,
+        int hourOffsetRows,
+        bool showCurrentTimeLine,
+        double currentTimeRowFraction,
+        IReadOnlyList<TimelineAppointmentBlockVm> blocks,
+        int overflowCount)
+    {
+        Date = date;
         DentistId = dentistId;
         FullName = fullName;
         Subtitle = string.IsNullOrWhiteSpace(specialty)
@@ -52,69 +203,44 @@ public sealed class DayDentistHeaderVm
             : $"{specialty} · {defaultRoom}";
         DefaultRoom = defaultRoom;
         CountLabel = dayCount == 1 ? "1 appt" : $"{dayCount} appts";
+        AccentBrush = accentBrush;
+        TotalRows = totalRows;
+        HourOffsetRows = hourOffsetRows;
+        ShowCurrentTimeLine = showCurrentTimeLine;
+        CurrentTimeRowFraction = currentTimeRowFraction;
+        Blocks = blocks;
+        OverflowCount = overflowCount;
     }
 
+    public DateOnly Date { get; }
     public Guid? DentistId { get; }
     public string FullName { get; }
     public string Subtitle { get; }
     public string DefaultRoom { get; }
     public string CountLabel { get; }
-}
-
-public sealed class DaySlotCellVm
-{
-    public DaySlotCellVm(
-        DateOnly date,
-        TimeOnly startTime,
-        Guid? dentistId,
-        string dentistName,
-        string defaultRoom,
-        IReadOnlyList<CalendarAppointmentCardVm> visibleCards,
-        int overflowCount)
-    {
-        Date = date;
-        StartTime = startTime;
-        DentistId = dentistId;
-        DentistName = dentistName;
-        DefaultRoom = defaultRoom;
-        VisibleCards = visibleCards;
-        OverflowCount = overflowCount;
-    }
-
-    public DateOnly Date { get; }
-    public TimeOnly StartTime { get; }
-    public Guid? DentistId { get; }
-    public string DentistName { get; }
-    public string DefaultRoom { get; }
-    public IReadOnlyList<CalendarAppointmentCardVm> VisibleCards { get; }
+    public Brush AccentBrush { get; }
+    public int TotalRows { get; }
+    public int HourOffsetRows { get; }
+    public bool ShowCurrentTimeLine { get; }
+    public double CurrentTimeRowFraction { get; }
+    public IReadOnlyList<TimelineAppointmentBlockVm> Blocks { get; }
     public int OverflowCount { get; }
     public bool HasOverflow => OverflowCount > 0;
     public string OverflowLabel => $"+{OverflowCount} more";
-    public bool IsEmpty => VisibleCards.Count == 0 && !HasOverflow;
 }
 
-public sealed class DaySlotRowVm
+public sealed class WeekTimelineColumnVm
 {
-    public DaySlotRowVm(string timeLabel, TimeOnly startTime, IReadOnlyList<DaySlotCellVm> cells)
-    {
-        TimeLabel = timeLabel;
-        StartTime = startTime;
-        Cells = cells;
-    }
-
-    public string TimeLabel { get; }
-    public TimeOnly StartTime { get; }
-    public IReadOnlyList<DaySlotCellVm> Cells { get; }
-}
-
-public sealed class WeekDayColumnVm
-{
-    public WeekDayColumnVm(
+    public WeekTimelineColumnVm(
         DateOnly date,
         bool isToday,
         bool isSunday,
         int totalCount,
-        IReadOnlyList<CalendarAppointmentCardVm> visibleCards,
+        int totalRows,
+        int hourOffsetRows,
+        bool showCurrentTimeLine,
+        double currentTimeRowFraction,
+        IReadOnlyList<TimelineAppointmentBlockVm> blocks,
         int overflowCount)
     {
         Date = date;
@@ -124,7 +250,11 @@ public sealed class WeekDayColumnVm
         IsSunday = isSunday;
         TotalCount = totalCount;
         CountLabel = totalCount == 0 ? string.Empty : totalCount.ToString(CultureInfo.InvariantCulture);
-        VisibleCards = visibleCards;
+        TotalRows = totalRows;
+        HourOffsetRows = hourOffsetRows;
+        ShowCurrentTimeLine = showCurrentTimeLine;
+        CurrentTimeRowFraction = currentTimeRowFraction;
+        Blocks = blocks;
         OverflowCount = overflowCount;
     }
 
@@ -136,7 +266,11 @@ public sealed class WeekDayColumnVm
     public int TotalCount { get; }
     public string CountLabel { get; }
     public bool HasCount => TotalCount > 0;
-    public IReadOnlyList<CalendarAppointmentCardVm> VisibleCards { get; }
+    public int TotalRows { get; }
+    public int HourOffsetRows { get; }
+    public bool ShowCurrentTimeLine { get; }
+    public double CurrentTimeRowFraction { get; }
+    public IReadOnlyList<TimelineAppointmentBlockVm> Blocks { get; }
     public int OverflowCount { get; }
     public bool HasOverflow => OverflowCount > 0;
     public string OverflowLabel => $"+{OverflowCount} more";
@@ -178,18 +312,31 @@ public sealed class MonthDayCellVm
 }
 
 /// <summary>
-/// Workspace ViewModel managing the Appointments Calendar (Day / Week / Month)
-/// and paginated 4-column Appointment Table with Dentist, Treatment, and Patient filters.
+/// Workspace ViewModel managing the Appointments proportional 15-minute Timeline Calendar
+/// (Day / Week / Month) and paginated 4-column Appointment Table with drag-and-drop date rescheduling.
 /// </summary>
 public partial class AppointmentsViewModel : ObservableObject
 {
     private const double ResolutionHeightThreshold = 1120.0;
 
+    private static readonly CardPalette[] DentistPalettes =
+    [
+        CreatePalette("#E8F7F5", "#B7E4DD", "#0F766E", "#0F3D39", "#2C6B65", "#FFFFFF", "#0F766E"),
+        CreatePalette("#EAF4FE", "#BCD9FA", "#0369A1", "#0C3554", "#2D5D80", "#FFFFFF", "#0369A1"),
+        CreatePalette("#F2EEFE", "#D3C6FA", "#6D28D9", "#36196B", "#5B428A", "#FFFFFF", "#6D28D9"),
+        CreatePalette("#ECFDF3", "#B5ECCD", "#15803D", "#124024", "#316B46", "#FFFFFF", "#15803D")
+    ];
+
+    private static readonly CardPalette AiPendingPalette =
+        CreatePalette("#FFFBEB", "#FDE68A", "#D97706", "#78350F", "#92400E", "#FEF3C7", "#B45309");
+
+    private static readonly CardPalette CancelledPalette =
+        CreatePalette("#F8FAFC", "#E2E8F0", "#94A3B8", "#64748B", "#94A3B8", "#F1F5F9", "#64748B");
+
     private List<AppointmentQueueItemDto> _allAppointments = new();
     private List<DentistDto> _dentists = new();
     private List<TreatmentDto> _treatments = new();
     private bool _suppressFilterRebuild;
-    private int _maxWeekCardsPerDay = 6;
     private int _maxMonthCardsPerDay = 2;
 
     [ObservableProperty]
@@ -198,6 +345,7 @@ public partial class AppointmentsViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(IsDayCalendarView))]
     [NotifyPropertyChangedFor(nameof(IsWeekCalendarView))]
     [NotifyPropertyChangedFor(nameof(IsMonthCalendarView))]
+    [NotifyPropertyChangedFor(nameof(IsTimelineCalendarView))]
     [NotifyPropertyChangedFor(nameof(IsRangeDayChecked))]
     [NotifyPropertyChangedFor(nameof(IsRangeWeekChecked))]
     [NotifyPropertyChangedFor(nameof(IsRangeMonthChecked))]
@@ -209,6 +357,7 @@ public partial class AppointmentsViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(IsDayCalendarView))]
     [NotifyPropertyChangedFor(nameof(IsWeekCalendarView))]
     [NotifyPropertyChangedFor(nameof(IsMonthCalendarView))]
+    [NotifyPropertyChangedFor(nameof(IsTimelineCalendarView))]
     [NotifyPropertyChangedFor(nameof(IsRangeDayChecked))]
     [NotifyPropertyChangedFor(nameof(IsRangeWeekChecked))]
     [NotifyPropertyChangedFor(nameof(IsRangeMonthChecked))]
@@ -253,6 +402,12 @@ public partial class AppointmentsViewModel : ObservableObject
     private int _monthRowCount = 5;
 
     [ObservableProperty]
+    private int _timelineTotalRows = 36;
+
+    [ObservableProperty]
+    private TimeOnly _timelineWindowStart = new(9, 0);
+
+    [ObservableProperty]
     private string _filteredSummaryLabel = "0 appointments";
 
     public AppointmentsViewModel()
@@ -269,23 +424,28 @@ public partial class AppointmentsViewModel : ObservableObject
         _suppressFilterRebuild = false;
 
         TableRows = new ObservableCollection<AppointmentRowItem>();
-        DayDentistHeaders = new ObservableCollection<DayDentistHeaderVm>();
-        DayTimeRows = new ObservableCollection<DaySlotRowVm>();
-        WeekDayColumns = new ObservableCollection<WeekDayColumnVm>();
+        TimelineHourMarks = new ObservableCollection<TimelineHourMarkVm>();
+        DayQuickDates = new ObservableCollection<DayQuickDatePillVm>();
+        DayDentistColumns = new ObservableCollection<DayDentistTimelineColumnVm>();
+        WeekTimelineColumns = new ObservableCollection<WeekTimelineColumnVm>();
         MonthDayCells = new ObservableCollection<MonthDayCellVm>();
     }
 
     public event EventHandler<AppointmentQueueItemDto>? AppointmentOpenRequested;
     public event EventHandler<QuickBookSlotArgs>? QuickBookRequested;
     public event EventHandler<AppointmentQueueItemDto>? AppointmentSelectedForBanner;
+    public event EventHandler<AppointmentRescheduleArgs>? AppointmentRescheduleRequested;
 
     public ObservableCollection<FilterOptionVm> DentistFilterOptions { get; }
     public ObservableCollection<FilterOptionVm> TreatmentFilterOptions { get; }
     public ObservableCollection<AppointmentRowItem> TableRows { get; }
-    public ObservableCollection<DayDentistHeaderVm> DayDentistHeaders { get; }
-    public ObservableCollection<DaySlotRowVm> DayTimeRows { get; }
-    public ObservableCollection<WeekDayColumnVm> WeekDayColumns { get; }
+    public ObservableCollection<TimelineHourMarkVm> TimelineHourMarks { get; }
+    public ObservableCollection<DayQuickDatePillVm> DayQuickDates { get; }
+    public ObservableCollection<DayDentistTimelineColumnVm> DayDentistColumns { get; }
+    public ObservableCollection<WeekTimelineColumnVm> WeekTimelineColumns { get; }
     public ObservableCollection<MonthDayCellVm> MonthDayCells { get; }
+
+    public int TimelineSlotMinutes => 15;
 
     public bool IsCalendarMode => DisplayMode == AppointmentDisplayMode.Calendar;
     public bool IsTableMode => DisplayMode == AppointmentDisplayMode.Table;
@@ -293,6 +453,7 @@ public partial class AppointmentsViewModel : ObservableObject
     public bool IsDayCalendarView => IsCalendarMode && CalendarViewMode == AppointmentCalendarViewMode.Day;
     public bool IsWeekCalendarView => IsCalendarMode && CalendarViewMode == AppointmentCalendarViewMode.Week;
     public bool IsMonthCalendarView => IsCalendarMode && CalendarViewMode == AppointmentCalendarViewMode.Month;
+    public bool IsTimelineCalendarView => IsDayCalendarView || IsWeekCalendarView;
 
     public bool IsRangeDayChecked => (IsCalendarMode || !ShowAllDatesInTable) && CalendarViewMode == AppointmentCalendarViewMode.Day;
     public bool IsRangeWeekChecked => (IsCalendarMode || !ShowAllDatesInTable) && CalendarViewMode == AppointmentCalendarViewMode.Week;
@@ -336,22 +497,84 @@ public partial class AppointmentsViewModel : ObservableObject
 
     public void UpdateViewportCapacity(double hostHeight)
     {
-        int newWeekCap = hostHeight > ResolutionHeightThreshold ? 9 : 6;
         int newMonthCap = hostHeight > ResolutionHeightThreshold ? 3 : 2;
-        if (newWeekCap == _maxWeekCardsPerDay && newMonthCap == _maxMonthCardsPerDay)
+        if (newMonthCap == _maxMonthCardsPerDay)
         {
             return;
         }
 
-        _maxWeekCardsPerDay = newWeekCap;
         _maxMonthCardsPerDay = newMonthCap;
         RebuildViews();
+    }
+
+    public void QuickBookAtSlot(
+        DateOnly date,
+        TimeOnly startTime,
+        Guid? dentistId,
+        string? doctorName,
+        string? defaultRoom)
+    {
+        if (!dentistId.HasValue && string.IsNullOrWhiteSpace(doctorName))
+        {
+            var eligible = AppointmentCalendarHelper.GetEligibleDentists(_dentists, SelectedTreatmentFilter?.Id);
+            var fallback = SelectedDentistFilter?.Id is Guid did
+                ? eligible.FirstOrDefault(d => d.Id == did) ?? _dentists.FirstOrDefault(d => d.Id == did)
+                : eligible.FirstOrDefault() ?? _dentists.FirstOrDefault();
+            dentistId = fallback?.Id;
+            doctorName = fallback?.FullName;
+            defaultRoom = fallback?.DefaultRoom;
+        }
+
+        QuickBookRequested?.Invoke(this, new QuickBookSlotArgs(
+            date,
+            startTime,
+            dentistId,
+            doctorName,
+            defaultRoom,
+            SelectedTreatmentFilter?.Id));
+    }
+
+    public bool CanDropAppointmentOnDentist(
+        AppointmentQueueItemDto appointment,
+        Guid? targetDentistId,
+        string? targetDentistName) =>
+        AppointmentCalendarHelper.IsSameDentist(appointment, targetDentistId, targetDentistName);
+
+    public void RequestReschedule(
+        AppointmentQueueItemDto appointment,
+        DateOnly targetDate,
+        TimeOnly targetStartTime)
+    {
+        var local = appointment.ScheduledAt.ToOffset(DateTimeOffset.Now.Offset);
+        var currentDate = DateOnly.FromDateTime(local.DateTime);
+        var currentTime = TimeOnly.FromDateTime(local.DateTime);
+
+        if (currentDate == targetDate && currentTime == targetStartTime)
+        {
+            return;
+        }
+
+        AppointmentRescheduleRequested?.Invoke(
+            this,
+            new AppointmentRescheduleArgs(appointment, targetDate, targetStartTime));
+    }
+
+    public int ComputeAppointmentRowSpan(AppointmentQueueItemDto appointment)
+    {
+        int duration = Math.Max(TimelineSlotMinutes, appointment.DurationMinutes);
+        return Math.Max(1, (int)Math.Ceiling(duration / (double)TimelineSlotMinutes));
+    }
+
+    public TimeOnly SnapRowToTime(int rowIndex)
+    {
+        var window = AppointmentCalendarHelper.GetTimelineWindow(DaySession, TimelineSlotMinutes);
+        return AppointmentCalendarHelper.SnapRowToStartTime(window, rowIndex);
     }
 
     partial void OnDisplayModeChanged(AppointmentDisplayMode value) => RebuildViews();
     partial void OnCalendarViewModeChanged(AppointmentCalendarViewMode value) => RebuildViews();
     partial void OnShowAllDatesInTableChanged(bool value) => RebuildViews();
-    partial void OnDaySessionChanged(DaySlotSession value) => RebuildDayView();
+    partial void OnDaySessionChanged(DaySlotSession value) => RebuildViews();
     partial void OnAnchorDateChanged(DateOnly value) => RebuildViews();
 
     partial void OnSelectedDentistFilterChanged(FilterOptionVm? value)
@@ -492,20 +715,20 @@ public partial class AppointmentsViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void ShowSlotOverflowInTable(DaySlotCellVm? cell)
+    private void ShowDentistDayOverflowInTable(DayDentistTimelineColumnVm? column)
     {
-        if (cell == null)
+        if (column == null)
         {
             return;
         }
 
         _suppressFilterRebuild = true;
-        AnchorDate = cell.Date;
+        AnchorDate = column.Date;
         CalendarViewMode = AppointmentCalendarViewMode.Day;
         ShowAllDatesInTable = false;
-        if (cell.DentistId.HasValue)
+        if (column.DentistId.HasValue)
         {
-            var match = DentistFilterOptions.FirstOrDefault(o => o.Id == cell.DentistId);
+            var match = DentistFilterOptions.FirstOrDefault(o => o.Id == column.DentistId);
             if (match != null)
             {
                 SelectedDentistFilter = match;
@@ -529,23 +752,6 @@ public partial class AppointmentsViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void QuickBookFromDayCell(DaySlotCellVm? cell)
-    {
-        if (cell == null)
-        {
-            return;
-        }
-
-        QuickBookRequested?.Invoke(this, new QuickBookSlotArgs(
-            cell.Date,
-            cell.StartTime,
-            cell.DentistId,
-            cell.DentistName,
-            cell.DefaultRoom,
-            SelectedTreatmentFilter?.Id));
-    }
-
-    [RelayCommand]
     private void QuickBookFromDate(DateOnly date)
     {
         var eligible = AppointmentCalendarHelper.GetEligibleDentists(_dentists, SelectedTreatmentFilter?.Id);
@@ -555,7 +761,7 @@ public partial class AppointmentsViewModel : ObservableObject
 
         QuickBookRequested?.Invoke(this, new QuickBookSlotArgs(
             date,
-            new TimeOnly(9, 0),
+            TimelineWindowStart,
             dentist?.Id,
             dentist?.FullName,
             dentist?.DefaultRoom,
@@ -663,9 +869,56 @@ public partial class AppointmentsViewModel : ObservableObject
         }
     }
 
+    private void RebuildTimelineHeaderMarks(TimelineWindow window)
+    {
+        TimelineTotalRows = window.TotalRows;
+        TimelineWindowStart = window.Start;
+        TimelineHourMarks.Clear();
+
+        int rowsPerHour = 60 / window.SlotMinutes;
+        int row = 0;
+        while (row < window.TotalRows)
+        {
+            var time = window.Start.AddMinutes(row * window.SlotMinutes);
+            bool isFullHour = time.Minute == 0;
+            int nextBoundary = isFullHour
+                ? Math.Min(window.TotalRows, row + rowsPerHour)
+                : Math.Min(window.TotalRows, row + ((60 - time.Minute) / window.SlotMinutes));
+            int span = Math.Max(1, nextBoundary - row);
+
+            TimelineHourMarks.Add(new TimelineHourMarkVm(
+                time.ToString("HH:mm", CultureInfo.InvariantCulture),
+                row,
+                span,
+                isFullHour));
+
+            row = nextBoundary;
+        }
+    }
+
     private void RebuildDayView()
     {
-        var localOffset = DateTimeOffset.Now.Offset;
+        var localNow = DateTimeOffset.Now;
+        var localOffset = localNow.Offset;
+        var localToday = DateOnly.FromDateTime(localNow.DateTime);
+        var window = AppointmentCalendarHelper.GetTimelineWindow(DaySession, TimelineSlotMinutes);
+        RebuildTimelineHeaderMarks(window);
+
+        var weekDates = AppointmentCalendarHelper.GetWeekDates(AnchorDate);
+        var weekItems = FilterWithActiveCriteria(weekDates[0], weekDates[^1], localOffset);
+        DayQuickDates.Clear();
+        foreach (var d in weekDates)
+        {
+            int count = weekItems.Count(a => DateOnly.FromDateTime(a.ScheduledAt.ToOffset(localOffset).DateTime) == d);
+            DayQuickDates.Add(new DayQuickDatePillVm(
+                d,
+                d.ToString("ddd", CultureInfo.InvariantCulture),
+                d.ToString("dd MMM", CultureInfo.InvariantCulture),
+                d == AnchorDate,
+                d == localToday,
+                count));
+        }
+
         var dayItems = FilterWithActiveCriteria(AnchorDate, AnchorDate, localOffset);
 
         var columnsSource = new List<(Guid? Id, string Name, string Specialty, string Room)>();
@@ -702,84 +955,88 @@ public partial class AppointmentsViewModel : ObservableObject
             }
         }
 
-        DayDentistHeaders.Clear();
+        int hourOffsetRows = window.Start.Minute == 0 ? 0 : (60 - window.Start.Minute) / window.SlotMinutes;
+        var (showNow, nowFraction) = ComputeCurrentTimeIndicator(AnchorDate, window, localNow);
+
+        DayDentistColumns.Clear();
         foreach (var col in columnsSource)
         {
-            int count = dayItems.Count(a => BelongsToDentistColumn(a, col.Id, col.Name));
-            DayDentistHeaders.Add(new DayDentistHeaderVm(col.Id, col.Name, col.Specialty, col.Room, count));
-        }
+            var colMatches = dayItems
+                .Where(a => BelongsToDentistColumn(a, col.Id, col.Name))
+                .ToList();
 
-        var slots = AppointmentCalendarHelper.GetDayTimeSlots(DaySession);
-        DayTimeRows.Clear();
+            var layout = AppointmentCalendarHelper.ComputeTimelineLayout(
+                colMatches,
+                DaySession,
+                localOffset,
+                slotMinutes: TimelineSlotMinutes,
+                maxVisibleLanes: 4);
 
-        foreach (var slot in slots)
-        {
-            var cells = new List<DaySlotCellVm>(columnsSource.Count);
-            foreach (var col in columnsSource)
-            {
-                var matches = dayItems
-                    .Where(a => BelongsToDentistColumn(a, col.Id, col.Name)
-                        && AppointmentCalendarHelper.DoesAppointmentMatchSlot(a.ScheduledAt, localOffset, slot, DaySession))
-                    .ToList();
+            var blocks = layout.VisibleBlocks
+                .Select(b => BuildTimelineBlock(b, localOffset, isWeekView: false))
+                .ToList();
 
-                List<CalendarAppointmentCardVm> visible;
-                int overflow = 0;
-
-                if (matches.Count <= 2)
-                {
-                    bool compact = matches.Count == 2;
-                    visible = matches.Select(m => BuildDayCard(m, localOffset, compact)).ToList();
-                }
-                else
-                {
-                    visible = new List<CalendarAppointmentCardVm>
-                    {
-                        BuildDayCard(matches[0], localOffset, compact: true)
-                    };
-                    overflow = matches.Count - 1;
-                }
-
-                cells.Add(new DaySlotCellVm(
-                    AnchorDate,
-                    slot.Start,
-                    col.Id,
-                    col.Name,
-                    col.Room,
-                    visible,
-                    overflow));
-            }
-
-            DayTimeRows.Add(new DaySlotRowVm(slot.Label, slot.Start, cells));
+            var palette = DentistPalettes[GetDentistPaletteIndex(col.Id, col.Name)];
+            DayDentistColumns.Add(new DayDentistTimelineColumnVm(
+                AnchorDate,
+                col.Id,
+                col.Name,
+                col.Specialty,
+                col.Room,
+                colMatches.Count,
+                palette.Accent,
+                window.TotalRows,
+                hourOffsetRows,
+                showNow,
+                nowFraction,
+                blocks,
+                layout.OverflowAppointments.Count));
         }
     }
 
     private void RebuildWeekView()
     {
-        var localOffset = DateTimeOffset.Now.Offset;
-        var localToday = DateOnly.FromDateTime(DateTime.Now);
+        var localNow = DateTimeOffset.Now;
+        var localOffset = localNow.Offset;
+        var localToday = DateOnly.FromDateTime(localNow.DateTime);
+        var window = AppointmentCalendarHelper.GetTimelineWindow(DaySession, TimelineSlotMinutes);
+        RebuildTimelineHeaderMarks(window);
+
+        int hourOffsetRows = window.Start.Minute == 0 ? 0 : (60 - window.Start.Minute) / window.SlotMinutes;
         var weekDates = AppointmentCalendarHelper.GetWeekDates(AnchorDate);
         var weekItems = FilterWithActiveCriteria(weekDates[0], weekDates[^1], localOffset);
 
-        WeekDayColumns.Clear();
+        WeekTimelineColumns.Clear();
         foreach (var date in weekDates)
         {
             var dayMatches = weekItems
                 .Where(a => DateOnly.FromDateTime(a.ScheduledAt.ToOffset(localOffset).DateTime) == date)
                 .ToList();
 
-            var visible = dayMatches
-                .Take(_maxWeekCardsPerDay)
-                .Select(a => BuildWeekCard(a, localOffset))
-                .ToList();
-            int overflow = Math.Max(0, dayMatches.Count - _maxWeekCardsPerDay);
+            var layout = AppointmentCalendarHelper.ComputeTimelineLayout(
+                dayMatches,
+                DaySession,
+                localOffset,
+                slotMinutes: TimelineSlotMinutes,
+                maxVisibleLanes: 3);
 
-            WeekDayColumns.Add(new WeekDayColumnVm(
+            var blocks = layout.VisibleBlocks
+                .Select(b => BuildTimelineBlock(b, localOffset, isWeekView: true))
+                .ToList();
+
+            var (showNow, nowFraction) = ComputeCurrentTimeIndicator(date, window, localNow);
+
+            WeekTimelineColumns.Add(new WeekTimelineColumnVm(
                 date,
                 date == localToday,
                 date.DayOfWeek == DayOfWeek.Sunday,
                 dayMatches.Count,
-                visible,
-                overflow));
+                window.TotalRows,
+                hourOffsetRows,
+                showNow,
+                nowFraction,
+                blocks,
+                layout.OverflowAppointments.Count));
         }
     }
 
@@ -853,51 +1110,217 @@ public partial class AppointmentsViewModel : ObservableObject
         return string.Equals(appt.DoctorName.Trim(), dentistName.Trim(), StringComparison.OrdinalIgnoreCase);
     }
 
-    private static CalendarAppointmentCardVm BuildDayCard(
-        AppointmentQueueItemDto appt,
+    private TimelineAppointmentBlockVm BuildTimelineBlock(
+        TimelineBlockLayout layout,
         TimeSpan localOffset,
-        bool compact)
+        bool isWeekView)
     {
-        var local = appt.ScheduledAt.ToOffset(localOffset);
-        var timeLabel = local.ToString("HH:mm", CultureInfo.InvariantCulture);
-        var patient = AppointmentCalendarHelper.FormatCompactPatientName(appt.PatientName, shortForm: false);
-        var alertPrefix = appt.HasCriticalMedicalAlert ? "[!] " : string.Empty;
+        var appt = layout.Appointment;
+        var localStart = appt.ScheduledAt.ToOffset(localOffset);
+        var duration = Math.Max(15, appt.DurationMinutes);
+        var localEnd = localStart.AddMinutes(duration);
 
-        if (compact)
+        var startStr = localStart.ToString("HH:mm", CultureInfo.InvariantCulture);
+        var endStr = localEnd.ToString("HH:mm", CultureInfo.InvariantCulture);
+        var durLabel = duration >= 60 && duration % 60 == 0
+            ? $"{duration / 60}h"
+            : $"{duration}m";
+
+        var shortName = AppointmentCalendarHelper.FormatCompactPatientName(appt.PatientName, shortForm: true);
+        var fullCompactName = AppointmentCalendarHelper.FormatCompactPatientName(appt.PatientName, shortForm: false);
+        var alertPrefix = appt.HasCriticalMedicalAlert ? "[!] " : string.Empty;
+        var statusLabel = AppointmentCalendarHelper.FormatStatusLabel(appt.Status);
+
+        var palette = ResolvePalette(appt);
+        bool isNarrowSplit = layout.LaneCount >= 3 || (isWeekView && layout.LaneCount >= 2);
+
+        string timeRangeLabel;
+        string patientDisplay;
+        string secondaryDisplay;
+        string tertiaryDisplay;
+        bool showHeaderRow;
+        bool showSecondaryLine;
+        bool showTertiaryLine;
+        bool showStatusBadge;
+
+        if (layout.RowSpan <= 1)
         {
-            var proc = AppointmentCalendarHelper.FormatCompactTreatment(appt.ProcedureSummary, 16);
-            return new CalendarAppointmentCardVm(
-                appt,
-                timeLabel,
-                $"{timeLabel} · {alertPrefix}{patient} · {proc}",
-                string.Empty,
-                BuildTooltip(appt, local));
+            timeRangeLabel = string.Empty;
+            patientDisplay = isNarrowSplit
+                ? $"{startStr} {shortName}"
+                : $"{startStr} · {alertPrefix}{shortName}";
+            secondaryDisplay = string.Empty;
+            tertiaryDisplay = string.Empty;
+            showHeaderRow = false;
+            showSecondaryLine = false;
+            showTertiaryLine = false;
+            showStatusBadge = false;
+        }
+        else if (isNarrowSplit)
+        {
+            timeRangeLabel = $"{startStr}–{endStr}";
+            patientDisplay = $"{alertPrefix}{shortName}";
+            showHeaderRow = layout.RowSpan >= 3;
+            secondaryDisplay = layout.RowSpan == 2
+                ? $"{startStr}–{endStr}"
+                : AppointmentCalendarHelper.FormatCompactTreatment(appt.ProcedureSummary, 16);
+            tertiaryDisplay = layout.RowSpan >= 5
+                ? (isWeekView
+                    ? AppointmentCalendarHelper.FormatCompactDentistName(appt.DoctorName)
+                    : appt.RoomName)
+                : string.Empty;
+            showSecondaryLine = !string.IsNullOrEmpty(secondaryDisplay);
+            showTertiaryLine = !string.IsNullOrEmpty(tertiaryDisplay);
+            showStatusBadge = false;
+        }
+        else
+        {
+            var displayName = layout.LaneCount >= 2 ? shortName : fullCompactName;
+
+            if (layout.RowSpan == 2)
+            {
+                showHeaderRow = false;
+                timeRangeLabel = $"{startStr}–{endStr}";
+                patientDisplay = $"{alertPrefix}{displayName}";
+                secondaryDisplay = isWeekView && layout.LaneCount == 1
+                    ? $"{startStr}–{endStr} · {AppointmentCalendarHelper.FormatCompactDentistName(appt.DoctorName)}"
+                    : $"{startStr}–{endStr} · {AppointmentCalendarHelper.FormatCompactTreatment(appt.ProcedureSummary, 18)}";
+                tertiaryDisplay = string.Empty;
+                showSecondaryLine = true;
+                showTertiaryLine = false;
+                showStatusBadge = false;
+            }
+            else if (layout.RowSpan == 3)
+            {
+                showHeaderRow = true;
+                timeRangeLabel = $"{startStr} – {endStr}";
+                patientDisplay = $"{alertPrefix}{displayName}";
+                secondaryDisplay = isWeekView
+                    ? $"{AppointmentCalendarHelper.FormatCompactDentistName(appt.DoctorName)} · {AppointmentCalendarHelper.FormatCompactTreatment(appt.ProcedureSummary, 16)}"
+                    : AppointmentCalendarHelper.FormatCompactTreatment(appt.ProcedureSummary, 22);
+                tertiaryDisplay = string.Empty;
+                showSecondaryLine = true;
+                showTertiaryLine = false;
+                showStatusBadge = layout.LaneCount == 1
+                    && (appt.Status == QueueStatus.InChair
+                        || appt.Status == QueueStatus.AiBookedPending
+                        || appt.Status == QueueStatus.Cancelled);
+            }
+            else
+            {
+                showHeaderRow = true;
+                timeRangeLabel = $"{startStr} – {endStr} · {durLabel}";
+                patientDisplay = $"{alertPrefix}{displayName}";
+                secondaryDisplay = AppointmentCalendarHelper.FormatCompactTreatment(
+                    appt.ProcedureSummary,
+                    layout.LaneCount >= 2 ? 20 : 28);
+
+                var dentistShort = AppointmentCalendarHelper.FormatCompactDentistName(appt.DoctorName);
+                var roomPart = string.IsNullOrWhiteSpace(appt.RoomName) ? string.Empty : $" · {appt.RoomName}";
+                var baseMeta = isWeekView
+                    ? $"{dentistShort}{roomPart}"
+                    : (string.IsNullOrWhiteSpace(appt.RoomName)
+                        ? $"{dentistShort} · {statusLabel}"
+                        : $"{appt.RoomName} · {statusLabel}");
+
+                if (layout.RowSpan >= 6 && !string.IsNullOrWhiteSpace(appt.Notes))
+                {
+                    baseMeta = $"{baseMeta} · {AppointmentCalendarHelper.FormatCompactTreatment(appt.Notes, 24)}";
+                }
+
+                tertiaryDisplay = baseMeta;
+                showSecondaryLine = true;
+                showTertiaryLine = true;
+                showStatusBadge = layout.LaneCount == 1;
+            }
         }
 
-        var treatment = AppointmentCalendarHelper.FormatCompactTreatment(appt.ProcedureSummary, 22);
-        var status = AppointmentCalendarHelper.FormatStatusLabel(appt.Status);
-        return new CalendarAppointmentCardVm(
+        return new TimelineAppointmentBlockVm(
             appt,
-            timeLabel,
-            $"{timeLabel} ({appt.DurationMinutes}m) · {alertPrefix}{patient}",
-            $"{treatment} · {status}",
-            BuildTooltip(appt, local));
+            layout.StartRow,
+            layout.RowSpan,
+            layout.LaneIndex,
+            layout.LaneSpan,
+            layout.LaneCount,
+            timeRangeLabel,
+            patientDisplay,
+            secondaryDisplay,
+            tertiaryDisplay,
+            statusLabel,
+            BuildTooltip(appt, localStart),
+            showHeaderRow,
+            showSecondaryLine,
+            showTertiaryLine,
+            showStatusBadge,
+            palette.Background,
+            palette.Border,
+            palette.Accent,
+            palette.PrimaryText,
+            palette.SecondaryText,
+            palette.BadgeBg,
+            palette.BadgeFg);
     }
 
-    private static CalendarAppointmentCardVm BuildWeekCard(AppointmentQueueItemDto appt, TimeSpan localOffset)
+    private CardPalette ResolvePalette(AppointmentQueueItemDto appt)
     {
-        var local = appt.ScheduledAt.ToOffset(localOffset);
-        var timeLabel = local.ToString("HH:mm", CultureInfo.InvariantCulture);
-        var dentist = AppointmentCalendarHelper.FormatCompactDentistName(appt.DoctorName);
-        var patient = AppointmentCalendarHelper.FormatCompactPatientName(appt.PatientName, shortForm: false);
-        var alertPrefix = appt.HasCriticalMedicalAlert ? "[!] " : string.Empty;
+        if (appt.Status == QueueStatus.Cancelled)
+        {
+            return CancelledPalette;
+        }
 
-        return new CalendarAppointmentCardVm(
-            appt,
-            timeLabel,
-            $"{timeLabel} · {dentist}",
-            $"{alertPrefix}{patient} ({appt.DurationMinutes}m)",
-            BuildTooltip(appt, local));
+        if (appt.Status == QueueStatus.AiBookedPending)
+        {
+            return AiPendingPalette;
+        }
+
+        return DentistPalettes[GetDentistPaletteIndex(appt.DentistId, appt.DoctorName)];
+    }
+
+    private int GetDentistPaletteIndex(Guid? dentistId, string? doctorName)
+    {
+        if (dentistId.HasValue)
+        {
+            int idx = _dentists.FindIndex(d => d.Id == dentistId.Value);
+            if (idx >= 0)
+            {
+                return idx % DentistPalettes.Length;
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(doctorName))
+        {
+            var trimmed = doctorName.Trim();
+            int idx = _dentists.FindIndex(d =>
+                string.Equals(d.FullName.Trim(), trimmed, StringComparison.OrdinalIgnoreCase));
+            if (idx >= 0)
+            {
+                return idx % DentistPalettes.Length;
+            }
+
+            return Math.Abs(StringComparer.OrdinalIgnoreCase.GetHashCode(trimmed)) % DentistPalettes.Length;
+        }
+
+        return 0;
+    }
+
+    private static (bool Show, double RowFraction) ComputeCurrentTimeIndicator(
+        DateOnly columnDate,
+        TimelineWindow window,
+        DateTimeOffset localNow)
+    {
+        if (columnDate != DateOnly.FromDateTime(localNow.DateTime))
+        {
+            return (false, -1.0);
+        }
+
+        double nowMinFromStart = (localNow.Hour * 60.0 + localNow.Minute) - (window.Start.Hour * 60.0 + window.Start.Minute);
+        double fraction = nowMinFromStart / window.SlotMinutes;
+        if (fraction < 0 || fraction > window.TotalRows)
+        {
+            return (false, -1.0);
+        }
+
+        return (true, fraction);
     }
 
     private static CalendarAppointmentCardVm BuildMonthCard(AppointmentQueueItemDto appt, TimeSpan localOffset)
@@ -937,7 +1360,7 @@ public partial class AppointmentsViewModel : ObservableObject
             lines.Add($"Notes: {appt.Notes}");
         }
 
-        lines.Add("Click to view or edit appointment");
+        lines.Add("Click to edit · Drag to another date to reschedule (same dentist)");
         return string.Join(Environment.NewLine, lines);
     }
 
@@ -951,4 +1374,37 @@ public partial class AppointmentsViewModel : ObservableObject
 
     private static string FormatCountLabel(int count) =>
         count == 1 ? "1 appointment" : $"{count} appointments";
+
+    private static Brush FreezeBrush(string hex)
+    {
+        var brush = (SolidColorBrush)new BrushConverter().ConvertFromString(hex)!;
+        brush.Freeze();
+        return brush;
+    }
+
+    private static CardPalette CreatePalette(
+        string backgroundHex,
+        string borderHex,
+        string accentHex,
+        string primaryTextHex,
+        string secondaryTextHex,
+        string badgeBgHex,
+        string badgeFgHex) =>
+        new(
+            FreezeBrush(backgroundHex),
+            FreezeBrush(borderHex),
+            FreezeBrush(accentHex),
+            FreezeBrush(primaryTextHex),
+            FreezeBrush(secondaryTextHex),
+            FreezeBrush(badgeBgHex),
+            FreezeBrush(badgeFgHex));
+
+    private sealed record CardPalette(
+        Brush Background,
+        Brush Border,
+        Brush Accent,
+        Brush PrimaryText,
+        Brush SecondaryText,
+        Brush BadgeBg,
+        Brush BadgeFg);
 }

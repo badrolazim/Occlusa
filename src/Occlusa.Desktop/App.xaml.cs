@@ -23,9 +23,24 @@ public partial class App : Application
             ?? "http://localhost:5188";
 
         _localApiHost = new LocalApiHostService(baseUrl);
-        _apiClient = new OcclusaApiClient(baseUrl);
+        _apiClient = new OcclusaApiClient(baseUrl, async ct =>
+        {
+            if (_localApiHost is null)
+            {
+                return null;
+            }
+
+            return await _localApiHost.EnsureRunningAsync(ct)
+                ? _localApiHost.ActiveBaseUrl
+                : null;
+        });
         _myKadService = new MyKadPcscReaderService();
-        _mainViewModel = new MainViewModel(_apiClient, _myKadService, () => _localApiHost.EnsureRunningAsync());
+        _mainViewModel = new MainViewModel(
+            _apiClient,
+            _myKadService,
+            () => _localApiHost.EnsureRunningAsync(),
+            () => _localApiHost.ActiveBaseUrl,
+            () => _localApiHost.LastStatusMessage);
 
         var mainWindow = new MainWindow(_mainViewModel, _apiClient, _myKadService);
         MainWindow = mainWindow;

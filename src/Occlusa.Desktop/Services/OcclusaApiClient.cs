@@ -9,17 +9,21 @@ using Occlusa.Shared.Models;
 namespace Occlusa.Desktop.Services;
 
 /// <summary>
-/// Typed HTTP + SignalR client for Occlusa.Api with mandatory 5-second DispatcherTimer
-/// polling fallback whenever the SignalR hub connection is disconnected or reconnecting.
+/// Typed HTTP + SignalR client for Occlusa.Api with transparent local host recovery
+/// and 5-second DispatcherTimer polling fallback whenever SignalR is disconnected.
 /// </summary>
 public sealed class OcclusaApiClient : IAsyncDisposable
 {
     private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
 
-    private readonly HttpClient _http;
-    private readonly string _baseUrl;
+    private readonly Func<CancellationToken, Task<string?>>? _ensureApiAvailableAsync;
+    private readonly object _httpSync = new();
+    private readonly List<HttpClient> _retiredClients = new();
     private readonly DispatcherTimer _fallbackPollTimer;
+    private HttpClient _http;
+    private string _baseUrl;
     private HubConnection? _hubConnection;
+    private string _hubBaseUrl = string.Empty;
     private string _activeBranchId = "HQ-KL";
     private bool _isPollInFlight;
     private bool _disposed;
@@ -31,26 +35,31 @@ public sealed class OcclusaApiClient : IAsyncDisposable
     public event EventHandler<ClinicDashboardSnapshotDto>? FallbackSnapshotPolled;
     public event EventHandler<bool>? ConnectionModeChanged;
 
-    public OcclusaApiClient(string baseUrl = "http://localhost:5188")
+    public OcclusaApiClient(
+        string baseUrl = "http://localhost:5188",
+        Func<CancellationToken, Task<string?>>? ensureApiAvailableAsync = null)
     {
         _baseUrl = baseUrl.TrimEnd('/');
+        _ensureApiAvailableAsync = ensureApiAvailableAsync;
         var baseUri = new Uri(_baseUrl);
-        _http = new HttpClient(new SocketsHttpHandler
-        {
-            UseProxy = !baseUri.IsLoopback
-        })
-        {
-            BaseAddress = baseUri,
-            Timeout = TimeSpan.FromSeconds(15)
-        };
-        _http.DefaultRequestHeaders.TryAddWithoutValidation("X-Occlusa-User", "desktop-clinician");
-        _http.DefaultRequestHeaders.TryAddWithoutValidation("X-Occlusa-Allowed-Branches", "HQ-KL,PJ-SS2");
+        _http = CreateHttpClient(baseUri);
 
         _fallbackPollTimer = new DispatcherTimer
         {
             Interval = TimeSpan.FromSeconds(5)
         };
         _fallbackPollTimer.Tick += FallbackPollTimer_Tick;
+    }
+
+    public string BaseUrl
+    {
+        get
+        {
+            lock (_httpSync)
+            {
+                return _baseUrl;
+            }
+        }
     }
 
     public bool IsSignalRConnected => _hubConnection?.State == HubConnectionState.Connected;
@@ -63,6 +72,32 @@ public sealed class OcclusaApiClient : IAsyncDisposable
         private set => _activeBranchId = value;
     }
 
+    public void UpdateBaseUrl(string newBaseUrl)
+    {
+        if (string.IsNullOrWhiteSpace(newBaseUrl))
+        {
+            return;
+        }
+
+        var normalized = newBaseUrl.TrimEnd('/');
+        if (!Uri.TryCreate(normalized, UriKind.Absolute, out var newUri))
+        {
+            return;
+        }
+
+        lock (_httpSync)
+        {
+            if (_disposed || string.Equals(_baseUrl, normalized, StringComparison.OrdinalIgnoreCase))
+            {
+                return;
+            }
+
+            _retiredClients.Add(_http);
+            _http = CreateHttpClient(newUri);
+            _baseUrl = normalized;
+        }
+    }
+
     /// <summary>
     /// Starts SignalR hub connection and enables 5-second fallback polling until connected.
     /// </summary>
@@ -70,10 +105,45 @@ public sealed class OcclusaApiClient : IAsyncDisposable
     {
         _activeBranchId = branchId;
 
+        var currentBaseUrl = BaseUrl;
+        if (_hubConnection != null
+            && !string.Equals(_hubBaseUrl, currentBaseUrl, StringComparison.OrdinalIgnoreCase))
+        {
+            try
+            {
+                await _hubConnection.DisposeAsync();
+            }
+            catch
+            {
+                // Ignore disposal errors when rebinding to a recovered base URL.
+            }
+
+            _hubConnection = null;
+        }
+
         if (_hubConnection == null)
         {
+            _hubBaseUrl = currentBaseUrl;
             _hubConnection = new HubConnectionBuilder()
-                .WithUrl($"{_baseUrl}/hubs/queue")
+                .WithUrl($"{currentBaseUrl}/hubs/queue", options =>
+                {
+                    if (Uri.TryCreate(currentBaseUrl, UriKind.Absolute, out var hubUri) && hubUri.IsLoopback)
+                    {
+                        options.HttpMessageHandlerFactory = handler =>
+                        {
+                            if (handler is HttpClientHandler clientHandler)
+                            {
+                                clientHandler.UseProxy = false;
+                            }
+                            else if (handler is SocketsHttpHandler socketsHandler)
+                            {
+                                socketsHandler.UseProxy = false;
+                            }
+
+                            return handler;
+                        };
+                    }
+                })
                 .WithAutomaticReconnect()
                 .Build();
 
@@ -189,7 +259,8 @@ public sealed class OcclusaApiClient : IAsyncDisposable
             return;
         }
 
-        if (_hubConnection?.State == HubConnectionState.Connected)
+        if (_hubConnection?.State == HubConnectionState.Connected
+            && string.Equals(_hubBaseUrl, BaseUrl, StringComparison.OrdinalIgnoreCase))
         {
             OnConnectionStateChanged(true);
             return;
@@ -198,25 +269,17 @@ public sealed class OcclusaApiClient : IAsyncDisposable
         _isPollInFlight = true;
         try
         {
-            // Periodically attempt to re-establish SignalR if it closed completely.
-            if (_hubConnection is { State: HubConnectionState.Disconnected })
-            {
-                try
-                {
-                    await _hubConnection.StartAsync();
-                    await SafeJoinBranchAsync(_activeBranchId);
-                    OnConnectionStateChanged(true);
-                }
-                catch
-                {
-                    // Remain in 5s fallback polling mode until API/Hub is reachable.
-                }
-            }
-
             var snapshot = await GetDashboardSnapshotAsync(_activeBranchId);
             if (snapshot != null)
             {
                 FallbackSnapshotPolled?.Invoke(this, snapshot);
+            }
+
+            if (_hubConnection == null
+                || !string.Equals(_hubBaseUrl, BaseUrl, StringComparison.OrdinalIgnoreCase)
+                || _hubConnection.State == HubConnectionState.Disconnected)
+            {
+                await StartRealtimeAsync(_activeBranchId);
             }
         }
         catch
@@ -229,225 +292,318 @@ public sealed class OcclusaApiClient : IAsyncDisposable
         }
     }
 
-    public async Task<HealthStatusDto?> GetHealthAsync(CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<HealthStatusDto>("/api/health", JsonOptions, ct);
-
-    public async Task<ClinicDashboardSnapshotDto?> GetDashboardSnapshotAsync(string branchId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<ClinicDashboardSnapshotDto>(
-            $"/api/dashboard/snapshot?branchId={Uri.EscapeDataString(branchId)}",
-            JsonOptions,
+    public Task<HealthStatusDto?> GetHealthAsync(CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(
+            (http, token) => http.GetFromJsonAsync<HealthStatusDto>("/api/health", JsonOptions, token),
             ct);
 
-    public async Task<List<PatientDto>> GetPatientsAsync(CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<List<PatientDto>>("/api/patients", JsonOptions, ct) ?? new();
+    public Task<ClinicDashboardSnapshotDto?> GetDashboardSnapshotAsync(string branchId, CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(
+            (http, token) => http.GetFromJsonAsync<ClinicDashboardSnapshotDto>(
+                $"/api/dashboard/snapshot?branchId={Uri.EscapeDataString(branchId)}",
+                JsonOptions,
+                token),
+            ct);
 
-    public async Task<PatientDto> UpsertPatientAsync(UpsertPatientRequest request, CancellationToken ct = default)
-    {
-        var resp = await _http.PostAsJsonAsync("/api/patients", request, JsonOptions, ct);
-        return await ReadRequiredAsync<PatientDto>(resp, ct);
-    }
+    public Task<List<PatientDto>> GetPatientsAsync(CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(
+            async (http, token) => await http.GetFromJsonAsync<List<PatientDto>>("/api/patients", JsonOptions, token) ?? new(),
+            ct);
 
-    public async Task<PatientDto> UpsertPatientFromMyKadAsync(UpsertPatientRequest request, CancellationToken ct = default)
-    {
-        var resp = await _http.PostAsJsonAsync("/api/patients/mykad-upsert", request, JsonOptions, ct);
-        return await ReadRequiredAsync<PatientDto>(resp, ct);
-    }
+    public Task<PatientDto> UpsertPatientAsync(UpsertPatientRequest request, CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(async (http, token) =>
+        {
+            var resp = await http.PostAsJsonAsync("/api/patients", request, JsonOptions, token);
+            return await ReadRequiredAsync<PatientDto>(resp, token);
+        }, ct);
 
-    public async Task<PatientDto> UpdateMedicalAlertsAsync(
+    public Task<PatientDto> UpsertPatientFromMyKadAsync(UpsertPatientRequest request, CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(async (http, token) =>
+        {
+            var resp = await http.PostAsJsonAsync("/api/patients/mykad-upsert", request, JsonOptions, token);
+            return await ReadRequiredAsync<PatientDto>(resp, token);
+        }, ct);
+
+    public Task<PatientDto> UpdateMedicalAlertsAsync(
         Guid patientId,
         MedicalAlertDto alerts,
         string branchId = "HQ-KL",
-        CancellationToken ct = default)
-    {
-        var resp = await _http.PutAsJsonAsync(
-            $"/api/patients/{patientId}/medical-alerts?branchId={Uri.EscapeDataString(branchId)}",
-            alerts,
-            JsonOptions,
-            ct);
-        return await ReadRequiredAsync<PatientDto>(resp, ct);
-    }
+        CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(async (http, token) =>
+        {
+            var resp = await http.PutAsJsonAsync(
+                $"/api/patients/{patientId}/medical-alerts?branchId={Uri.EscapeDataString(branchId)}",
+                alerts,
+                JsonOptions,
+                token);
+            return await ReadRequiredAsync<PatientDto>(resp, token);
+        }, ct);
 
-    public async Task<PatientDto> SignConsentAsync(
+    public Task<PatientDto> SignConsentAsync(
         Guid patientId,
         SignConsentRequest request,
         string branchId = "HQ-KL",
-        CancellationToken ct = default)
-    {
-        var resp = await _http.PostAsJsonAsync(
-            $"/api/patients/{patientId}/consent?branchId={Uri.EscapeDataString(branchId)}",
-            request,
-            JsonOptions,
-            ct);
-        return await ReadRequiredAsync<PatientDto>(resp, ct);
-    }
+        CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(async (http, token) =>
+        {
+            var resp = await http.PostAsJsonAsync(
+                $"/api/patients/{patientId}/consent?branchId={Uri.EscapeDataString(branchId)}",
+                request,
+                JsonOptions,
+                token);
+            return await ReadRequiredAsync<PatientDto>(resp, token);
+        }, ct);
 
-    public async Task<List<DentistDto>> GetDentistsAsync(string? branchId = null, CancellationToken ct = default)
+    public Task<List<DentistDto>> GetDentistsAsync(string? branchId = null, CancellationToken ct = default)
     {
         var url = string.IsNullOrWhiteSpace(branchId)
             ? "/api/dentists"
             : $"/api/dentists?branchId={Uri.EscapeDataString(branchId)}";
-        return await _http.GetFromJsonAsync<List<DentistDto>>(url, JsonOptions, ct) ?? new();
+        return ExecuteWithRecoveryAsync(
+            async (http, token) => await http.GetFromJsonAsync<List<DentistDto>>(url, JsonOptions, token) ?? new(),
+            ct);
     }
 
-    public async Task<List<TreatmentDto>> GetTreatmentsAsync(CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<List<TreatmentDto>>("/api/treatments", JsonOptions, ct) ?? new();
+    public Task<List<TreatmentDto>> GetTreatmentsAsync(CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(
+            async (http, token) => await http.GetFromJsonAsync<List<TreatmentDto>>("/api/treatments", JsonOptions, token) ?? new(),
+            ct);
 
-    public async Task<List<AppointmentQueueItemDto>> GetAppointmentsAsync(string branchId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<List<AppointmentQueueItemDto>>(
-            $"/api/appointments?branchId={Uri.EscapeDataString(branchId)}",
-            JsonOptions,
-            ct) ?? new();
+    public Task<List<AppointmentQueueItemDto>> GetAppointmentsAsync(string branchId, CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(
+            async (http, token) => await http.GetFromJsonAsync<List<AppointmentQueueItemDto>>(
+                $"/api/appointments?branchId={Uri.EscapeDataString(branchId)}",
+                JsonOptions,
+                token) ?? new(),
+            ct);
 
-    public async Task<AppointmentQueueItemDto> CreateAppointmentAsync(CreateAppointmentRequest request, CancellationToken ct = default)
-    {
-        var resp = await _http.PostAsJsonAsync("/api/appointments", request, JsonOptions, ct);
-        return await ReadRequiredAsync<AppointmentQueueItemDto>(resp, ct);
-    }
+    public Task<AppointmentQueueItemDto> CreateAppointmentAsync(CreateAppointmentRequest request, CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(async (http, token) =>
+        {
+            var resp = await http.PostAsJsonAsync("/api/appointments", request, JsonOptions, token);
+            return await ReadRequiredAsync<AppointmentQueueItemDto>(resp, token);
+        }, ct);
 
-    public async Task<RegisterPatientAndAppointmentResponse> RegisterPatientAndBookAsync(
+    public Task<RegisterPatientAndAppointmentResponse> RegisterPatientAndBookAsync(
         RegisterPatientAndAppointmentRequest request,
-        CancellationToken ct = default)
-    {
-        var resp = await _http.PostAsJsonAsync("/api/appointments/register-and-book", request, JsonOptions, ct);
-        return await ReadRequiredAsync<RegisterPatientAndAppointmentResponse>(resp, ct);
-    }
+        CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(async (http, token) =>
+        {
+            var resp = await http.PostAsJsonAsync("/api/appointments/register-and-book", request, JsonOptions, token);
+            return await ReadRequiredAsync<RegisterPatientAndAppointmentResponse>(resp, token);
+        }, ct);
 
-    public async Task<AppointmentQueueItemDto> UpdateAppointmentAsync(
+    public Task<AppointmentQueueItemDto> UpdateAppointmentAsync(
         Guid appointmentId,
         UpdateAppointmentRequest request,
-        CancellationToken ct = default)
-    {
-        var resp = await _http.PutAsJsonAsync($"/api/appointments/{appointmentId}", request, JsonOptions, ct);
-        return await ReadRequiredAsync<AppointmentQueueItemDto>(resp, ct);
-    }
+        CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(async (http, token) =>
+        {
+            var resp = await http.PutAsJsonAsync($"/api/appointments/{appointmentId}", request, JsonOptions, token);
+            return await ReadRequiredAsync<AppointmentQueueItemDto>(resp, token);
+        }, ct);
 
-    public async Task<AppointmentQueueItemDto> UpdateQueueStatusAsync(
+    public Task<AppointmentQueueItemDto> UpdateQueueStatusAsync(
         Guid appointmentId,
         UpdateQueueStatusRequest request,
-        CancellationToken ct = default)
-    {
-        var resp = await _http.PatchAsJsonAsync($"/api/queue/{appointmentId}/status", request, JsonOptions, ct);
-        return await ReadRequiredAsync<AppointmentQueueItemDto>(resp, ct);
-    }
+        CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(async (http, token) =>
+        {
+            var resp = await http.PatchAsJsonAsync($"/api/queue/{appointmentId}/status", request, JsonOptions, token);
+            return await ReadRequiredAsync<AppointmentQueueItemDto>(resp, token);
+        }, ct);
 
-    public async Task<List<OdontogramToothDto>> GetOdontogramAsync(Guid patientId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<List<OdontogramToothDto>>(
-            $"/api/patients/{patientId}/odontogram",
-            JsonOptions,
-            ct) ?? new();
+    public Task<List<OdontogramToothDto>> GetOdontogramAsync(Guid patientId, CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(
+            async (http, token) => await http.GetFromJsonAsync<List<OdontogramToothDto>>(
+                $"/api/patients/{patientId}/odontogram",
+                JsonOptions,
+                token) ?? new(),
+            ct);
 
-    public async Task<OdontogramToothDto> UpdateOdontogramToothAsync(
+    public Task<OdontogramToothDto> UpdateOdontogramToothAsync(
         Guid patientId,
         UpdateOdontogramRequest request,
-        CancellationToken ct = default)
-    {
-        var resp = await _http.PutAsJsonAsync($"/api/patients/{patientId}/odontogram", request, JsonOptions, ct);
-        return await ReadRequiredAsync<OdontogramToothDto>(resp, ct);
-    }
+        CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(async (http, token) =>
+        {
+            var resp = await http.PutAsJsonAsync($"/api/patients/{patientId}/odontogram", request, JsonOptions, token);
+            return await ReadRequiredAsync<OdontogramToothDto>(resp, token);
+        }, ct);
 
-    public async Task<List<SoapNoteDto>> GetSoapNotesAsync(Guid patientId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<List<SoapNoteDto>>(
-            $"/api/patients/{patientId}/soap-notes",
-            JsonOptions,
-            ct) ?? new();
+    public Task<List<SoapNoteDto>> GetSoapNotesAsync(Guid patientId, CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(
+            async (http, token) => await http.GetFromJsonAsync<List<SoapNoteDto>>(
+                $"/api/patients/{patientId}/soap-notes",
+                JsonOptions,
+                token) ?? new(),
+            ct);
 
-    public async Task<SoapNoteDto> CreateSoapNoteAsync(
+    public Task<SoapNoteDto> CreateSoapNoteAsync(
         Guid patientId,
         CreateSoapNoteRequest request,
-        CancellationToken ct = default)
-    {
-        var resp = await _http.PostAsJsonAsync($"/api/patients/{patientId}/soap-notes", request, JsonOptions, ct);
-        return await ReadRequiredAsync<SoapNoteDto>(resp, ct);
-    }
+        CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(async (http, token) =>
+        {
+            var resp = await http.PostAsJsonAsync($"/api/patients/{patientId}/soap-notes", request, JsonOptions, token);
+            return await ReadRequiredAsync<SoapNoteDto>(resp, token);
+        }, ct);
 
-    public async Task<List<SoapMacroDto>> GetSoapMacrosAsync(CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<List<SoapMacroDto>>("/api/soap-macros", JsonOptions, ct) ?? new();
+    public Task<List<SoapMacroDto>> GetSoapMacrosAsync(CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(
+            async (http, token) => await http.GetFromJsonAsync<List<SoapMacroDto>>("/api/soap-macros", JsonOptions, token) ?? new(),
+            ct);
 
-    public async Task<List<InvoiceDto>> GetInvoicesAsync(string branchId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<List<InvoiceDto>>(
-            $"/api/invoices?branchId={Uri.EscapeDataString(branchId)}",
-            JsonOptions,
-            ct) ?? new();
+    public Task<List<InvoiceDto>> GetInvoicesAsync(string branchId, CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(
+            async (http, token) => await http.GetFromJsonAsync<List<InvoiceDto>>(
+                $"/api/invoices?branchId={Uri.EscapeDataString(branchId)}",
+                JsonOptions,
+                token) ?? new(),
+            ct);
 
-    public async Task<InvoiceDto?> GetInvoiceAsync(Guid invoiceId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<InvoiceDto>($"/api/invoices/{invoiceId}", JsonOptions, ct);
+    public Task<InvoiceDto?> GetInvoiceAsync(Guid invoiceId, CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(
+            (http, token) => http.GetFromJsonAsync<InvoiceDto>($"/api/invoices/{invoiceId}", JsonOptions, token),
+            ct);
 
-    public async Task<InvoiceDto> ApplyPaymentAsync(
+    public Task<InvoiceDto> ApplyPaymentAsync(
         Guid invoiceId,
         ApplyPaymentRequest request,
-        CancellationToken ct = default)
-    {
-        var resp = await _http.PostAsJsonAsync($"/api/invoices/{invoiceId}/pay", request, JsonOptions, ct);
-        return await ReadRequiredAsync<InvoiceDto>(resp, ct);
-    }
+        CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(async (http, token) =>
+        {
+            var resp = await http.PostAsJsonAsync($"/api/invoices/{invoiceId}/pay", request, JsonOptions, token);
+            return await ReadRequiredAsync<InvoiceDto>(resp, token);
+        }, ct);
 
-    public async Task<InvoiceDto> VoidInvoiceAsync(
+    public Task<InvoiceDto> VoidInvoiceAsync(
         Guid invoiceId,
         VoidInvoiceRequest request,
-        CancellationToken ct = default)
-    {
-        var resp = await _http.PostAsJsonAsync($"/api/invoices/{invoiceId}/void", request, JsonOptions, ct);
-        return await ReadRequiredAsync<InvoiceDto>(resp, ct);
-    }
+        CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(async (http, token) =>
+        {
+            var resp = await http.PostAsJsonAsync($"/api/invoices/{invoiceId}/void", request, JsonOptions, token);
+            return await ReadRequiredAsync<InvoiceDto>(resp, token);
+        }, ct);
 
-    public async Task<DailySalesReconciliationDto> ReconcileDailySalesAsync(
+    public Task<DailySalesReconciliationDto> ReconcileDailySalesAsync(
         ReconcileDailySalesRequest request,
-        CancellationToken ct = default)
-    {
-        var resp = await _http.PostAsJsonAsync("/api/daily-sales/reconcile", request, JsonOptions, ct);
-        return await ReadRequiredAsync<DailySalesReconciliationDto>(resp, ct);
-    }
+        CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(async (http, token) =>
+        {
+            var resp = await http.PostAsJsonAsync("/api/daily-sales/reconcile", request, JsonOptions, token);
+            return await ReadRequiredAsync<DailySalesReconciliationDto>(resp, token);
+        }, ct);
 
-    public async Task<List<AuditLogDto>> GetAuditLogsAsync(string branchId, CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<List<AuditLogDto>>(
-            $"/api/audit-logs?branchId={Uri.EscapeDataString(branchId)}",
-            JsonOptions,
-            ct) ?? new();
+    public Task<List<AuditLogDto>> GetAuditLogsAsync(string branchId, CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(
+            async (http, token) => await http.GetFromJsonAsync<List<AuditLogDto>>(
+                $"/api/audit-logs?branchId={Uri.EscapeDataString(branchId)}",
+                JsonOptions,
+                token) ?? new(),
+            ct);
 
-    public async Task<BackupVerificationDto> VerifyBackupAsync(
+    public Task<BackupVerificationDto> VerifyBackupAsync(
         string branchId,
         string verifiedBy,
-        CancellationToken ct = default)
-    {
-        using var req = new HttpRequestMessage(HttpMethod.Post, "/api/backups/verify");
-        if (!string.IsNullOrWhiteSpace(verifiedBy))
+        CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(async (http, token) =>
         {
-            req.Headers.TryAddWithoutValidation("X-Occlusa-User", verifiedBy);
-        }
-        var resp = await _http.SendAsync(req, ct);
-        return await ReadRequiredAsync<BackupVerificationDto>(resp, ct);
-    }
+            using var req = new HttpRequestMessage(HttpMethod.Post, "/api/backups/verify");
+            if (!string.IsNullOrWhiteSpace(verifiedBy))
+            {
+                req.Headers.TryAddWithoutValidation("X-Occlusa-User", verifiedBy);
+            }
 
-    public async Task<List<WhatsAppThreadDto>> GetWhatsAppThreadsAsync(CancellationToken ct = default) =>
-        await _http.GetFromJsonAsync<List<WhatsAppThreadDto>>("/api/whatsapp/threads", JsonOptions, ct) ?? new();
+            var resp = await http.SendAsync(req, token);
+            return await ReadRequiredAsync<BackupVerificationDto>(resp, token);
+        }, ct);
 
-    public async Task<WhatsAppThreadDto> SimulateWhatsAppAsync(
+    public Task<List<WhatsAppThreadDto>> GetWhatsAppThreadsAsync(CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(
+            async (http, token) => await http.GetFromJsonAsync<List<WhatsAppThreadDto>>("/api/whatsapp/threads", JsonOptions, token) ?? new(),
+            ct);
+
+    public Task<WhatsAppThreadDto> SimulateWhatsAppAsync(
         WhatsAppSimulateRequest request,
-        CancellationToken ct = default)
-    {
-        var resp = await _http.PostAsJsonAsync("/api/whatsapp/simulate", request, JsonOptions, ct);
-        return await ReadRequiredAsync<WhatsAppThreadDto>(resp, ct);
-    }
+        CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(async (http, token) =>
+        {
+            var resp = await http.PostAsJsonAsync("/api/whatsapp/simulate", request, JsonOptions, token);
+            return await ReadRequiredAsync<WhatsAppThreadDto>(resp, token);
+        }, ct);
 
-    public async Task<WhatsAppThreadDto> SendWhatsAppTakeoverReplyAsync(
+    public Task<WhatsAppThreadDto> SendWhatsAppTakeoverReplyAsync(
         string threadId,
         WhatsAppTakeoverReplyRequest request,
-        CancellationToken ct = default)
+        CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(async (http, token) =>
+        {
+            var resp = await http.PostAsJsonAsync(
+                $"/api/whatsapp/threads/{Uri.EscapeDataString(threadId)}/takeover-reply",
+                request,
+                JsonOptions,
+                token);
+            return await ReadRequiredAsync<WhatsAppThreadDto>(resp, token);
+        }, ct);
+
+    public Task<AppointmentQueueItemDto> ApproveAiBookingAsync(
+        Guid appointmentId,
+        CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(async (http, token) =>
+        {
+            var resp = await http.PostAsync($"/api/whatsapp/bookings/{appointmentId}/approve", null, token);
+            return await ReadRequiredAsync<AppointmentQueueItemDto>(resp, token);
+        }, ct);
+
+    private async Task<T> ExecuteWithRecoveryAsync<T>(
+        Func<HttpClient, CancellationToken, Task<T>> operation,
+        CancellationToken ct)
     {
-        var resp = await _http.PostAsJsonAsync(
-            $"/api/whatsapp/threads/{Uri.EscapeDataString(threadId)}/takeover-reply",
-            request,
-            JsonOptions,
-            ct);
-        return await ReadRequiredAsync<WhatsAppThreadDto>(resp, ct);
+        HttpClient client;
+        lock (_httpSync)
+        {
+            client = _http;
+        }
+
+        try
+        {
+            return await operation(client, ct);
+        }
+        catch (HttpRequestException) when (_ensureApiAvailableAsync is not null && !_disposed && !ct.IsCancellationRequested)
+        {
+            var recoveredUrl = await _ensureApiAvailableAsync(ct);
+            if (string.IsNullOrWhiteSpace(recoveredUrl))
+            {
+                throw;
+            }
+
+            UpdateBaseUrl(recoveredUrl);
+
+            HttpClient retryClient;
+            lock (_httpSync)
+            {
+                retryClient = _http;
+            }
+
+            return await operation(retryClient, ct);
+        }
     }
 
-    public async Task<AppointmentQueueItemDto> ApproveAiBookingAsync(
-        Guid appointmentId,
-        CancellationToken ct = default)
+    private static HttpClient CreateHttpClient(Uri baseUri)
     {
-        var resp = await _http.PostAsync($"/api/whatsapp/bookings/{appointmentId}/approve", null, ct);
-        return await ReadRequiredAsync<AppointmentQueueItemDto>(resp, ct);
+        var client = new HttpClient(new SocketsHttpHandler
+        {
+            UseProxy = !baseUri.IsLoopback
+        })
+        {
+            BaseAddress = baseUri,
+            Timeout = TimeSpan.FromSeconds(15)
+        };
+        client.DefaultRequestHeaders.TryAddWithoutValidation("X-Occlusa-User", "desktop-clinician");
+        client.DefaultRequestHeaders.TryAddWithoutValidation("X-Occlusa-Allowed-Branches", "HQ-KL,PJ-SS2");
+        return client;
     }
 
     private static async Task<T> ReadRequiredAsync<T>(HttpResponseMessage response, CancellationToken ct)
@@ -541,6 +697,16 @@ public sealed class OcclusaApiClient : IAsyncDisposable
             _hubConnection = null;
         }
 
-        _http.Dispose();
+        List<HttpClient> clientsToDispose;
+        lock (_httpSync)
+        {
+            clientsToDispose = new List<HttpClient>(_retiredClients) { _http };
+            _retiredClients.Clear();
+        }
+
+        foreach (var client in clientsToDispose)
+        {
+            client.Dispose();
+        }
     }
 }

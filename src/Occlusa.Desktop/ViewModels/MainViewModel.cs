@@ -24,6 +24,8 @@ public partial class MainViewModel : ObservableObject
     private readonly OcclusaApiClient _apiClient;
     private readonly MyKadPcscReaderService _myKadService;
     private readonly Func<Task<bool>>? _ensureLocalApiAsync;
+    private readonly Func<string?>? _getLocalApiUrl;
+    private readonly Func<string>? _getLocalApiStatus;
 
     private List<PatientDto> _allPatients = new();
     private List<DentistDto> _dentists = new();
@@ -137,11 +139,15 @@ public partial class MainViewModel : ObservableObject
     public MainViewModel(
         OcclusaApiClient apiClient,
         MyKadPcscReaderService myKadService,
-        Func<Task<bool>>? ensureLocalApiAsync = null)
+        Func<Task<bool>>? ensureLocalApiAsync = null,
+        Func<string?>? getLocalApiUrl = null,
+        Func<string>? getLocalApiStatus = null)
     {
         _apiClient = apiClient;
         _myKadService = myKadService;
         _ensureLocalApiAsync = ensureLocalApiAsync;
+        _getLocalApiUrl = getLocalApiUrl;
+        _getLocalApiStatus = getLocalApiStatus;
 
         AvailableBranches = new ObservableCollection<string> { "HQ-KL", "PJ-SS2" };
         SimulatedProfileNames = new ObservableCollection<string>(
@@ -155,6 +161,8 @@ public partial class MainViewModel : ObservableObject
         Appointments = new AppointmentsViewModel();
         Appointments.AppointmentSelectedForBanner += (_, appt) =>
             SelectPatientById(appt.PatientId, appt.PatientName, appt.PatientIc);
+        Appointments.AppointmentRescheduleRequested += (_, args) =>
+            _ = RescheduleAppointmentAsync(args);
 
         _apiClient.ConnectionModeChanged += (_, connected) => RunOnUi(() =>
         {
@@ -224,7 +232,23 @@ public partial class MainViewModel : ObservableObject
         if (_ensureLocalApiAsync != null)
         {
             StatusMessage = "Connecting to local Occlusa API...";
-            await _ensureLocalApiAsync();
+            bool ready = await _ensureLocalApiAsync();
+            if (ready)
+            {
+                var activeUrl = _getLocalApiUrl?.Invoke();
+                if (!string.IsNullOrWhiteSpace(activeUrl))
+                {
+                    _apiClient.UpdateBaseUrl(activeUrl);
+                }
+            }
+            else
+            {
+                var detail = _getLocalApiStatus?.Invoke();
+                if (!string.IsNullOrWhiteSpace(detail))
+                {
+                    StatusMessage = detail;
+                }
+            }
         }
 
         await RefreshSnapshotAsync();
@@ -300,11 +324,17 @@ public partial class MainViewModel : ObservableObject
                 StatusMessage = $"Connected ({snapshot.DatabaseMode}) · Synced {DateTime.Now:HH:mm:ss}";
             }
         }
-        catch (HttpRequestException) when (_ensureLocalApiAsync != null)
+        catch (HttpRequestException ex) when (_ensureLocalApiAsync != null)
         {
-            StatusMessage = "Local Occlusa API offline — starting background service...";
+            StatusMessage = "Local Occlusa API offline — starting embedded service...";
             if (await _ensureLocalApiAsync())
             {
+                var activeUrl = _getLocalApiUrl?.Invoke();
+                if (!string.IsNullOrWhiteSpace(activeUrl))
+                {
+                    _apiClient.UpdateBaseUrl(activeUrl);
+                }
+
                 try
                 {
                     var snapshot = await _apiClient.GetDashboardSnapshotAsync(SelectedBranchId);
@@ -322,8 +352,10 @@ public partial class MainViewModel : ObservableObject
                 }
             }
 
+            var hostDetail = _getLocalApiStatus?.Invoke();
+            var reason = !string.IsNullOrWhiteSpace(hostDetail) ? hostDetail : ex.Message;
             DatabaseModeLabel = "API Offline";
-            StatusMessage = "API unreachable (http://localhost:5188) — 5s fallback retry active";
+            StatusMessage = $"API unreachable ({_apiClient.BaseUrl}): {reason} — 5s fallback retry active";
         }
         catch (Exception ex)
         {
@@ -503,6 +535,26 @@ public partial class MainViewModel : ObservableObject
 
     public void MergeAppointment(AppointmentQueueItemDto item) =>
         UpsertQueueItem(item);
+
+    public async Task RescheduleAppointmentAsync(AppointmentRescheduleArgs args)
+    {
+        try
+        {
+            var request = AppointmentCalendarHelper.BuildDragRescheduleRequest(
+                args.Appointment,
+                args.TargetDate,
+                args.TargetStartTime,
+                DateTimeOffset.Now.Offset);
+
+            var updated = await _apiClient.UpdateAppointmentAsync(args.Appointment.Id, request);
+            UpsertQueueItem(updated);
+            StatusMessage = $"Rescheduled {updated.PatientName} ({updated.DoctorName}) to {updated.ScheduledAt.ToLocalTime():ddd dd MMM, HH:mm}.";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Reschedule failed: {ex.Message}";
+        }
+    }
 
     public PatientDto? FindPatient(Guid patientId) =>
         _allPatients.FirstOrDefault(p => p.Id == patientId);

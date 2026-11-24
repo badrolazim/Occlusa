@@ -267,7 +267,7 @@
                         </StackPanel>
                     </Border>
 
-                    <!-- RIGHT COLUMN: Step 3 & 4 (Patient IC/Name/Phone Lookup + Register Prompt + Notes) -->
+                    <!-- RIGHT COLUMN: Step 3 & 4 (Patient IC/Name/Phone Lookup + Register Prompt + Notes + Staff Activity Trail) -->
                     <Border Grid.Column="2" Style="{StaticResource UniformCardBorderStyle}" Padding="14,12">
                         <Grid>
                             <Grid.RowDefinitions>
@@ -275,6 +275,7 @@
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="*" />
+                                <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
 
                             <!-- Header -->
@@ -511,8 +512,75 @@
                                 <TextBox Grid.Row="1"
                                          Text="{Binding Notes, UpdateSourceTrigger=PropertyChanged}"
                                          Style="{StaticResource UniformMultiLineTextBoxStyle}"
-                                         MinHeight="64" />
+                                         MinHeight="56" />
                             </Grid>
+
+                            <!-- Staff Attribution / Visit Activity Trail (Edit mode only, paged, zero scrollbars) -->
+                            <Border Grid.Row="4"
+                                    Visibility="{Binding HasActivityLog, Converter={StaticResource BoolToVisibilityConverter}}"
+                                    Style="{StaticResource UniformSubtleCardBorderStyle}"
+                                    Padding="10,8"
+                                    Margin="0,10,0,0">
+                                <StackPanel>
+                                    <DockPanel LastChildFill="False" Margin="0,0,0,5">
+                                        <TextBlock DockPanel.Dock="Left"
+                                                   Text="Staff Activity Trail (Who Did What)"
+                                                   Style="{StaticResource UniformLabelTextStyle}"
+                                                   VerticalAlignment="Center" />
+                                        <StackPanel DockPanel.Dock="Right"
+                                                    Orientation="Horizontal"
+                                                    VerticalAlignment="Center"
+                                                    Visibility="{Binding ShowActivityPaging, Converter={StaticResource BoolToVisibilityConverter}}">
+                                            <Button Content="◀"
+                                                    Command="{Binding PrevActivityPageCommand}"
+                                                    IsEnabled="{Binding CanActivityPrev}"
+                                                    Style="{StaticResource UniformGhostButtonStyle}"
+                                                    Height="22"
+                                                    Width="24"
+                                                    Padding="0"
+                                                    FontSize="10.5" />
+                                            <TextBlock Text="{Binding ActivityPageSummary}"
+                                                       Style="{StaticResource UniformMutedTextStyle}"
+                                                       VerticalAlignment="Center"
+                                                       Margin="4,0" />
+                                            <Button Content="▶"
+                                                    Command="{Binding NextActivityPageCommand}"
+                                                    IsEnabled="{Binding CanActivityNext}"
+                                                    Style="{StaticResource UniformGhostButtonStyle}"
+                                                    Height="22"
+                                                    Width="24"
+                                                    Padding="0"
+                                                    FontSize="10.5" />
+                                        </StackPanel>
+                                    </DockPanel>
+
+                                    <ItemsControl ItemsSource="{Binding PagedActivityEntries}">
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <DockPanel LastChildFill="True"
+                                                           Margin="0,1"
+                                                           ToolTip="{Binding ToolTipText}"
+                                                           Background="Transparent">
+                                                    <TextBlock DockPanel.Dock="Left"
+                                                               Text="{Binding TimestampDisplay}"
+                                                               FontFamily="{StaticResource FontFamilyMono}"
+                                                               FontSize="11"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="{StaticResource BrandPrimaryBrush}"
+                                                               Width="42"
+                                                               VerticalAlignment="Center" />
+                                                    <TextBlock Text="{Binding SummaryLine}"
+                                                               FontSize="11"
+                                                               Foreground="{StaticResource TextSecondaryBrush}"
+                                                               VerticalAlignment="Center"
+                                                               TextWrapping="NoWrap"
+                                                               TextTrimming="None" />
+                                                </DockPanel>
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </StackPanel>
+                            </Border>
                         </Grid>
                     </Border>
                 </Grid>

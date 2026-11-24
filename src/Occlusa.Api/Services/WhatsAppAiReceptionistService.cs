@@ -522,7 +522,9 @@ public sealed class WhatsAppAiReceptionistService : IWhatsAppAiReceptionistServi
             RoomName = room,
             ScheduledAt = slot,
             ProcedureSummary = procedure,
-            Status = QueueStatus.AiBookedPending
+            Status = QueueStatus.AiBookedPending,
+            VisitType = VisitType.AiBooked,
+            CreatedBy = "WhatsApp AI"
         }, ct);
 
         await _notifier.NotifyQueueUpdatedAsync(created, ct);

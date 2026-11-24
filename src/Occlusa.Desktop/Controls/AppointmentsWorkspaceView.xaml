@@ -34,6 +34,15 @@
                         <ColumnDefinition Width="*" />
                     </Grid.ColumnDefinitions>
 
+                    <Rectangle Grid.ColumnSpan="2"
+                               Stroke="{Binding CardBorderBrush}"
+                               StrokeThickness="1.4"
+                               StrokeDashArray="4,2"
+                               RadiusX="7"
+                               RadiusY="7"
+                               IsHitTestVisible="False"
+                               Visibility="{Binding IsWalkIn, Converter={StaticResource BoolToVisibilityConverter}}" />
+
                     <Border Grid.Column="0"
                             Width="3.5"
                             CornerRadius="2"

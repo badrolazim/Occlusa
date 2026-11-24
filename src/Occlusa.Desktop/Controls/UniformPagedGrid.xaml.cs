@@ -49,6 +49,7 @@ public sealed class UniformColumnDef
     public bool IsMonospace { get; set; }
     public bool IsBold { get; set; }
     public double MinWidth { get; set; } = 70;
+    public DataTemplate? CellTemplate { get; set; }
 }
 
 /// <summary>
@@ -579,6 +580,19 @@ public partial class UniformPagedGrid : UserControl
 
         foreach (var col in activeColumns)
         {
+            if (col.CellTemplate != null)
+            {
+                var tplCol = new DataGridTemplateColumn
+                {
+                    Header = col.Header,
+                    CellTemplate = col.CellTemplate,
+                    Width = new DataGridLength(Math.Max(0.2, col.StarWidth), DataGridLengthUnitType.Star),
+                    MinWidth = Math.Max(40, col.MinWidth)
+                };
+                InternalDataGrid.Columns.Add(tplCol);
+                continue;
+            }
+
             var binding = new Binding(col.BindingPath);
             if (!string.IsNullOrWhiteSpace(col.StringFormat))
             {

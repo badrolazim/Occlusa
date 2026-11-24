@@ -967,5 +967,308 @@ public class AppointmentSchedulingTests
         Assert.Equal(120, updated.DurationMinutes);
         Assert.Equal(new DateTimeOffset(targetDate.ToDateTime(new TimeOnly(14, 30)), offset), updated.ScheduledAt);
     }
+
+    [Fact]
+    public void SortLiveQueue_PushesCompletedAndCancelledToBottom_AndOrdersWaitingByLongestWait()
+    {
+        var offset = TimeSpan.FromHours(8);
+        var now = new DateTimeOffset(2026, 11, 24, 11, 0, 0, offset);
+
+        var completed = new AppointmentQueueItemDto
+        {
+            Id = Guid.NewGuid(),
+            PatientName = "Completed Earlier",
+            ScheduledAt = now.AddHours(-2),
+            Status = QueueStatus.Completed
+        };
+        var cancelled = new AppointmentQueueItemDto
+        {
+            Id = Guid.NewGuid(),
+            PatientName = "Cancelled Earlier",
+            ScheduledAt = now.AddHours(-1.5),
+            Status = QueueStatus.Cancelled
+        };
+        var scheduled = new AppointmentQueueItemDto
+        {
+            Id = Guid.NewGuid(),
+            PatientName = "Scheduled Afternoon",
+            ScheduledAt = now.AddHours(2),
+            Status = QueueStatus.Scheduled
+        };
+        var waitingNewer = new AppointmentQueueItemDto
+        {
+            Id = Guid.NewGuid(),
+            PatientName = "Waiting Newer",
+            ScheduledAt = now.AddMinutes(-15),
+            ArrivedAt = now.AddMinutes(-10),
+            Status = QueueStatus.Waiting
+        };
+        var waitingLongest = new AppointmentQueueItemDto
+        {
+            Id = Guid.NewGuid(),
+            PatientName = "Waiting Longest",
+            ScheduledAt = now,
+            ArrivedAt = now.AddMinutes(-35),
+            Status = QueueStatus.Waiting
+        };
+        var inChair = new AppointmentQueueItemDto
+        {
+            Id = Guid.NewGuid(),
+            PatientName = "Currently Seated",
+            ScheduledAt = now.AddMinutes(-30),
+            SeatedAt = now.AddMinutes(-20),
+            Status = QueueStatus.InChair
+        };
+        var checkout = new AppointmentQueueItemDto
+        {
+            Id = Guid.NewGuid(),
+            PatientName = "Ready To Pay",
+            ScheduledAt = now.AddMinutes(-45),
+            Status = QueueStatus.AwaitingCheckout
+        };
+
+        var sorted = AppointmentCalendarHelper.SortLiveQueue(
+        [
+            completed,
+            scheduled,
+            waitingNewer,
+            cancelled,
+            waitingLongest,
+            inChair,
+            checkout
+        ]);
+
+        Assert.Equal(
+            new[]
+            {
+                "Ready To Pay",
+                "Currently Seated",
+                "Waiting Longest",
+                "Waiting Newer",
+                "Scheduled Afternoon",
+                "Completed Earlier",
+                "Cancelled Earlier"
+            },
+            sorted.Select(s => s.PatientName).ToArray());
+    }
+
+    [Fact]
+    public void NormalizeQueueStatus_MergesLegacyArrivedIntoWaiting_AndElapsedTimeFormatsCleanly()
+    {
+        Assert.Equal(QueueStatus.Waiting, AppointmentCalendarHelper.NormalizeQueueStatus(QueueStatus.Arrived));
+        Assert.Equal("Waiting", AppointmentCalendarHelper.FormatStatusLabel(QueueStatus.Arrived));
+
+        var now = new DateTimeOffset(2026, 11, 24, 12, 0, 0, TimeSpan.FromHours(8));
+        Assert.Equal("<1m", AppointmentCalendarHelper.FormatElapsedMinutes(now.AddSeconds(-25), now));
+        Assert.Equal("14m", AppointmentCalendarHelper.FormatElapsedMinutes(now.AddMinutes(-14), now));
+        Assert.Equal("1h 05m", AppointmentCalendarHelper.FormatElapsedMinutes(now.AddMinutes(-65), now));
+
+        var waiting29 = new AppointmentQueueItemDto
+        {
+            Status = QueueStatus.Waiting,
+            ArrivedAt = now.AddMinutes(-29)
+        };
+        var waiting30 = new AppointmentQueueItemDto
+        {
+            Status = QueueStatus.Arrived,
+            ArrivedAt = now.AddMinutes(-30)
+        };
+
+        Assert.False(AppointmentCalendarHelper.IsLongWait(waiting29, now));
+        Assert.True(AppointmentCalendarHelper.IsLongWait(waiting30, now));
+    }
+
+    [Fact]
+    public async Task InMemoryRepository_WalkInAndStaffAttribution_RecordsMilestonesAndBlocksCalendarAvailability()
+    {
+        var repo = CreateRepository();
+        var patients = await repo.GetPatientsAsync();
+        var dentists = await repo.GetDentistsAsync("HQ-KL");
+        var treatments = await repo.GetTreatmentsAsync();
+
+        var offset = TimeSpan.FromHours(8);
+        var targetDate = DateOnly.FromDateTime(DateTime.Today.AddDays(5));
+        var walkInSlot = new DateTimeOffset(targetDate.ToDateTime(new TimeOnly(11, 0)), offset);
+
+        var walkIn = await repo.CreateAppointmentAsync(new CreateAppointmentRequest
+        {
+            BranchId = "HQ-KL",
+            PatientId = patients[0].Id,
+            DentistId = dentists[0].Id,
+            DoctorName = dentists[0].FullName,
+            TreatmentId = treatments[1].Id,
+            RoomName = dentists[0].DefaultRoom,
+            ScheduledAt = walkInSlot,
+            DurationMinutes = 30,
+            ProcedureSummary = treatments[1].Name,
+            Status = QueueStatus.Waiting,
+            VisitType = VisitType.WalkIn,
+            CreatedBy = "Siti (Reception)"
+        });
+
+        Assert.Equal(VisitType.WalkIn, walkIn.VisitType);
+        Assert.Equal(QueueStatus.Waiting, walkIn.Status);
+        Assert.NotNull(walkIn.ArrivedAt);
+        Assert.Equal("Siti (Reception)", walkIn.CreatedBy);
+        Assert.Equal("Siti (Reception)", walkIn.CheckedInBy);
+        Assert.Contains(walkIn.ActivityLog, e => e.Action == "Walk-In Registered" && e.StaffName == "Siti (Reception)");
+
+        var branchAppointments = await repo.GetAppointmentsAsync("HQ-KL");
+        var slots = AppointmentCalendarHelper.GetDentistDaySlotAvailability(
+            branchAppointments,
+            dentists[0].Id,
+            dentists[0].FullName,
+            targetDate,
+            offset);
+        var slot1100 = Assert.Single(slots, s => s.Start == new TimeOnly(11, 0));
+        Assert.Equal(1, slot1100.BookedCount);
+        Assert.False(slot1100.IsAvailable);
+        Assert.Contains("(Walk-In)", slot1100.Summary);
+
+        var (seated, err1) = await repo.UpdateQueueStatusAsync(walkIn.Id, new UpdateQueueStatusRequest
+        {
+            NewStatus = QueueStatus.InChair,
+            RoomName = "Suite 1",
+            UpdatedBy = "Nurse Farah (Assistant)"
+        });
+        Assert.Null(err1);
+        Assert.NotNull(seated!.SeatedAt);
+        Assert.Equal("Nurse Farah (Assistant)", seated.SeatedBy);
+
+        var (checkout, err2) = await repo.UpdateQueueStatusAsync(walkIn.Id, new UpdateQueueStatusRequest
+        {
+            NewStatus = QueueStatus.AwaitingCheckout,
+            UpdatedBy = "Dr. Aina Rahman"
+        });
+        Assert.Null(err2);
+        Assert.NotNull(checkout!.CheckoutAt);
+        Assert.Equal("Dr. Aina Rahman", checkout.CheckoutBy);
+
+        var (completed, err3) = await repo.UpdateQueueStatusAsync(walkIn.Id, new UpdateQueueStatusRequest
+        {
+            NewStatus = QueueStatus.Completed,
+            UpdatedBy = "Aisyah (Reception)"
+        });
+        Assert.Null(err3);
+        Assert.NotNull(completed!.CompletedAt);
+        Assert.Equal("Aisyah (Reception)", completed.CompletedBy);
+        Assert.Equal(4, completed.ActivityLog.Count);
+        Assert.Equal(
+            new[] { "Walk-In Registered", "Called to Chair", "Sent to Checkout", "Completed" },
+            completed.ActivityLog.Select(e => e.Action).ToArray());
+
+        var logs = await repo.GetAuditLogsAsync("HQ-KL");
+        Assert.Contains(logs, l => l.EntityId == walkIn.Id.ToString() && l.UserId == "Aisyah (Reception)");
+    }
+
+    [Fact]
+    public async Task InMemoryRepository_LegacyArrivedStatus_NormalizesToWaitingAndUndoCheckInWorks()
+    {
+        var repo = CreateRepository();
+        var patients = await repo.GetPatientsAsync();
+        var dentists = await repo.GetDentistsAsync("HQ-KL");
+
+        var created = await repo.CreateAppointmentAsync(new CreateAppointmentRequest
+        {
+            BranchId = "HQ-KL",
+            PatientId = patients[0].Id,
+            DentistId = dentists[0].Id,
+            ScheduledAt = DateTimeOffset.Now,
+            Status = QueueStatus.Arrived,
+            CreatedBy = "Siti (Reception)"
+        });
+
+        Assert.Equal(QueueStatus.Waiting, created.Status);
+        Assert.NotNull(created.ArrivedAt);
+        Assert.Equal("Siti (Reception)", created.CheckedInBy);
+
+        var (reverted, err) = await repo.UpdateQueueStatusAsync(created.Id, new UpdateQueueStatusRequest
+        {
+            NewStatus = QueueStatus.Scheduled,
+            UpdatedBy = "Aisyah (Reception)"
+        });
+        Assert.Null(err);
+        Assert.Equal(QueueStatus.Scheduled, reverted!.Status);
+        Assert.Null(reverted.ArrivedAt);
+        Assert.Equal(string.Empty, reverted.CheckedInBy);
+        Assert.Contains(reverted.ActivityLog, e => e.Action == "Check-In Reverted" && e.StaffName == "Aisyah (Reception)");
+    }
+
+    [Fact]
+    public async Task HttpPipeline_WalkInAndQueueStatusAndApproveAi_PreservesVisitTypeAndStaffAttribution()
+    {
+        await using var app = OcclusaApiApplicationFactory.BuildApplication(
+            urls: "http://127.0.0.1:0",
+            environmentName: "Development");
+        await app.StartAsync();
+
+        try
+        {
+            var baseAddress = app.Urls.First();
+            using var http = new HttpClient { BaseAddress = new Uri(baseAddress) };
+            http.DefaultRequestHeaders.TryAddWithoutValidation("X-Occlusa-User", "Siti (Reception)");
+            http.DefaultRequestHeaders.TryAddWithoutValidation("X-Occlusa-Allowed-Branches", "HQ-KL,PJ-SS2");
+
+            var jsonOpts = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+            {
+                PropertyNameCaseInsensitive = true
+            };
+            jsonOpts.Converters.Add(new JsonStringEnumConverter());
+
+            var snapshot = await http.GetFromJsonAsync<ClinicDashboardSnapshotDto>(
+                "/api/dashboard/snapshot?branchId=HQ-KL",
+                jsonOpts);
+            Assert.NotNull(snapshot);
+
+            var walkInResp = await http.PostAsJsonAsync("/api/appointments", new CreateAppointmentRequest
+            {
+                BranchId = "HQ-KL",
+                PatientId = snapshot!.Patients[0].Id,
+                DentistId = snapshot.Dentists[0].Id,
+                DoctorName = snapshot.Dentists[0].FullName,
+                TreatmentId = snapshot.Treatments[0].Id,
+                RoomName = snapshot.Dentists[0].DefaultRoom,
+                ScheduledAt = DateTimeOffset.Now,
+                DurationMinutes = 30,
+                ProcedureSummary = snapshot.Treatments[0].Name,
+                Status = QueueStatus.Waiting,
+                VisitType = VisitType.WalkIn,
+                CreatedBy = "Siti (Reception)"
+            }, jsonOpts);
+            Assert.Equal(HttpStatusCode.Created, walkInResp.StatusCode);
+            var walkIn = await walkInResp.Content.ReadFromJsonAsync<AppointmentQueueItemDto>(jsonOpts);
+            Assert.NotNull(walkIn);
+            Assert.Equal(VisitType.WalkIn, walkIn!.VisitType);
+            Assert.Equal("Siti (Reception)", walkIn.CreatedBy);
+            Assert.NotNull(walkIn.ArrivedAt);
+
+            var patchResp = await http.PatchAsJsonAsync($"/api/queue/{walkIn.Id}/status", new UpdateQueueStatusRequest
+            {
+                NewStatus = QueueStatus.InChair,
+                RoomName = "Suite 1",
+                UpdatedBy = "Nurse Farah (Assistant)"
+            }, jsonOpts);
+            Assert.Equal(HttpStatusCode.OK, patchResp.StatusCode);
+            var seated = await patchResp.Content.ReadFromJsonAsync<AppointmentQueueItemDto>(jsonOpts);
+            Assert.NotNull(seated);
+            Assert.Equal(QueueStatus.InChair, seated!.Status);
+            Assert.Equal("Nurse Farah (Assistant)", seated.SeatedBy);
+            Assert.Equal(2, seated.ActivityLog.Count);
+
+            var aiPending = snapshot.Queue.First(q => q.Status == QueueStatus.AiBookedPending);
+            var approveResp = await http.PostAsync(
+                $"/api/whatsapp/bookings/{aiPending.Id}/approve?approvedBy={Uri.EscapeDataString("Aisyah (Reception)")}",
+                null);
+            Assert.Equal(HttpStatusCode.OK, approveResp.StatusCode);
+            var approved = await approveResp.Content.ReadFromJsonAsync<AppointmentQueueItemDto>(jsonOpts);
+            Assert.NotNull(approved);
+            Assert.Equal(QueueStatus.Scheduled, approved!.Status);
+            Assert.Equal("Aisyah (Reception)", approved.LastUpdatedBy);
+        }
+        finally
+        {
+            await app.StopAsync();
+        }
+    }
 }
 

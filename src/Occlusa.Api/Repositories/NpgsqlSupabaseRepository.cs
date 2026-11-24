@@ -1,5 +1,8 @@
+using System.Text.Json;
+using System.Text.Json.Serialization;
 using Microsoft.Extensions.Options;
 using Npgsql;
+using NpgsqlTypes;
 using Occlusa.Api.Options;
 using Occlusa.Api.Security;
 using Occlusa.Shared.Models;
@@ -13,11 +16,23 @@ namespace Occlusa.Api.Repositories;
 /// </summary>
 public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
 {
+    private static readonly JsonSerializerOptions ActivityJsonOptions = CreateActivityJsonOptions();
+
     private readonly SupabaseOptions _supabaseOptions;
     private readonly ClinicOptions _clinicOptions;
     private readonly RequestClaimsContext _claimsContext;
 
     public string DatabaseMode => "SupabasePostgreSQL";
+
+    private static JsonSerializerOptions CreateActivityJsonOptions()
+    {
+        var opts = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            PropertyNameCaseInsensitive = true
+        };
+        opts.Converters.Add(new JsonStringEnumConverter());
+        return opts;
+    }
 
     public NpgsqlSupabaseRepository(
         IOptions<SupabaseOptions> supabaseOptions,
@@ -405,7 +420,10 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
             const string sql = """
                 SELECT id, branch_id, patient_id, patient_name, patient_ic, dentist_id, doctor_name,
                        treatment_id, room_name, scheduled_at, duration_minutes, procedure_summary,
-                       notes, status, has_critical_medical_alert, alert_summary
+                       notes, status, has_critical_medical_alert, alert_summary,
+                       visit_type, arrived_at, seated_at, checkout_at, completed_at,
+                       created_by, checked_in_by, seated_by, checkout_by, completed_by,
+                       last_updated_by, updated_at, activity_log
                 FROM public.appointments
                 WHERE is_deleted = FALSE
                   AND (@branchId IS NULL OR branch_id = @branchId)
@@ -503,6 +521,7 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
         CancellationToken ct)
     {
         var branch = ClinicDomainHelpers.NormalizeBranch(request.BranchId, _clinicOptions.DefaultBranchId);
+        var now = DateTimeOffset.UtcNow;
         var id = Guid.NewGuid();
         var patientId = patient?.Id ?? request.PatientId;
         var patientName = patient?.FullName ?? "Walk-In Patient";
@@ -511,20 +530,57 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
         var alertSummary = patient?.MedicalAlerts.BuildAlertSummary() ?? "No Critical Alerts";
         var doctorName = string.IsNullOrWhiteSpace(request.DoctorName) ? "Dr. Aina Rahman" : request.DoctorName.Trim();
         var roomName = string.IsNullOrWhiteSpace(request.RoomName) ? "Suite 1" : request.RoomName.Trim();
-        var scheduledAt = request.ScheduledAt == default ? DateTimeOffset.UtcNow : request.ScheduledAt;
+        var scheduledAt = request.ScheduledAt == default ? now : request.ScheduledAt;
         var duration = Math.Clamp(request.DurationMinutes > 0 ? request.DurationMinutes : 30, 15, 480);
         var procedure = string.IsNullOrWhiteSpace(request.ProcedureSummary) ? "Consultation" : request.ProcedureSummary.Trim();
         var notes = request.Notes?.Trim() ?? string.Empty;
+
+        var normalizedStatus = AppointmentCalendarHelper.NormalizeQueueStatus(request.Status);
+        var visitType = normalizedStatus == QueueStatus.AiBookedPending
+            ? VisitType.AiBooked
+            : request.VisitType;
+        var actor = !string.IsNullOrWhiteSpace(request.CreatedBy)
+            ? request.CreatedBy.Trim()
+            : _claimsContext.UserId;
+
+        DateTimeOffset? arrivedAt = request.ArrivedAt;
+        var checkedInBy = string.Empty;
+        if (visitType == VisitType.WalkIn || normalizedStatus is QueueStatus.Waiting or QueueStatus.InChair)
+        {
+            arrivedAt ??= now;
+            checkedInBy = actor;
+        }
+
+        DateTimeOffset? seatedAt = normalizedStatus == QueueStatus.InChair ? now : null;
+        var seatedBy = normalizedStatus == QueueStatus.InChair ? actor : string.Empty;
+        var initialAction = visitType switch
+        {
+            VisitType.WalkIn => "Walk-In Registered",
+            VisitType.AiBooked => "AI Booking Created",
+            _ => "Appointment Booked"
+        };
+        var activityLog = new List<VisitActivityEntryDto>
+        {
+            new()
+            {
+                Timestamp = now,
+                Action = initialAction,
+                StaffName = actor,
+                Details = $"{doctorName} · {roomName} · {procedure}"
+            }
+        };
 
         const string sql = """
             INSERT INTO public.appointments
                 (id, clinic_group_id, branch_id, patient_id, patient_name, patient_ic, dentist_id, doctor_name,
                  treatment_id, room_name, scheduled_at, duration_minutes, procedure_summary, notes, status,
-                 has_critical_medical_alert, alert_summary)
+                 has_critical_medical_alert, alert_summary, visit_type, arrived_at, seated_at,
+                 created_by, checked_in_by, seated_by, last_updated_by, activity_log, updated_at)
             VALUES
                 (@id, @groupId, @branchId, @patientId, @patientName, @patientIc, @dentistId, @doctorName,
                  @treatmentId, @roomName, @scheduledAt, @duration, @procedure, @notes, @status,
-                 @hasAlert, @alertSummary);
+                 @hasAlert, @alertSummary, @visitType, @arrivedAt, @seatedAt,
+                 @createdBy, @checkedInBy, @seatedBy, @lastUpdatedBy, @activityLog, @updatedAt);
             """;
 
         await using (var cmd = new NpgsqlCommand(sql, conn, tx))
@@ -543,9 +599,21 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
             cmd.Parameters.AddWithValue("duration", duration);
             cmd.Parameters.AddWithValue("procedure", procedure);
             cmd.Parameters.AddWithValue("notes", notes);
-            cmd.Parameters.AddWithValue("status", request.Status.ToString());
+            cmd.Parameters.AddWithValue("status", normalizedStatus.ToString());
             cmd.Parameters.AddWithValue("hasAlert", hasAlert);
             cmd.Parameters.AddWithValue("alertSummary", alertSummary);
+            cmd.Parameters.AddWithValue("visitType", visitType.ToString());
+            cmd.Parameters.AddWithValue("arrivedAt", (object?)arrivedAt ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("seatedAt", (object?)seatedAt ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("createdBy", actor);
+            cmd.Parameters.AddWithValue("checkedInBy", checkedInBy);
+            cmd.Parameters.AddWithValue("seatedBy", seatedBy);
+            cmd.Parameters.AddWithValue("lastUpdatedBy", actor);
+            cmd.Parameters.Add(new NpgsqlParameter("activityLog", NpgsqlDbType.Jsonb)
+            {
+                Value = JsonSerializer.Serialize(activityLog, ActivityJsonOptions)
+            });
+            cmd.Parameters.AddWithValue("updatedAt", now);
             await cmd.ExecuteNonQueryAsync(ct);
         }
 
@@ -557,8 +625,9 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
             "Appointment",
             id.ToString(),
             null,
-            $"{patientName} | {doctorName} | {procedure} | {duration}m | {request.Status}",
-            ct);
+            $"{patientName} | {visitType} | {doctorName} | {procedure} | {duration}m | {normalizedStatus}",
+            ct,
+            actor);
 
         return (await GetAppointmentInternalAsync(conn, tx, id, ct))!;
     }
@@ -578,24 +647,52 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
                 return (null, "Appointment not found.");
             }
 
+            var now = DateTimeOffset.UtcNow;
             var patient = request.PatientId != Guid.Empty
                 ? await GetPatientInternalAsync(conn, tx, request.PatientId, ct)
                 : null;
 
-            var patientId = patient?.Id ?? existing.PatientId;
-            var patientName = patient?.FullName ?? existing.PatientName;
-            var patientIc = patient?.IcNumber ?? existing.PatientIc;
-            var hasAlert = patient?.MedicalAlerts.HasAnyCriticalAlert ?? existing.HasCriticalMedicalAlert;
-            var alertSummary = patient?.MedicalAlerts.BuildAlertSummary() ?? existing.AlertSummary;
-
-            var doctorName = string.IsNullOrWhiteSpace(request.DoctorName) ? existing.DoctorName : request.DoctorName.Trim();
-            var roomName = string.IsNullOrWhiteSpace(request.RoomName) ? existing.RoomName : request.RoomName.Trim();
-            var procedure = string.IsNullOrWhiteSpace(request.ProcedureSummary) ? existing.ProcedureSummary : request.ProcedureSummary.Trim();
-            var scheduledAt = request.ScheduledAt == default ? existing.ScheduledAt : request.ScheduledAt;
-            var duration = request.DurationMinutes > 0 ? Math.Clamp(request.DurationMinutes, 15, 480) : existing.DurationMinutes;
-            var notes = request.Notes?.Trim() ?? string.Empty;
-
+            var oldStatus = existing.Status;
             var oldSummary = $"{existing.PatientName} | {existing.DoctorName} | {existing.ProcedureSummary} | {existing.ScheduledAt:O} | {existing.DurationMinutes}m | {existing.Status}";
+
+            existing.PatientId = patient?.Id ?? existing.PatientId;
+            existing.PatientName = patient?.FullName ?? existing.PatientName;
+            existing.PatientIc = patient?.IcNumber ?? existing.PatientIc;
+            existing.HasCriticalMedicalAlert = patient?.MedicalAlerts.HasAnyCriticalAlert ?? existing.HasCriticalMedicalAlert;
+            existing.AlertSummary = patient?.MedicalAlerts.BuildAlertSummary() ?? existing.AlertSummary;
+
+            existing.DentistId = request.DentistId ?? existing.DentistId;
+            existing.DoctorName = string.IsNullOrWhiteSpace(request.DoctorName) ? existing.DoctorName : request.DoctorName.Trim();
+            existing.TreatmentId = request.TreatmentId ?? existing.TreatmentId;
+            existing.RoomName = string.IsNullOrWhiteSpace(request.RoomName) ? existing.RoomName : request.RoomName.Trim();
+            existing.ProcedureSummary = string.IsNullOrWhiteSpace(request.ProcedureSummary) ? existing.ProcedureSummary : request.ProcedureSummary.Trim();
+            existing.ScheduledAt = request.ScheduledAt == default ? existing.ScheduledAt : request.ScheduledAt;
+            existing.DurationMinutes = request.DurationMinutes > 0 ? Math.Clamp(request.DurationMinutes, 15, 480) : existing.DurationMinutes;
+            existing.Notes = request.Notes?.Trim() ?? string.Empty;
+            if (request.VisitType.HasValue)
+            {
+                existing.VisitType = request.VisitType.Value;
+            }
+
+            var actor = string.IsNullOrWhiteSpace(request.UpdatedBy) ? _claimsContext.UserId : request.UpdatedBy.Trim();
+            var normalizedTargetStatus = AppointmentCalendarHelper.NormalizeQueueStatus(request.Status);
+            if (AppointmentCalendarHelper.NormalizeQueueStatus(oldStatus) != normalizedTargetStatus)
+            {
+                ClinicDomainHelpers.ApplyStatusMilestone(existing, oldStatus, normalizedTargetStatus, actor, now, existing.RoomName);
+            }
+            else
+            {
+                existing.Status = normalizedTargetStatus;
+                existing.LastUpdatedBy = actor;
+                existing.LastUpdatedAt = now;
+                existing.ActivityLog.Add(new VisitActivityEntryDto
+                {
+                    Timestamp = now,
+                    Action = "Appointment Updated",
+                    StaffName = actor,
+                    Details = $"{existing.DoctorName} · {existing.RoomName} · {existing.ScheduledAt.ToLocalTime():dd MMM HH:mm}"
+                });
+            }
 
             const string sql = """
                 UPDATE public.appointments
@@ -611,33 +708,59 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
                     procedure_summary = @procedure,
                     notes = @notes,
                     status = @status,
+                    visit_type = @visitType,
+                    arrived_at = @arrivedAt,
+                    seated_at = @seatedAt,
+                    checkout_at = @checkoutAt,
+                    completed_at = @completedAt,
+                    checked_in_by = @checkedInBy,
+                    seated_by = @seatedBy,
+                    checkout_by = @checkoutBy,
+                    completed_by = @completedBy,
+                    last_updated_by = @lastUpdatedBy,
+                    activity_log = @activityLog,
                     has_critical_medical_alert = @hasAlert,
                     alert_summary = @alertSummary,
-                    updated_at = NOW()
+                    updated_at = @updatedAt
                 WHERE id = @id;
                 """;
 
             await using (var cmd = new NpgsqlCommand(sql, conn, tx))
             {
-                cmd.Parameters.AddWithValue("patientId", patientId);
-                cmd.Parameters.AddWithValue("patientName", patientName);
-                cmd.Parameters.AddWithValue("patientIc", patientIc);
-                cmd.Parameters.AddWithValue("dentistId", (object?)request.DentistId ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("doctorName", doctorName);
-                cmd.Parameters.AddWithValue("treatmentId", (object?)request.TreatmentId ?? DBNull.Value);
-                cmd.Parameters.AddWithValue("roomName", roomName);
-                cmd.Parameters.AddWithValue("scheduledAt", scheduledAt);
-                cmd.Parameters.AddWithValue("duration", duration);
-                cmd.Parameters.AddWithValue("procedure", procedure);
-                cmd.Parameters.AddWithValue("notes", notes);
-                cmd.Parameters.AddWithValue("status", request.Status.ToString());
-                cmd.Parameters.AddWithValue("hasAlert", hasAlert);
-                cmd.Parameters.AddWithValue("alertSummary", alertSummary);
+                cmd.Parameters.AddWithValue("patientId", existing.PatientId);
+                cmd.Parameters.AddWithValue("patientName", existing.PatientName);
+                cmd.Parameters.AddWithValue("patientIc", existing.PatientIc);
+                cmd.Parameters.AddWithValue("dentistId", (object?)existing.DentistId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("doctorName", existing.DoctorName);
+                cmd.Parameters.AddWithValue("treatmentId", (object?)existing.TreatmentId ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("roomName", existing.RoomName);
+                cmd.Parameters.AddWithValue("scheduledAt", existing.ScheduledAt);
+                cmd.Parameters.AddWithValue("duration", existing.DurationMinutes);
+                cmd.Parameters.AddWithValue("procedure", existing.ProcedureSummary);
+                cmd.Parameters.AddWithValue("notes", existing.Notes);
+                cmd.Parameters.AddWithValue("status", existing.Status.ToString());
+                cmd.Parameters.AddWithValue("visitType", existing.VisitType.ToString());
+                cmd.Parameters.AddWithValue("arrivedAt", (object?)existing.ArrivedAt ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("seatedAt", (object?)existing.SeatedAt ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("checkoutAt", (object?)existing.CheckoutAt ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("completedAt", (object?)existing.CompletedAt ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("checkedInBy", existing.CheckedInBy);
+                cmd.Parameters.AddWithValue("seatedBy", existing.SeatedBy);
+                cmd.Parameters.AddWithValue("checkoutBy", existing.CheckoutBy);
+                cmd.Parameters.AddWithValue("completedBy", existing.CompletedBy);
+                cmd.Parameters.AddWithValue("lastUpdatedBy", existing.LastUpdatedBy);
+                cmd.Parameters.Add(new NpgsqlParameter("activityLog", NpgsqlDbType.Jsonb)
+                {
+                    Value = JsonSerializer.Serialize(existing.ActivityLog, ActivityJsonOptions)
+                });
+                cmd.Parameters.AddWithValue("hasAlert", existing.HasCriticalMedicalAlert);
+                cmd.Parameters.AddWithValue("alertSummary", existing.AlertSummary);
+                cmd.Parameters.AddWithValue("updatedAt", now);
                 cmd.Parameters.AddWithValue("id", appointmentId);
                 await cmd.ExecuteNonQueryAsync(ct);
             }
 
-            var newSummary = $"{patientName} | {doctorName} | {procedure} | {scheduledAt:O} | {duration}m | {request.Status}";
+            var newSummary = $"{existing.PatientName} | {existing.DoctorName} | {existing.ProcedureSummary} | {existing.ScheduledAt:O} | {existing.DurationMinutes}m | {existing.Status}";
             await InsertAuditLogInternalAsync(
                 conn,
                 tx,
@@ -647,7 +770,8 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
                 appointmentId.ToString(),
                 oldSummary,
                 newSummary,
-                ct);
+                ct,
+                actor);
 
             var updated = (await GetAppointmentInternalAsync(conn, tx, appointmentId, ct))!;
             await tx.CommitAsync(ct);
@@ -670,26 +794,21 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
                 return (null, "Appointment not found.");
             }
 
-            if (!ClinicDomainHelpers.IsTransitionAllowed(existing.Status, request.NewStatus))
+            var normalizedNew = AppointmentCalendarHelper.NormalizeQueueStatus(request.NewStatus);
+            if (!ClinicDomainHelpers.IsTransitionAllowed(existing.Status, normalizedNew))
             {
-                return (null, $"Invalid queue transition from {existing.Status} to {request.NewStatus}.");
+                return (null, $"Invalid queue transition from {existing.Status} to {normalizedNew}.");
             }
 
-            const string sql = """
-                UPDATE public.appointments
-                SET status = @status,
-                    room_name = COALESCE(NULLIF(@roomName, ''), room_name),
-                    updated_at = NOW()
-                WHERE id = @id;
-                """;
-
-            await using (var cmd = new NpgsqlCommand(sql, conn, tx))
+            var oldStatus = existing.Status;
+            if (!string.IsNullOrWhiteSpace(request.RoomName))
             {
-                cmd.Parameters.AddWithValue("status", request.NewStatus.ToString());
-                cmd.Parameters.AddWithValue("roomName", request.RoomName?.Trim() ?? string.Empty);
-                cmd.Parameters.AddWithValue("id", appointmentId);
-                await cmd.ExecuteNonQueryAsync(ct);
+                existing.RoomName = request.RoomName.Trim();
             }
+
+            var actor = string.IsNullOrWhiteSpace(request.UpdatedBy) ? _claimsContext.UserId : request.UpdatedBy.Trim();
+            ClinicDomainHelpers.ApplyStatusMilestone(existing, oldStatus, normalizedNew, actor, DateTimeOffset.UtcNow, request.RoomName);
+            await PersistAppointmentLifecycleAsync(conn, tx, existing, ct);
 
             await InsertAuditLogInternalAsync(
                 conn,
@@ -698,9 +817,10 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
                 "QUEUE_STATUS_CHANGED",
                 "Appointment",
                 appointmentId.ToString(),
+                oldStatus.ToString(),
                 existing.Status.ToString(),
-                request.NewStatus.ToString(),
-                ct);
+                ct,
+                actor);
 
             var updated = (await GetAppointmentInternalAsync(conn, tx, appointmentId, ct))!;
             await tx.CommitAsync(ct);
@@ -1173,15 +1293,17 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
 
                 if (apptId.HasValue)
                 {
-                    await using var completeAppt = new NpgsqlCommand("""
-                        UPDATE public.appointments
-                        SET status = 'Completed', updated_at = NOW()
-                        WHERE id = @id AND status NOT IN ('Completed', 'Cancelled');
-                        """, conn, tx);
-                    completeAppt.Parameters.AddWithValue("id", apptId.Value);
-                    var changed = await completeAppt.ExecuteNonQueryAsync(ct);
-                    if (changed > 0)
+                    var linked = await GetAppointmentInternalAsync(conn, tx, apptId.Value, ct);
+                    if (linked is not null && linked.Status != QueueStatus.Completed && linked.Status != QueueStatus.Cancelled)
                     {
+                        ClinicDomainHelpers.ApplyStatusMilestone(
+                            linked,
+                            linked.Status,
+                            QueueStatus.Completed,
+                            collectedBy,
+                            DateTimeOffset.UtcNow,
+                            $"Invoice {validation.Invoice.InvoiceNumber}");
+                        await PersistAppointmentLifecycleAsync(conn, tx, linked, ct);
                         updatedQueue = await GetAppointmentInternalAsync(conn, tx, apptId.Value, ct);
                     }
                 }
@@ -1592,13 +1714,10 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
                 return (null, null, $"Cannot approve booking in status {appt.Status}.");
             }
 
-            await using (var cmd = new NpgsqlCommand(
-                "UPDATE public.appointments SET status = 'Scheduled', updated_at = NOW() WHERE id = @id;",
-                conn, tx))
-            {
-                cmd.Parameters.AddWithValue("id", appointmentId);
-                await cmd.ExecuteNonQueryAsync(ct);
-            }
+            var oldStatus = appt.Status;
+            var actor = string.IsNullOrWhiteSpace(approvedBy) ? _claimsContext.UserId : approvedBy.Trim();
+            ClinicDomainHelpers.ApplyStatusMilestone(appt, oldStatus, QueueStatus.Scheduled, actor, DateTimeOffset.UtcNow);
+            await PersistAppointmentLifecycleAsync(conn, tx, appt, ct);
 
             string? threadId = null;
             await using (var findThread = new NpgsqlCommand(
@@ -1622,7 +1741,7 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
                     msgCmd.Parameters.AddWithValue("id", Guid.NewGuid());
                     msgCmd.Parameters.AddWithValue("tid", threadId);
                     msgCmd.Parameters.AddWithValue("branchId", appt.BranchId);
-                    msgCmd.Parameters.AddWithValue("sender", $"Staff ({approvedBy})");
+                    msgCmd.Parameters.AddWithValue("sender", $"Staff ({actor})");
                     msgCmd.Parameters.AddWithValue("text", $"Appointment approved & confirmed for {appt.ScheduledAt:ddd dd MMM, hh:mm tt} with {appt.DoctorName} at {appt.BranchId}.");
                     msgCmd.Parameters.AddWithValue("ts", now);
                     msgCmd.Parameters.AddWithValue("bid", appointmentId);
@@ -1639,9 +1758,10 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
                 "AI_BOOKING_APPROVED",
                 "Appointment",
                 appointmentId.ToString(),
-                appt.Status.ToString(),
+                oldStatus.ToString(),
                 QueueStatus.Scheduled.ToString(),
-                ct);
+                ct,
+                actor);
 
             var updatedAppt = (await GetAppointmentInternalAsync(conn, tx, appointmentId, ct))!;
             await tx.CommitAsync(ct);
@@ -1715,12 +1835,61 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
         await cmd.ExecuteNonQueryAsync(ct);
     }
 
+    private static async Task PersistAppointmentLifecycleAsync(
+        NpgsqlConnection conn,
+        NpgsqlTransaction tx,
+        AppointmentQueueItemDto item,
+        CancellationToken ct)
+    {
+        var updatedAt = item.LastUpdatedAt ?? DateTimeOffset.UtcNow;
+        const string sql = """
+            UPDATE public.appointments
+            SET status = @status,
+                room_name = @roomName,
+                arrived_at = @arrivedAt,
+                seated_at = @seatedAt,
+                checkout_at = @checkoutAt,
+                completed_at = @completedAt,
+                checked_in_by = @checkedInBy,
+                seated_by = @seatedBy,
+                checkout_by = @checkoutBy,
+                completed_by = @completedBy,
+                last_updated_by = @lastUpdatedBy,
+                activity_log = @activityLog,
+                updated_at = @updatedAt
+            WHERE id = @id;
+            """;
+
+        await using var cmd = new NpgsqlCommand(sql, conn, tx);
+        cmd.Parameters.AddWithValue("status", item.Status.ToString());
+        cmd.Parameters.AddWithValue("roomName", item.RoomName);
+        cmd.Parameters.AddWithValue("arrivedAt", (object?)item.ArrivedAt ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("seatedAt", (object?)item.SeatedAt ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("checkoutAt", (object?)item.CheckoutAt ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("completedAt", (object?)item.CompletedAt ?? DBNull.Value);
+        cmd.Parameters.AddWithValue("checkedInBy", item.CheckedInBy);
+        cmd.Parameters.AddWithValue("seatedBy", item.SeatedBy);
+        cmd.Parameters.AddWithValue("checkoutBy", item.CheckoutBy);
+        cmd.Parameters.AddWithValue("completedBy", item.CompletedBy);
+        cmd.Parameters.AddWithValue("lastUpdatedBy", item.LastUpdatedBy);
+        cmd.Parameters.Add(new NpgsqlParameter("activityLog", NpgsqlDbType.Jsonb)
+        {
+            Value = JsonSerializer.Serialize(item.ActivityLog, ActivityJsonOptions)
+        });
+        cmd.Parameters.AddWithValue("updatedAt", updatedAt);
+        cmd.Parameters.AddWithValue("id", item.Id);
+        await cmd.ExecuteNonQueryAsync(ct);
+    }
+
     private static async Task<AppointmentQueueItemDto?> GetAppointmentInternalAsync(NpgsqlConnection conn, NpgsqlTransaction tx, Guid id, CancellationToken ct)
     {
         const string sql = """
             SELECT id, branch_id, patient_id, patient_name, patient_ic, dentist_id, doctor_name,
                    treatment_id, room_name, scheduled_at, duration_minutes, procedure_summary,
-                   notes, status, has_critical_medical_alert, alert_summary
+                   notes, status, has_critical_medical_alert, alert_summary,
+                   visit_type, arrived_at, seated_at, checkout_at, completed_at,
+                   created_by, checked_in_by, seated_by, checkout_by, completed_by,
+                   last_updated_by, updated_at, activity_log
             FROM public.appointments
             WHERE id = @id AND is_deleted = FALSE;
             """;
@@ -2050,7 +2219,8 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
         string entityId,
         string? oldValue,
         string? newValue,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? actorOverride = null)
     {
         const string sql = """
             INSERT INTO public.audit_logs
@@ -2059,10 +2229,14 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
                 (@id, @branchId, @userId, NOW(), @action, @entityName, @entityId, @oldValue, @newValue);
             """;
 
+        var actor = !string.IsNullOrWhiteSpace(actorOverride)
+            ? actorOverride.Trim()
+            : (string.IsNullOrWhiteSpace(_claimsContext.UserId) ? "system" : _claimsContext.UserId);
+
         await using var cmd = new NpgsqlCommand(sql, conn, tx);
         cmd.Parameters.AddWithValue("id", Guid.NewGuid());
         cmd.Parameters.AddWithValue("branchId", branchId);
-        cmd.Parameters.AddWithValue("userId", string.IsNullOrWhiteSpace(_claimsContext.UserId) ? "system" : _claimsContext.UserId);
+        cmd.Parameters.AddWithValue("userId", actor);
         cmd.Parameters.AddWithValue("action", action);
         cmd.Parameters.AddWithValue("entityName", entityName);
         cmd.Parameters.AddWithValue("entityId", entityId);
@@ -2093,23 +2267,53 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
         }
     };
 
-    private static AppointmentQueueItemDto ReadAppointment(NpgsqlDataReader reader) => new()
+    private static AppointmentQueueItemDto ReadAppointment(NpgsqlDataReader reader)
     {
-        Id = reader.GetGuid(0),
-        BranchId = reader.GetString(1),
-        PatientId = reader.GetGuid(2),
-        PatientName = reader.GetString(3),
-        PatientIc = reader.GetString(4),
-        DentistId = reader.IsDBNull(5) ? null : reader.GetGuid(5),
-        DoctorName = reader.GetString(6),
-        TreatmentId = reader.IsDBNull(7) ? null : reader.GetGuid(7),
-        RoomName = reader.GetString(8),
-        ScheduledAt = reader.GetFieldValue<DateTimeOffset>(9),
-        DurationMinutes = reader.GetInt32(10),
-        ProcedureSummary = reader.GetString(11),
-        Notes = reader.GetString(12),
-        Status = Enum.Parse<QueueStatus>(reader.GetString(13)),
-        HasCriticalMedicalAlert = reader.GetBoolean(14),
-        AlertSummary = reader.GetString(15)
-    };
+        var rawStatus = Enum.Parse<QueueStatus>(reader.GetString(13));
+        var normalizedStatus = AppointmentCalendarHelper.NormalizeQueueStatus(rawStatus);
+        var visitType = reader.IsDBNull(16) ? VisitType.Booked : Enum.Parse<VisitType>(reader.GetString(16));
+        var activityJson = reader.IsDBNull(28) ? "[]" : reader.GetString(28);
+        List<VisitActivityEntryDto> activity;
+        try
+        {
+            activity = JsonSerializer.Deserialize<List<VisitActivityEntryDto>>(activityJson, ActivityJsonOptions) ?? new();
+        }
+        catch (JsonException)
+        {
+            activity = new();
+        }
+
+        return new AppointmentQueueItemDto
+        {
+            Id = reader.GetGuid(0),
+            BranchId = reader.GetString(1),
+            PatientId = reader.GetGuid(2),
+            PatientName = reader.GetString(3),
+            PatientIc = reader.GetString(4),
+            DentistId = reader.IsDBNull(5) ? null : reader.GetGuid(5),
+            DoctorName = reader.GetString(6),
+            TreatmentId = reader.IsDBNull(7) ? null : reader.GetGuid(7),
+            RoomName = reader.GetString(8),
+            ScheduledAt = reader.GetFieldValue<DateTimeOffset>(9),
+            DurationMinutes = reader.GetInt32(10),
+            ProcedureSummary = reader.GetString(11),
+            Notes = reader.GetString(12),
+            Status = normalizedStatus,
+            HasCriticalMedicalAlert = reader.GetBoolean(14),
+            AlertSummary = reader.GetString(15),
+            VisitType = visitType,
+            ArrivedAt = reader.IsDBNull(17) ? null : reader.GetFieldValue<DateTimeOffset>(17),
+            SeatedAt = reader.IsDBNull(18) ? null : reader.GetFieldValue<DateTimeOffset>(18),
+            CheckoutAt = reader.IsDBNull(19) ? null : reader.GetFieldValue<DateTimeOffset>(19),
+            CompletedAt = reader.IsDBNull(20) ? null : reader.GetFieldValue<DateTimeOffset>(20),
+            CreatedBy = reader.IsDBNull(21) ? string.Empty : reader.GetString(21),
+            CheckedInBy = reader.IsDBNull(22) ? string.Empty : reader.GetString(22),
+            SeatedBy = reader.IsDBNull(23) ? string.Empty : reader.GetString(23),
+            CheckoutBy = reader.IsDBNull(24) ? string.Empty : reader.GetString(24),
+            CompletedBy = reader.IsDBNull(25) ? string.Empty : reader.GetString(25),
+            LastUpdatedBy = reader.IsDBNull(26) ? string.Empty : reader.GetString(26),
+            LastUpdatedAt = reader.IsDBNull(27) ? null : reader.GetFieldValue<DateTimeOffset>(27),
+            ActivityLog = activity
+        };
+    }
 }

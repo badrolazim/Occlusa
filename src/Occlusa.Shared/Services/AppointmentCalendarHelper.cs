@@ -391,14 +391,88 @@ public static class AppointmentCalendarHelper
     }
 
     /// <summary>
+    /// Normalizes legacy <see cref="QueueStatus.Arrived"/> into <see cref="QueueStatus.Waiting"/>.
+    /// </summary>
+    public static QueueStatus NormalizeQueueStatus(QueueStatus status) =>
+        status == QueueStatus.Arrived ? QueueStatus.Waiting : status;
+
+    /// <summary>
+    /// Returns true when the visit is finished (<see cref="QueueStatus.Completed"/> or <see cref="QueueStatus.Cancelled"/>).
+    /// </summary>
+    public static bool IsFinishedQueueStatus(QueueStatus status) =>
+        status is QueueStatus.Completed or QueueStatus.Cancelled;
+
+    /// <summary>
+    /// Orders today's Live Queue rows by operational priority (Checkout -> In Chair -> Waiting by longest wait ->
+    /// AI Pending -> Scheduled), pushing Completed and Cancelled rows to the bottom.
+    /// </summary>
+    public static IReadOnlyList<AppointmentQueueItemDto> SortLiveQueue(IEnumerable<AppointmentQueueItemDto> items) =>
+        items
+            .OrderBy(a => GetLiveQueueSortPriority(a.Status))
+            .ThenBy(a =>
+            {
+                var normalized = NormalizeQueueStatus(a.Status);
+                return normalized == QueueStatus.Waiting
+                    ? (a.ArrivedAt ?? a.ScheduledAt)
+                    : a.ScheduledAt;
+            })
+            .ThenBy(a => a.ScheduledAt)
+            .ThenBy(a => a.Id)
+            .ToList();
+
+    private static int GetLiveQueueSortPriority(QueueStatus status) => NormalizeQueueStatus(status) switch
+    {
+        QueueStatus.AwaitingCheckout => 0,
+        QueueStatus.InChair => 1,
+        QueueStatus.Waiting => 2,
+        QueueStatus.AiBookedPending => 3,
+        QueueStatus.Scheduled => 4,
+        QueueStatus.Completed => 5,
+        QueueStatus.Cancelled => 6,
+        _ => 7
+    };
+
+    /// <summary>
+    /// Formats a concise elapsed duration string (e.g. "&lt;1m", "14m", "1h 05m").
+    /// </summary>
+    public static string FormatElapsedMinutes(DateTimeOffset? since, DateTimeOffset now)
+    {
+        if (!since.HasValue)
+        {
+            return string.Empty;
+        }
+
+        int totalMins = Math.Max(0, (int)Math.Floor((now - since.Value).TotalMinutes));
+        if (totalMins == 0)
+        {
+            return "<1m";
+        }
+
+        if (totalMins < 60)
+        {
+            return $"{totalMins}m";
+        }
+
+        return $"{totalMins / 60}h {totalMins % 60:00}m";
+    }
+
+    /// <summary>
+    /// Returns true if a waiting patient has exceeded the wait-time threshold.
+    /// </summary>
+    public static bool IsLongWait(AppointmentQueueItemDto appt, DateTimeOffset now, int thresholdMinutes = 30) =>
+        NormalizeQueueStatus(appt.Status) == QueueStatus.Waiting
+        && appt.ArrivedAt.HasValue
+        && (now - appt.ArrivedAt.Value).TotalMinutes >= thresholdMinutes;
+
+    /// <summary>
     /// Human-readable short status label used across appointment tables and cards.
     /// </summary>
-    public static string FormatStatusLabel(QueueStatus status) => status switch
+    public static string FormatStatusLabel(QueueStatus status) => NormalizeQueueStatus(status) switch
     {
         QueueStatus.AiBookedPending => "AI-Booked",
         QueueStatus.InChair => "In Chair",
         QueueStatus.AwaitingCheckout => "Checkout",
-        _ => status.ToString()
+        _ => NormalizeQueueStatus(status).ToString()
     };
 
     /// <summary>
@@ -512,7 +586,10 @@ public static class AppointmentCalendarHelper
             var summary = overlapping.Count == 0
                 ? "Available"
                 : string.Join(", ", overlapping.Select(a =>
-                    $"{a.ScheduledAt.ToOffset(localOffset):HH:mm} {FormatCompactPatientName(a.PatientName)}"));
+                {
+                    var walkInSuffix = a.VisitType == VisitType.WalkIn ? " (Walk-In)" : string.Empty;
+                    return $"{a.ScheduledAt.ToOffset(localOffset):HH:mm} {FormatCompactPatientName(a.PatientName)}{walkInSuffix}";
+                }));
 
             result.Add(new DentistSlotAvailability(slot.Start, slot.End, slot.Label, overlapping.Count, summary));
         }
@@ -740,6 +817,7 @@ public static class AppointmentCalendarHelper
             ScheduledAt = scheduledAt,
             DurationMinutes = appointment.DurationMinutes,
             Status = appointment.Status,
+            VisitType = appointment.VisitType,
             Notes = appointment.Notes,
             UpdatedBy = updatedBy
         };

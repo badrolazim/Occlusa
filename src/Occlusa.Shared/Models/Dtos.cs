@@ -103,6 +103,17 @@ public class PatientDto
 }
 
 /// <summary>
+/// Timestamped staff attribution milestone recorded on a visit's activity trail.
+/// </summary>
+public class VisitActivityEntryDto
+{
+    public DateTimeOffset Timestamp { get; set; } = DateTimeOffset.UtcNow;
+    public string Action { get; set; } = string.Empty;
+    public string StaffName { get; set; } = string.Empty;
+    public string Details { get; set; } = string.Empty;
+}
+
+/// <summary>
 /// Live appointment and queue item displayed on the clinic floor board and Appointments calendar.
 /// </summary>
 public class AppointmentQueueItemDto
@@ -121,6 +132,19 @@ public class AppointmentQueueItemDto
     public string ProcedureSummary { get; set; } = string.Empty;
     public string Notes { get; set; } = string.Empty;
     public QueueStatus Status { get; set; } = QueueStatus.Scheduled;
+    public VisitType VisitType { get; set; } = VisitType.Booked;
+    public DateTimeOffset? ArrivedAt { get; set; }
+    public DateTimeOffset? SeatedAt { get; set; }
+    public DateTimeOffset? CheckoutAt { get; set; }
+    public DateTimeOffset? CompletedAt { get; set; }
+    public string CreatedBy { get; set; } = string.Empty;
+    public string CheckedInBy { get; set; } = string.Empty;
+    public string SeatedBy { get; set; } = string.Empty;
+    public string CheckoutBy { get; set; } = string.Empty;
+    public string CompletedBy { get; set; } = string.Empty;
+    public string LastUpdatedBy { get; set; } = string.Empty;
+    public DateTimeOffset? LastUpdatedAt { get; set; }
+    public List<VisitActivityEntryDto> ActivityLog { get; set; } = new();
     public bool HasCriticalMedicalAlert { get; set; }
     public string AlertSummary { get; set; } = string.Empty;
 
@@ -391,6 +415,9 @@ public class CreateAppointmentRequest
     public string ProcedureSummary { get; set; } = string.Empty;
     public string Notes { get; set; } = string.Empty;
     public QueueStatus Status { get; set; } = QueueStatus.Scheduled;
+    public VisitType VisitType { get; set; } = VisitType.Booked;
+    public DateTimeOffset? ArrivedAt { get; set; }
+    public string? CreatedBy { get; set; }
 }
 
 public class UpdateAppointmentRequest
@@ -404,6 +431,7 @@ public class UpdateAppointmentRequest
     public DateTimeOffset ScheduledAt { get; set; }
     public int DurationMinutes { get; set; } = 30;
     public QueueStatus Status { get; set; } = QueueStatus.Scheduled;
+    public VisitType? VisitType { get; set; }
     public string Notes { get; set; } = string.Empty;
     public string? UpdatedBy { get; set; }
 }

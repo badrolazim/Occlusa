@@ -1,6 +1,7 @@
 using System.Collections.ObjectModel;
 using System.Net.Http;
 using System.Windows;
+using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Occlusa.Desktop.Services;
@@ -35,9 +36,13 @@ public partial class MainViewModel : ObservableObject
     private List<WhatsAppThreadDto> _allThreads = new();
     private List<SoapMacroDto> _soapMacros = new();
     private DailySalesReconciliationDto? _latestReconciliation;
+    private DispatcherTimer? _queueElapsedTimer;
 
     [ObservableProperty]
     private string _selectedBranchId = "HQ-KL";
+
+    [ObservableProperty]
+    private string _selectedStaffName = "Siti (Reception)";
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsQueueWorkspace))]
@@ -92,7 +97,17 @@ public partial class MainViewModel : ObservableObject
     private string _bannerAlertNotes = string.Empty;
 
     [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasSelectedQueueRow))]
+    [NotifyPropertyChangedFor(nameof(CanApproveSelectedAi))]
+    [NotifyPropertyChangedFor(nameof(CanCheckInSelected))]
+    [NotifyPropertyChangedFor(nameof(CanCallToChairSelected))]
+    [NotifyPropertyChangedFor(nameof(CanSendToCheckoutSelected))]
+    [NotifyPropertyChangedFor(nameof(CanCompleteSelected))]
+    [NotifyPropertyChangedFor(nameof(CanCancelSelectedQueue))]
     private QueueRowItem? _selectedQueueRow;
+
+    [ObservableProperty]
+    private string _queuePulseSummary = "Double-click any row for Visit Details or Odontogram";
 
     [ObservableProperty]
     private PatientRowItem? _selectedPatientRow;
@@ -150,6 +165,17 @@ public partial class MainViewModel : ObservableObject
         _getLocalApiStatus = getLocalApiStatus;
 
         AvailableBranches = new ObservableCollection<string> { "HQ-KL", "PJ-SS2" };
+        StaffMembers = new ObservableCollection<string>
+        {
+            "Siti (Reception)",
+            "Aisyah (Reception)",
+            "Nurse Farah (Assistant)",
+            "Nurse Mei Yan (Assistant)",
+            "Dr. Aina Rahman",
+            "Dr. Marcus Tan",
+            "Dr. Priya Nair"
+        };
+        _apiClient.SetActiveUser(SelectedStaffName);
         SimulatedProfileNames = new ObservableCollection<string>(
             _myKadService.SimulatedProfiles.Select(p => $"{p.FullName} ({p.IcNumber})"));
 
@@ -185,7 +211,10 @@ public partial class MainViewModel : ObservableObject
         _myKadService.MyKadDetected += (_, result) => RunOnUi(() => _ = HandleMyKadReadResultAsync(result));
     }
 
+    public event EventHandler<PatientDto>? WalkInIntakeRequested;
+
     public ObservableCollection<string> AvailableBranches { get; }
+    public ObservableCollection<string> StaffMembers { get; }
     public ObservableCollection<string> SimulatedProfileNames { get; }
     public ObservableCollection<QueueRowItem> QueueRows { get; }
     public ObservableCollection<PatientRowItem> PatientRows { get; }
@@ -199,6 +228,14 @@ public partial class MainViewModel : ObservableObject
     public IReadOnlyList<SoapMacroDto> SoapMacros => _soapMacros;
     public IReadOnlyList<AppointmentQueueItemDto> AllQueueItems => _allQueue;
     public DailySalesReconciliationDto? LatestReconciliation => _latestReconciliation;
+
+    public bool HasSelectedQueueRow => SelectedQueueRow != null;
+    public bool CanApproveSelectedAi => SelectedQueueRow?.Source.Status == QueueStatus.AiBookedPending;
+    public bool CanCheckInSelected => SelectedQueueRow?.Source.Status is QueueStatus.Scheduled or QueueStatus.AiBookedPending;
+    public bool CanCallToChairSelected => SelectedQueueRow?.Source.Status is QueueStatus.Waiting or QueueStatus.Arrived or QueueStatus.Scheduled;
+    public bool CanSendToCheckoutSelected => SelectedQueueRow?.Source.Status == QueueStatus.InChair;
+    public bool CanCompleteSelected => SelectedQueueRow?.Source.Status is QueueStatus.InChair or QueueStatus.AwaitingCheckout;
+    public bool CanCancelSelectedQueue => SelectedQueueRow != null && !AppointmentCalendarHelper.IsFinishedQueueStatus(SelectedQueueRow.Source.Status);
 
     public bool IsQueueWorkspace => ActiveWorkspaceIndex == WorkspaceQueue;
     public bool IsAppointmentsWorkspace => ActiveWorkspaceIndex == WorkspaceAppointments;
@@ -253,6 +290,21 @@ public partial class MainViewModel : ObservableObject
 
         await RefreshSnapshotAsync();
         await _apiClient.StartRealtimeAsync(SelectedBranchId);
+
+        if (_queueElapsedTimer == null)
+        {
+            _queueElapsedTimer = new DispatcherTimer
+            {
+                Interval = TimeSpan.FromSeconds(30)
+            };
+            _queueElapsedTimer.Tick += (_, _) => RefreshQueueElapsedTimers();
+            _queueElapsedTimer.Start();
+        }
+    }
+
+    public void StopTimers()
+    {
+        _queueElapsedTimer?.Stop();
     }
 
     partial void OnSelectedBranchIdChanged(string value)
@@ -260,6 +312,15 @@ public partial class MainViewModel : ObservableObject
         if (!string.IsNullOrWhiteSpace(value))
         {
             _ = SwitchBranchInternalAsync(value);
+        }
+    }
+
+    partial void OnSelectedStaffNameChanged(string value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+        {
+            _apiClient.SetActiveUser(value);
+            StatusMessage = $"Active operator switched to {value}.";
         }
     }
 
@@ -382,11 +443,12 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private async Task AdvanceQueueStatusAsync(string targetStatusName)
     {
-        if (SelectedQueueRow == null || !Enum.TryParse<QueueStatus>(targetStatusName, out var newStatus))
+        if (SelectedQueueRow == null || !Enum.TryParse<QueueStatus>(targetStatusName, out var parsedStatus))
         {
             return;
         }
 
+        var newStatus = AppointmentCalendarHelper.NormalizeQueueStatus(parsedStatus);
         try
         {
             var updated = await _apiClient.UpdateQueueStatusAsync(
@@ -395,15 +457,57 @@ public partial class MainViewModel : ObservableObject
                 {
                     NewStatus = newStatus,
                     RoomName = SelectedQueueRow.Source.RoomName,
-                    UpdatedBy = "Desktop Reception"
+                    UpdatedBy = SelectedStaffName
                 });
 
             UpsertQueueItem(updated);
-            StatusMessage = $"Updated {updated.PatientName} to {updated.Status}.";
+            SelectedQueueRow = QueueRows.FirstOrDefault(r => r.Source.Id == updated.Id);
+            StatusMessage = $"{updated.PatientName} → {AppointmentCalendarHelper.FormatStatusLabel(updated.Status)} (by {SelectedStaffName}).";
         }
         catch (Exception ex)
         {
             StatusMessage = $"Status update failed: {ex.Message}";
+        }
+    }
+
+    [RelayCommand]
+    private async Task CancelSelectedQueueItemAsync()
+    {
+        if (SelectedQueueRow == null || AppointmentCalendarHelper.IsFinishedQueueStatus(SelectedQueueRow.Source.Status))
+        {
+            return;
+        }
+
+        var target = SelectedQueueRow.Source;
+        var confirm = MessageBox.Show(
+            $"Cancel {target.PatientName}'s visit ({target.ProcedureSummary})?\nThis will move the row to the bottom as Cancelled.",
+            "Confirm Cancel Visit",
+            MessageBoxButton.YesNo,
+            MessageBoxImage.Question);
+
+        if (confirm != MessageBoxResult.Yes)
+        {
+            return;
+        }
+
+        try
+        {
+            var updated = await _apiClient.UpdateQueueStatusAsync(
+                target.Id,
+                new UpdateQueueStatusRequest
+                {
+                    NewStatus = QueueStatus.Cancelled,
+                    RoomName = target.RoomName,
+                    UpdatedBy = SelectedStaffName
+                });
+
+            UpsertQueueItem(updated);
+            SelectedQueueRow = QueueRows.FirstOrDefault(r => r.Source.Id == updated.Id);
+            StatusMessage = $"Cancelled {updated.PatientName} (by {SelectedStaffName}).";
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Cancel failed: {ex.Message}";
         }
     }
 
@@ -417,9 +521,10 @@ public partial class MainViewModel : ObservableObject
 
         try
         {
-            var approved = await _apiClient.ApproveAiBookingAsync(SelectedQueueRow.Source.Id);
+            var approved = await _apiClient.ApproveAiBookingAsync(SelectedQueueRow.Source.Id, SelectedStaffName);
             UpsertQueueItem(approved);
-            StatusMessage = $"Approved AI booking for {approved.PatientName}.";
+            SelectedQueueRow = QueueRows.FirstOrDefault(r => r.Source.Id == approved.Id);
+            StatusMessage = $"Approved AI booking for {approved.PatientName} (by {SelectedStaffName}).";
         }
         catch (Exception ex)
         {
@@ -436,27 +541,37 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
-        try
-        {
-            var created = await _apiClient.CreateAppointmentAsync(new CreateAppointmentRequest
-            {
-                BranchId = SelectedBranchId,
-                PatientId = SelectedPatient.Id,
-                DoctorName = SelectedBranchId == "PJ-SS2" ? "Dr. Marcus Tan" : "Dr. Aina Rahman",
-                RoomName = SelectedBranchId == "PJ-SS2" ? "Room 2" : "Room 1",
-                ScheduledAt = DateTimeOffset.Now,
-                ProcedureSummary = "Walk-In Consultation",
-                Status = QueueStatus.Arrived
-            });
+        var existingToday = QueueRows.FirstOrDefault(r =>
+            r.Source.PatientId == SelectedPatient.Id
+            && r.Source.Status is QueueStatus.Scheduled or QueueStatus.AiBookedPending);
 
-            UpsertQueueItem(created);
-            ActiveWorkspaceIndex = WorkspaceQueue;
-            StatusMessage = $"Checked in {SelectedPatient.FullName} to Live Queue ({SelectedBranchId}).";
-        }
-        catch (Exception ex)
+        if (existingToday != null)
         {
-            StatusMessage = $"Check-in failed: {ex.Message}";
+            try
+            {
+                var updated = await _apiClient.UpdateQueueStatusAsync(
+                    existingToday.Source.Id,
+                    new UpdateQueueStatusRequest
+                    {
+                        NewStatus = QueueStatus.Waiting,
+                        RoomName = existingToday.Source.RoomName,
+                        UpdatedBy = SelectedStaffName
+                    });
+
+                UpsertQueueItem(updated);
+                ActiveWorkspaceIndex = WorkspaceQueue;
+                SelectedQueueRow = QueueRows.FirstOrDefault(r => r.Source.Id == updated.Id);
+                StatusMessage = $"Checked in {SelectedPatient.FullName} to Waiting (by {SelectedStaffName}).";
+                return;
+            }
+            catch (Exception ex)
+            {
+                StatusMessage = $"Check-in failed: {ex.Message}";
+                return;
+            }
         }
+
+        WalkInIntakeRequested?.Invoke(this, SelectedPatient);
     }
 
     public async Task HandleMyKadReadResultAsync(MyKadReadResultDto result)
@@ -490,7 +605,68 @@ public partial class MainViewModel : ObservableObject
             MergePatient(saved);
             SelectedPatient = saved;
             SelectedPatientRow = PatientRows.FirstOrDefault(r => r.Source.Id == saved.Id);
-            ActiveWorkspaceIndex = WorkspacePatients;
+
+            var activeVisitRow = QueueRows.FirstOrDefault(r =>
+                r.Source.PatientId == saved.Id
+                && !AppointmentCalendarHelper.IsFinishedQueueStatus(r.Source.Status));
+
+            if (activeVisitRow != null)
+            {
+                ActiveWorkspaceIndex = WorkspaceQueue;
+                SelectedQueueRow = activeVisitRow;
+
+                if (activeVisitRow.Source.Status is QueueStatus.Scheduled or QueueStatus.AiBookedPending)
+                {
+                    var checkInPrompt = MessageBox.Show(
+                        $"MyKad verified for {saved.FullName}.\n\n"
+                        + $"Found booking today at {activeVisitRow.Source.ScheduledAt.ToLocalTime():HH:mm} "
+                        + $"with {activeVisitRow.Source.DoctorName} ({activeVisitRow.Source.RoomName}).\n\n"
+                        + "Check in to Waiting now?",
+                        "Smart MyKad Check-In",
+                        MessageBoxButton.YesNo,
+                        MessageBoxImage.Question);
+
+                    if (checkInPrompt == MessageBoxResult.Yes)
+                    {
+                        var updated = await _apiClient.UpdateQueueStatusAsync(
+                            activeVisitRow.Source.Id,
+                            new UpdateQueueStatusRequest
+                            {
+                                NewStatus = QueueStatus.Waiting,
+                                RoomName = activeVisitRow.Source.RoomName,
+                                UpdatedBy = SelectedStaffName
+                            });
+                        UpsertQueueItem(updated);
+                        SelectedQueueRow = QueueRows.FirstOrDefault(r => r.Source.Id == updated.Id);
+                        StatusMessage = $"Checked in {saved.FullName} via MyKad (by {SelectedStaffName}).";
+                        return;
+                    }
+                }
+
+                StatusMessage = $"MyKad verified: {saved.FullName} ({activeVisitRow.StatusDisplay})";
+                return;
+            }
+
+            if (IsQueueWorkspace)
+            {
+                var walkInPrompt = MessageBox.Show(
+                    $"MyKad verified for {saved.FullName} ({saved.IcNumber}).\n\n"
+                    + "No appointment found for today. Register as Walk-In now?",
+                    "MyKad Walk-In Check-In",
+                    MessageBoxButton.YesNo,
+                    MessageBoxImage.Question);
+
+                if (walkInPrompt == MessageBoxResult.Yes)
+                {
+                    WalkInIntakeRequested?.Invoke(this, saved);
+                    return;
+                }
+            }
+            else
+            {
+                ActiveWorkspaceIndex = WorkspacePatients;
+            }
+
             StatusMessage = $"MyKad Verified ({(result.IsSimulated ? "Simulated" : result.ReaderName)}): {saved.FullName} [{saved.IcNumber}]";
         }
         catch (Exception ex)
@@ -544,7 +720,8 @@ public partial class MainViewModel : ObservableObject
                 args.Appointment,
                 args.TargetDate,
                 args.TargetStartTime,
-                DateTimeOffset.Now.Offset);
+                DateTimeOffset.Now.Offset,
+                SelectedStaffName);
 
             var updated = await _apiClient.UpdateAppointmentAsync(args.Appointment.Id, request);
             UpsertQueueItem(updated);
@@ -645,10 +822,13 @@ public partial class MainViewModel : ObservableObject
         var localToday = DateOnly.FromDateTime(DateTime.Now);
         var localOffset = DateTimeOffset.Now.Offset;
 
-        QueueRows.Clear();
-        foreach (var item in _allQueue
+        var todayItems = _allQueue
             .Where(a => AppointmentCalendarHelper.IsTodayForLiveQueue(a, localToday, localOffset))
-            .OrderBy(q => q.ScheduledAt))
+            .ToList();
+        var ordered = AppointmentCalendarHelper.SortLiveQueue(todayItems);
+
+        QueueRows.Clear();
+        foreach (var item in ordered)
         {
             QueueRows.Add(new QueueRowItem(item));
         }
@@ -659,6 +839,41 @@ public partial class MainViewModel : ObservableObject
         }
 
         QueueCount = QueueRows.Count;
+        UpdateQueuePulseSummary(ordered);
+        NotifyQueueCommandStates();
+    }
+
+    private void RefreshQueueElapsedTimers()
+    {
+        var now = DateTimeOffset.Now;
+        foreach (var row in QueueRows)
+        {
+            if (!row.IsFinished)
+            {
+                row.RefreshElapsed(now);
+            }
+        }
+    }
+
+    private void UpdateQueuePulseSummary(IReadOnlyList<AppointmentQueueItemDto> ordered)
+    {
+        int waiting = ordered.Count(q => AppointmentCalendarHelper.NormalizeQueueStatus(q.Status) == QueueStatus.Waiting);
+        int inChair = ordered.Count(q => q.Status == QueueStatus.InChair);
+        int checkout = ordered.Count(q => q.Status == QueueStatus.AwaitingCheckout);
+        int upcoming = ordered.Count(q => q.Status is QueueStatus.Scheduled or QueueStatus.AiBookedPending);
+        int done = ordered.Count(q => AppointmentCalendarHelper.IsFinishedQueueStatus(q.Status));
+        QueuePulseSummary = $"Waiting: {waiting} · In Chair: {inChair} · Checkout: {checkout} · Upcoming: {upcoming} · Done: {done} · Double-click for Details";
+    }
+
+    private void NotifyQueueCommandStates()
+    {
+        OnPropertyChanged(nameof(HasSelectedQueueRow));
+        OnPropertyChanged(nameof(CanApproveSelectedAi));
+        OnPropertyChanged(nameof(CanCheckInSelected));
+        OnPropertyChanged(nameof(CanCallToChairSelected));
+        OnPropertyChanged(nameof(CanSendToCheckoutSelected));
+        OnPropertyChanged(nameof(CanCompleteSelected));
+        OnPropertyChanged(nameof(CanCancelSelectedQueue));
     }
 
     private void RebuildAppointmentsWorkspace()

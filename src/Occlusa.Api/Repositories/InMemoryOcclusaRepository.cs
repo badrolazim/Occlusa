@@ -475,6 +475,7 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
     {
         _patients.TryGetValue(request.PatientId, out var patient);
         var branch = ClinicDomainHelpers.NormalizeBranch(request.BranchId, _clinicOptions.DefaultBranchId);
+        var now = DateTimeOffset.UtcNow;
 
         var dentist = ResolveDentist(request.DentistId, request.DoctorName);
         var treatment = ResolveTreatment(request.TreatmentId, request.ProcedureSummary);
@@ -492,6 +493,32 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
             ? Math.Clamp(request.DurationMinutes, 15, 480)
             : Math.Clamp(treatment?.DefaultDurationMinutes ?? 30, 15, 480);
 
+        var normalizedStatus = AppointmentCalendarHelper.NormalizeQueueStatus(request.Status);
+        var visitType = normalizedStatus == QueueStatus.AiBookedPending
+            ? VisitType.AiBooked
+            : request.VisitType;
+        var actor = !string.IsNullOrWhiteSpace(request.CreatedBy)
+            ? request.CreatedBy.Trim()
+            : claims.UserId;
+
+        DateTimeOffset? arrivedAt = request.ArrivedAt;
+        var checkedInBy = string.Empty;
+        if (visitType == VisitType.WalkIn || normalizedStatus is QueueStatus.Waiting or QueueStatus.InChair)
+        {
+            arrivedAt ??= now;
+            checkedInBy = actor;
+        }
+
+        DateTimeOffset? seatedAt = normalizedStatus == QueueStatus.InChair ? now : null;
+        var seatedBy = normalizedStatus == QueueStatus.InChair ? actor : string.Empty;
+
+        var initialAction = visitType switch
+        {
+            VisitType.WalkIn => "Walk-In Registered",
+            VisitType.AiBooked => "AI Booking Created",
+            _ => "Appointment Booked"
+        };
+
         var item = new AppointmentQueueItemDto
         {
             Id = Guid.NewGuid(),
@@ -503,11 +530,29 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
             DoctorName = doctorName,
             TreatmentId = request.TreatmentId ?? treatment?.Id,
             RoomName = roomName,
-            ScheduledAt = request.ScheduledAt == default ? DateTimeOffset.UtcNow : request.ScheduledAt,
+            ScheduledAt = request.ScheduledAt == default ? now : request.ScheduledAt,
             DurationMinutes = duration,
             ProcedureSummary = procedureSummary,
             Notes = request.Notes?.Trim() ?? string.Empty,
-            Status = request.Status,
+            Status = normalizedStatus,
+            VisitType = visitType,
+            ArrivedAt = arrivedAt,
+            SeatedAt = seatedAt,
+            CreatedBy = actor,
+            CheckedInBy = checkedInBy,
+            SeatedBy = seatedBy,
+            LastUpdatedBy = actor,
+            LastUpdatedAt = now,
+            ActivityLog = new List<VisitActivityEntryDto>
+            {
+                new()
+                {
+                    Timestamp = now,
+                    Action = initialAction,
+                    StaffName = actor,
+                    Details = $"{doctorName} · {roomName} · {procedureSummary}"
+                }
+            },
             HasCriticalMedicalAlert = patient?.MedicalAlerts.HasAnyCriticalAlert ?? false,
             AlertSummary = patient?.MedicalAlerts.BuildAlertSummary() ?? "No Critical Alerts"
         };
@@ -516,12 +561,12 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
 
         AppendAudit(
             branch,
-            claims.UserId,
+            actor,
             "APPOINTMENT_CREATED",
             "Appointment",
             item.Id.ToString(),
             null,
-            $"{item.PatientName} | {item.DoctorName} | {item.ProcedureSummary} | {item.DurationMinutes}m | {item.Status}");
+            $"{item.PatientName} | {item.VisitType} | {item.DoctorName} | {item.ProcedureSummary} | {item.DurationMinutes}m | {item.Status}");
 
         return item;
     }
@@ -539,6 +584,8 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
                 return Task.FromResult<(AppointmentQueueItemDto?, string?)>((null, "Appointment not found."));
             }
 
+            var now = DateTimeOffset.UtcNow;
+            var oldStatus = item.Status;
             var oldSummary = $"{item.PatientName} | {item.DoctorName} | {item.ProcedureSummary} | {item.ScheduledAt:O} | {item.DurationMinutes}m | {item.Status}";
 
             if (request.PatientId != Guid.Empty && _patients.TryGetValue(request.PatientId, out var patient))
@@ -592,13 +639,37 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
                 item.DurationMinutes = Math.Clamp(request.DurationMinutes, 15, 480);
             }
 
-            item.Status = request.Status;
+            if (request.VisitType.HasValue)
+            {
+                item.VisitType = request.VisitType.Value;
+            }
+
             item.Notes = request.Notes?.Trim() ?? string.Empty;
+
+            var actor = string.IsNullOrWhiteSpace(request.UpdatedBy) ? claims.UserId : request.UpdatedBy.Trim();
+            var normalizedTargetStatus = AppointmentCalendarHelper.NormalizeQueueStatus(request.Status);
+            if (AppointmentCalendarHelper.NormalizeQueueStatus(oldStatus) != normalizedTargetStatus)
+            {
+                ClinicDomainHelpers.ApplyStatusMilestone(item, oldStatus, normalizedTargetStatus, actor, now, item.RoomName);
+            }
+            else
+            {
+                item.Status = normalizedTargetStatus;
+                item.LastUpdatedBy = actor;
+                item.LastUpdatedAt = now;
+                item.ActivityLog.Add(new VisitActivityEntryDto
+                {
+                    Timestamp = now,
+                    Action = "Appointment Updated",
+                    StaffName = actor,
+                    Details = $"{item.DoctorName} · {item.RoomName} · {item.ScheduledAt.ToLocalTime():dd MMM HH:mm}"
+                });
+            }
 
             var newSummary = $"{item.PatientName} | {item.DoctorName} | {item.ProcedureSummary} | {item.ScheduledAt:O} | {item.DurationMinutes}m | {item.Status}";
             AppendAudit(
                 item.BranchId,
-                string.IsNullOrWhiteSpace(request.UpdatedBy) ? claims.UserId : request.UpdatedBy.Trim(),
+                actor,
                 "APPOINTMENT_UPDATED",
                 "Appointment",
                 item.Id.ToString(),
@@ -622,22 +693,25 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
                 return Task.FromResult<(AppointmentQueueItemDto?, string?)>((null, "Appointment not found."));
             }
 
-            if (!ClinicDomainHelpers.IsTransitionAllowed(item.Status, request.NewStatus))
+            var normalizedNew = AppointmentCalendarHelper.NormalizeQueueStatus(request.NewStatus);
+            if (!ClinicDomainHelpers.IsTransitionAllowed(item.Status, normalizedNew))
             {
                 return Task.FromResult<(AppointmentQueueItemDto?, string?)>(
-                    (null, $"Invalid queue transition from {item.Status} to {request.NewStatus}."));
+                    (null, $"Invalid queue transition from {item.Status} to {normalizedNew}."));
             }
 
             var oldStatus = item.Status;
-            item.Status = request.NewStatus;
             if (!string.IsNullOrWhiteSpace(request.RoomName))
             {
                 item.RoomName = request.RoomName.Trim();
             }
 
+            var actor = string.IsNullOrWhiteSpace(request.UpdatedBy) ? claims.UserId : request.UpdatedBy.Trim();
+            ClinicDomainHelpers.ApplyStatusMilestone(item, oldStatus, normalizedNew, actor, DateTimeOffset.UtcNow, request.RoomName);
+
             AppendAudit(
                 item.BranchId,
-                string.IsNullOrWhiteSpace(request.UpdatedBy) ? claims.UserId : request.UpdatedBy.Trim(),
+                actor,
                 "QUEUE_STATUS_CHANGED",
                 "Appointment",
                 item.Id.ToString(),
@@ -962,7 +1036,14 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
 
                 if (linkedAppt is not null && linkedAppt.Status != QueueStatus.Completed && linkedAppt.Status != QueueStatus.Cancelled)
                 {
-                    linkedAppt.Status = QueueStatus.Completed;
+                    var actor = string.IsNullOrWhiteSpace(request.CollectedBy) ? claims.UserId : request.CollectedBy.Trim();
+                    ClinicDomainHelpers.ApplyStatusMilestone(
+                        linkedAppt,
+                        linkedAppt.Status,
+                        QueueStatus.Completed,
+                        actor,
+                        DateTimeOffset.UtcNow,
+                        $"Invoice {validation.Invoice.InvoiceNumber}");
                     updatedQueue = ClinicDomainHelpers.Clone(linkedAppt);
                 }
             }
@@ -1218,7 +1299,8 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
             }
 
             var oldStatus = appt.Status;
-            appt.Status = QueueStatus.Scheduled;
+            var actor = string.IsNullOrWhiteSpace(approvedBy) ? claims.UserId : approvedBy.Trim();
+            ClinicDomainHelpers.ApplyStatusMilestone(appt, oldStatus, QueueStatus.Scheduled, actor, DateTimeOffset.UtcNow);
 
             WhatsAppThreadDto? updatedThread = null;
             var matchingEntry = _whatsAppThreads.Values
@@ -1579,19 +1661,33 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
             }
         };
 
-        // 5. Seed Appointments across HQ-KL (12 items today for 1080p 11-row paging + multi-day week/month) and PJ-SS2
-        var a1 = SeedAppt("30000000-0000-0000-0000-000000000001", "HQ-KL", p1, d1, "Suite 1", LocalSlot(localToday, 9, 0, localOffset), t3, "Posterior Composite Filling (#26)", QueueStatus.InChair, 45, "Penicillin allergy noted on chart");
-        var a2 = SeedAppt("30000000-0000-0000-0000-000000000002", "HQ-KL", p2, d2, "Suite 2", LocalSlot(localToday, 9, 30, localOffset), t5, "Root Canal Therapy Stage 1 (#36)", QueueStatus.Waiting, 60, "Type 2 DM; morning slot preferred");
-        var a3 = SeedAppt("30000000-0000-0000-0000-000000000003", "HQ-KL", p3, d1, "Suite 1", LocalSlot(localToday, 10, 0, localOffset), t3, "Temporary Filling (#24)", QueueStatus.Arrived, 30, "2nd trimester pregnancy; avoid radiographs");
-        var a4 = SeedAppt("30000000-0000-0000-0000-000000000004", "HQ-KL", p4, d2, "Suite 2", LocalSlot(localToday, 10, 30, localOffset), t1, "INR Review & Consultation (#47)", QueueStatus.Scheduled, 30, "Review Warfarin INR before extraction");
-        var a5 = SeedAppt("30000000-0000-0000-0000-000000000005", "HQ-KL", p5, d3, "Suite 3", LocalSlot(localToday, 9, 15, localOffset), t3, "Composite Filling (#14)", QueueStatus.AwaitingCheckout, 45, "Latex allergy; nitrile gloves used");
-        var a6 = SeedAppt("30000000-0000-0000-0000-000000000006", "HQ-KL", p6, d1, "Suite 3", LocalSlot(localToday, 11, 30, localOffset), t2, "Routine Scaling & Polishing", QueueStatus.AiBookedPending, 30, "Provisional WhatsApp AI booking");
-        var a7 = SeedAppt("30000000-0000-0000-0000-000000000007", "HQ-KL", p7, d2, "Suite 2", LocalSlot(localToday, 9, 0, localOffset), t6, "PFM Crown Cementation (#37)", QueueStatus.Completed, 60, "AIA Dental Panel covered");
-        var a8 = SeedAppt("30000000-0000-0000-0000-000000000008", "HQ-KL", p8, d3, "Suite 3", LocalSlot(localToday, 11, 0, localOffset), t1, "New Patient Consultation", QueueStatus.Scheduled, 30);
-        var a9 = SeedAppt("30000000-0000-0000-0000-000000000009", "HQ-KL", p9, d3, "Suite 3", LocalSlot(localToday, 13, 30, localOffset), t2, "Routine Scaling & Polishing", QueueStatus.Scheduled, 30);
-        var a10 = SeedAppt("30000000-0000-0000-0000-000000000010", "HQ-KL", p10, d1, "Suite 1", LocalSlot(localToday, 14, 0, localOffset), t1, "Routine Checkup", QueueStatus.Scheduled, 30, "On low-dose Aspirin 100mg");
-        var a11 = SeedAppt("30000000-0000-0000-0000-000000000011", "HQ-KL", p11, d3, "Suite 3", LocalSlot(localToday, 15, 0, localOffset), t3, "Simple Filling Review", QueueStatus.Waiting, 30);
-        var a12 = SeedAppt("30000000-0000-0000-0000-000000000012", "HQ-KL", p1, d1, "Suite 1", LocalSlot(localToday, 16, 0, localOffset), t3, "Posterior Composite Filling (#16)", QueueStatus.Completed, 45);
+        // 5. Seed Appointments across HQ-KL (including Walk-Ins, Waiting, InChair, Checkout, AI Pending, Completed) and PJ-SS2
+        var a1 = SeedAppt("30000000-0000-0000-0000-000000000001", "HQ-KL", p1, d1, "Suite 1", LocalSlot(localToday, 9, 0, localOffset), t3, "Posterior Composite Filling (#26)", QueueStatus.InChair, 45, "Penicillin allergy noted on chart",
+            visitType: VisitType.Booked, arrivedAt: now.AddMinutes(-32), seatedAt: now.AddMinutes(-18), createdBy: "Siti (Reception)", checkedInBy: "Siti (Reception)", seatedBy: "Nurse Farah (Assistant)");
+        var a2 = SeedAppt("30000000-0000-0000-0000-000000000002", "HQ-KL", p2, d2, "Suite 2", LocalSlot(localToday, 9, 30, localOffset), t5, "Root Canal Therapy Stage 1 (#36)", QueueStatus.Waiting, 60, "Type 2 DM; morning slot preferred",
+            visitType: VisitType.Booked, arrivedAt: now.AddMinutes(-21), createdBy: "Aisyah (Reception)", checkedInBy: "Siti (Reception)");
+        var a3 = SeedAppt("30000000-0000-0000-0000-000000000003", "HQ-KL", p3, d1, "Suite 1", LocalSlot(localToday, 10, 0, localOffset), t3, "Temporary Filling (#24)", QueueStatus.Waiting, 30, "2nd trimester pregnancy; avoid radiographs",
+            visitType: VisitType.Booked, arrivedAt: now.AddMinutes(-9), createdBy: "Siti (Reception)", checkedInBy: "Siti (Reception)");
+        var a4 = SeedAppt("30000000-0000-0000-0000-000000000004", "HQ-KL", p4, d2, "Suite 2", LocalSlot(localToday, 10, 30, localOffset), t1, "INR Review & Consultation (#47)", QueueStatus.Scheduled, 30, "Review Warfarin INR before extraction",
+            visitType: VisitType.Booked, createdBy: "Aisyah (Reception)");
+        var a5 = SeedAppt("30000000-0000-0000-0000-000000000005", "HQ-KL", p5, d3, "Suite 3", LocalSlot(localToday, 9, 15, localOffset), t3, "Composite Filling (#14)", QueueStatus.AwaitingCheckout, 45, "Latex allergy; nitrile gloves used",
+            visitType: VisitType.Booked, arrivedAt: now.AddMinutes(-68), seatedAt: now.AddMinutes(-55), checkoutAt: now.AddMinutes(-7), createdBy: "Siti (Reception)", checkedInBy: "Siti (Reception)", seatedBy: "Nurse Mei Yan (Assistant)", checkoutBy: "Dr. Priya Nair");
+        var a6 = SeedAppt("30000000-0000-0000-0000-000000000006", "HQ-KL", p6, d1, "Suite 3", LocalSlot(localToday, 11, 30, localOffset), t2, "Routine Scaling & Polishing", QueueStatus.AiBookedPending, 30, "Provisional WhatsApp AI booking",
+            visitType: VisitType.AiBooked, createdBy: "WhatsApp AI");
+        var a7 = SeedAppt("30000000-0000-0000-0000-000000000007", "HQ-KL", p7, d2, "Suite 2", LocalSlot(localToday, 9, 0, localOffset), t6, "PFM Crown Cementation (#37)", QueueStatus.Completed, 60, "AIA Dental Panel covered",
+            visitType: VisitType.Booked, arrivedAt: now.AddHours(-3), seatedAt: now.AddMinutes(-165), checkoutAt: now.AddHours(-2).AddMinutes(-15), completedAt: now.AddHours(-2), createdBy: "Aisyah (Reception)", checkedInBy: "Siti (Reception)", seatedBy: "Nurse Farah (Assistant)", checkoutBy: "Dr. Marcus Tan", completedBy: "Aisyah (Reception)");
+        var a8 = SeedAppt("30000000-0000-0000-0000-000000000008", "HQ-KL", p8, d3, "Suite 3", LocalSlot(localToday, 11, 0, localOffset), t1, "New Patient Consultation", QueueStatus.Scheduled, 30,
+            visitType: VisitType.Booked, createdBy: "Siti (Reception)");
+        var a9 = SeedAppt("30000000-0000-0000-0000-000000000009", "HQ-KL", p9, d3, "Suite 3", LocalSlot(localToday, 13, 30, localOffset), t2, "Routine Scaling & Polishing", QueueStatus.Scheduled, 30,
+            visitType: VisitType.Booked, createdBy: "Siti (Reception)");
+        var a10 = SeedAppt("30000000-0000-0000-0000-000000000010", "HQ-KL", p10, d1, "Suite 1", LocalSlot(localToday, 14, 0, localOffset), t1, "Routine Checkup", QueueStatus.Scheduled, 30, "On low-dose Aspirin 100mg",
+            visitType: VisitType.Booked, createdBy: "Aisyah (Reception)");
+        var a11 = SeedAppt("30000000-0000-0000-0000-000000000011", "HQ-KL", p11, d3, "Suite 3", LocalSlot(localToday, 15, 0, localOffset), t3, "Simple Filling Review", QueueStatus.Waiting, 30,
+            visitType: VisitType.WalkIn, arrivedAt: now.AddMinutes(-35), createdBy: "Siti (Reception)", checkedInBy: "Siti (Reception)");
+        var a12 = SeedAppt("30000000-0000-0000-0000-000000000012", "HQ-KL", p1, d1, "Suite 1", LocalSlot(localToday, 16, 0, localOffset), t3, "Posterior Composite Filling (#16)", QueueStatus.Completed, 45,
+            visitType: VisitType.Booked, arrivedAt: now.AddHours(-2), seatedAt: now.AddMinutes(-105), checkoutAt: now.AddHours(-1).AddMinutes(-10), completedAt: now.AddHours(-1), createdBy: "Siti (Reception)", checkedInBy: "Siti (Reception)", seatedBy: "Nurse Farah (Assistant)", checkoutBy: "Dr. Aina Rahman", completedBy: "Siti (Reception)");
+        SeedAppt("30000000-0000-0000-0000-000000000034", "HQ-KL", p9, d1, "Suite 1", LocalSlot(localToday, 12, 0, localOffset), t2, "Routine Scaling & Polishing", QueueStatus.Waiting, 30, "Walk-in patient at front desk",
+            visitType: VisitType.WalkIn, arrivedAt: now.AddMinutes(-14), createdBy: "Aisyah (Reception)", checkedInBy: "Aisyah (Reception)");
 
         // Multi-day HQ-KL appointments across the week and month
         SeedAppt("30000000-0000-0000-0000-000000000018", "HQ-KL", p2, d1, "Suite 1", LocalSlot(localToday.AddDays(-1), 10, 0, localOffset), t2, "Routine Scaling & Polishing", QueueStatus.Completed, 30);
@@ -1608,11 +1704,16 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
         SeedAppt("30000000-0000-0000-0000-000000000029", "HQ-KL", p2, d2, "Suite 2", LocalSlot(localToday.AddDays(7), 10, 30, localOffset), t5, "Root Canal Therapy Stage 2", QueueStatus.Scheduled, 60);
 
         // PJ-SS2 today + multi-day appointments
-        var a13 = SeedAppt("30000000-0000-0000-0000-000000000013", "PJ-SS2", p12, d2, "PJ Room 1", LocalSlot(localToday, 9, 30, localOffset), t7, "Implant Crown Review (#21)", QueueStatus.InChair, 30);
-        var a14 = SeedAppt("30000000-0000-0000-0000-000000000014", "PJ-SS2", p13, d1, "PJ Room 2", LocalSlot(localToday, 10, 30, localOffset), t2, "Routine Scaling & Polishing", QueueStatus.Waiting, 30, "Lidocaine sulfite allergy");
-        var a15 = SeedAppt("30000000-0000-0000-0000-000000000015", "PJ-SS2", p14, d2, "PJ Room 1", LocalSlot(localToday, 14, 0, localOffset), t1, "Diabetic Periodontal Review", QueueStatus.Scheduled, 30);
-        var a16 = SeedAppt("30000000-0000-0000-0000-000000000016", "PJ-SS2", p15, d1, "PJ Room 2", LocalSlot(localToday, 15, 30, localOffset), t1, "Routine Consultation", QueueStatus.AiBookedPending, 30, "Provisional WhatsApp AI booking");
-        var a17 = SeedAppt("30000000-0000-0000-0000-000000000017", "PJ-SS2", p16, d2, "PJ Room 1", LocalSlot(localToday, 11, 0, localOffset), t2, "Routine Scaling & Polishing", QueueStatus.Completed, 30);
+        var a13 = SeedAppt("30000000-0000-0000-0000-000000000013", "PJ-SS2", p12, d2, "PJ Room 1", LocalSlot(localToday, 9, 30, localOffset), t7, "Implant Crown Review (#21)", QueueStatus.InChair, 30,
+            visitType: VisitType.Booked, arrivedAt: now.AddMinutes(-24), seatedAt: now.AddMinutes(-12), createdBy: "Aisyah (Reception)", checkedInBy: "Aisyah (Reception)", seatedBy: "Nurse Mei Yan (Assistant)");
+        var a14 = SeedAppt("30000000-0000-0000-0000-000000000014", "PJ-SS2", p13, d1, "PJ Room 2", LocalSlot(localToday, 10, 30, localOffset), t2, "Routine Scaling & Polishing", QueueStatus.Waiting, 30, "Lidocaine sulfite allergy",
+            visitType: VisitType.WalkIn, arrivedAt: now.AddMinutes(-16), createdBy: "Siti (Reception)", checkedInBy: "Siti (Reception)");
+        var a15 = SeedAppt("30000000-0000-0000-0000-000000000015", "PJ-SS2", p14, d2, "PJ Room 1", LocalSlot(localToday, 14, 0, localOffset), t1, "Diabetic Periodontal Review", QueueStatus.Scheduled, 30,
+            visitType: VisitType.Booked, createdBy: "Siti (Reception)");
+        var a16 = SeedAppt("30000000-0000-0000-0000-000000000016", "PJ-SS2", p15, d1, "PJ Room 2", LocalSlot(localToday, 15, 30, localOffset), t1, "Routine Consultation", QueueStatus.AiBookedPending, 30, "Provisional WhatsApp AI booking",
+            visitType: VisitType.AiBooked, createdBy: "WhatsApp AI");
+        var a17 = SeedAppt("30000000-0000-0000-0000-000000000017", "PJ-SS2", p16, d2, "PJ Room 1", LocalSlot(localToday, 11, 0, localOffset), t2, "Routine Scaling & Polishing", QueueStatus.Completed, 30,
+            visitType: VisitType.Booked, arrivedAt: now.AddHours(-2), seatedAt: now.AddMinutes(-95), checkoutAt: now.AddHours(-1).AddMinutes(-15), completedAt: now.AddHours(-1), createdBy: "Siti (Reception)", checkedInBy: "Siti (Reception)", seatedBy: "Nurse Farah (Assistant)", checkoutBy: "Dr. Marcus Tan", completedBy: "Siti (Reception)");
 
         SeedAppt("30000000-0000-0000-0000-000000000030", "PJ-SS2", p12, d1, "PJ Room 2", LocalSlot(localToday.AddDays(1), 11, 0, localOffset), t2, "Routine Scaling & Polishing", QueueStatus.Scheduled, 30);
         SeedAppt("30000000-0000-0000-0000-000000000031", "PJ-SS2", p13, d1, "PJ Room 2", LocalSlot(localToday.AddDays(2), 14, 0, localOffset), t3, "Posterior Composite Filling", QueueStatus.Scheduled, 45);
@@ -1903,8 +2004,71 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
         string procedureSummary,
         QueueStatus status,
         int? durationMinutes = null,
-        string notes = "")
+        string notes = "",
+        VisitType visitType = VisitType.Booked,
+        DateTimeOffset? arrivedAt = null,
+        DateTimeOffset? seatedAt = null,
+        DateTimeOffset? checkoutAt = null,
+        DateTimeOffset? completedAt = null,
+        string createdBy = "Siti (Reception)",
+        string checkedInBy = "",
+        string seatedBy = "",
+        string checkoutBy = "",
+        string completedBy = "")
     {
+        var activity = new List<VisitActivityEntryDto>
+        {
+            new()
+            {
+                Timestamp = arrivedAt ?? scheduledAt.AddHours(-1),
+                Action = visitType == VisitType.WalkIn ? "Walk-In Registered" : visitType == VisitType.AiBooked ? "AI Booking Created" : "Appointment Booked",
+                StaffName = createdBy,
+                Details = $"{dentist.FullName} · {roomName} · {procedureSummary}"
+            }
+        };
+
+        if (arrivedAt.HasValue && visitType != VisitType.WalkIn)
+        {
+            activity.Add(new VisitActivityEntryDto
+            {
+                Timestamp = arrivedAt.Value,
+                Action = "Checked In (Waiting)",
+                StaffName = string.IsNullOrWhiteSpace(checkedInBy) ? createdBy : checkedInBy,
+                Details = $"{dentist.FullName} · {roomName}"
+            });
+        }
+        if (seatedAt.HasValue)
+        {
+            activity.Add(new VisitActivityEntryDto
+            {
+                Timestamp = seatedAt.Value,
+                Action = "Called to Chair",
+                StaffName = string.IsNullOrWhiteSpace(seatedBy) ? "Nurse Farah (Assistant)" : seatedBy,
+                Details = roomName
+            });
+        }
+        if (checkoutAt.HasValue)
+        {
+            activity.Add(new VisitActivityEntryDto
+            {
+                Timestamp = checkoutAt.Value,
+                Action = "Sent to Checkout",
+                StaffName = string.IsNullOrWhiteSpace(checkoutBy) ? dentist.FullName : checkoutBy,
+                Details = roomName
+            });
+        }
+        if (completedAt.HasValue)
+        {
+            activity.Add(new VisitActivityEntryDto
+            {
+                Timestamp = completedAt.Value,
+                Action = "Completed",
+                StaffName = string.IsNullOrWhiteSpace(completedBy) ? "Siti (Reception)" : completedBy,
+                Details = procedureSummary
+            });
+        }
+
+        var lastEntry = activity[^1];
         var item = new AppointmentQueueItemDto
         {
             Id = Guid.Parse(id),
@@ -1920,7 +2084,20 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
             DurationMinutes = durationMinutes ?? treatment.DefaultDurationMinutes,
             ProcedureSummary = procedureSummary,
             Notes = notes,
-            Status = status,
+            Status = AppointmentCalendarHelper.NormalizeQueueStatus(status),
+            VisitType = visitType,
+            ArrivedAt = arrivedAt,
+            SeatedAt = seatedAt,
+            CheckoutAt = checkoutAt,
+            CompletedAt = completedAt,
+            CreatedBy = createdBy,
+            CheckedInBy = checkedInBy,
+            SeatedBy = seatedBy,
+            CheckoutBy = checkoutBy,
+            CompletedBy = completedBy,
+            LastUpdatedBy = lastEntry.StaffName,
+            LastUpdatedAt = lastEntry.Timestamp,
+            ActivityLog = activity,
             HasCriticalMedicalAlert = patient.MedicalAlerts.HasAnyCriticalAlert,
             AlertSummary = patient.MedicalAlerts.BuildAlertSummary()
         };

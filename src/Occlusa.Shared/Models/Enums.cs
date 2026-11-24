@@ -10,12 +10,26 @@ public enum QueueStatus
 {
     Scheduled,
     AiBookedPending,
+    /// <summary>
+    /// Legacy state merged into <see cref="Waiting"/> for current clinic workflows.
+    /// </summary>
     Arrived,
     Waiting,
     InChair,
     AwaitingCheckout,
     Completed,
     Cancelled
+}
+
+/// <summary>
+/// Origin channel of a patient visit on the shared schedule and Live Queue.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum VisitType
+{
+    Booked,
+    WalkIn,
+    AiBooked
 }
 
 /// <summary>

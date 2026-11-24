@@ -1,39 +1,222 @@
+using System.Globalization;
+using System.Windows.Media;
+using CommunityToolkit.Mvvm.ComponentModel;
 using Occlusa.Shared.Models;
 using Occlusa.Shared.Services;
 
 namespace Occlusa.Desktop.ViewModels;
 
 /// <summary>
-/// Concise 4-column presentation row for the Live Queue UniformPagedGrid.
+/// Presentation row for the unified Live Queue UniformPagedGrid with separated appointment vs. arrival
+/// times, live wait/chair timers, and status-pill-only color styling.
 /// </summary>
-public sealed class QueueRowItem
+public sealed partial class QueueRowItem : ObservableObject
 {
+    private static readonly StatusPillPalette WaitingPalette = CreatePalette("#FFFBEB", "#FDE68A", "#D97706", "#92400E");
+    private static readonly StatusPillPalette LongWaitPalette = CreatePalette("#FEF2F2", "#FECACA", "#DC2626", "#991B1B");
+    private static readonly StatusPillPalette InChairPalette = CreatePalette("#E6F4F1", "#99F6E4", "#0F766E", "#0F514B");
+    private static readonly StatusPillPalette CheckoutPalette = CreatePalette("#EFF6FF", "#BFDBFE", "#2563EB", "#1E40AF");
+    private static readonly StatusPillPalette AiPendingPalette = CreatePalette("#FEF3C7", "#FCD34D", "#B45309", "#78350F");
+    private static readonly StatusPillPalette ScheduledPalette = CreatePalette("#F1F5F9", "#CBD5E1", "#64748B", "#334155");
+    private static readonly StatusPillPalette CompletedPalette = CreatePalette("#F0FDF4", "#BBF7D0", "#16A34A", "#166534");
+    private static readonly StatusPillPalette CancelledPalette = CreatePalette("#F8FAFC", "#E2E8F0", "#94A3B8", "#64748B");
+
+    [ObservableProperty]
+    private string _statusDisplay = string.Empty;
+
+    [ObservableProperty]
+    private Brush _statusBadgeBackground = ScheduledPalette.Background;
+
+    [ObservableProperty]
+    private Brush _statusBadgeBorder = ScheduledPalette.Border;
+
+    [ObservableProperty]
+    private Brush _statusDotBrush = ScheduledPalette.Dot;
+
+    [ObservableProperty]
+    private Brush _statusBadgeForeground = ScheduledPalette.Foreground;
+
+    [ObservableProperty]
+    private string _toolTipText = string.Empty;
+
     public QueueRowItem(AppointmentQueueItemDto source)
     {
         Source = source;
-        TimeDisplay = source.ScheduledAt.ToLocalTime().ToString("HH:mm");
-        PatientDisplay = source.HasCriticalMedicalAlert
+        IsWalkIn = source.VisitType == VisitType.WalkIn;
+        IsNoAppointment = IsWalkIn;
+        ApptTimeDisplay = IsWalkIn
+            ? "No Appointment"
+            : source.ScheduledAt.ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture);
+
+        if (IsWalkIn)
+        {
+            var arrived = (source.ArrivedAt ?? source.ScheduledAt).ToLocalTime();
+            ArrivalTimeDisplay = $"{arrived:HH:mm} · Walk-In";
+            HasArrivalTime = true;
+        }
+        else if (source.ArrivedAt.HasValue)
+        {
+            ArrivalTimeDisplay = source.ArrivedAt.Value.ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture);
+            HasArrivalTime = true;
+        }
+        else
+        {
+            ArrivalTimeDisplay = "—";
+            HasArrivalTime = false;
+        }
+
+        TimeDisplay = IsWalkIn ? ArrivalTimeDisplay : ApptTimeDisplay;
+        PatientNameDisplay = source.PatientName;
+        HasCriticalAlert = source.HasCriticalMedicalAlert;
+        PatientDisplay = HasCriticalAlert
             ? $"{source.PatientName} [ALERT]"
             : source.PatientName;
         DoctorRoomDisplay = string.IsNullOrWhiteSpace(source.RoomName)
             ? source.DoctorName
             : $"{source.DoctorName} · {source.RoomName}";
-        StatusDisplay = FormatStatus(source.Status);
+        IsFinished = AppointmentCalendarHelper.IsFinishedQueueStatus(source.Status);
+        RowContentOpacity = IsFinished ? 0.58 : 1.0;
+
+        RefreshElapsed(DateTimeOffset.Now);
     }
 
     public AppointmentQueueItemDto Source { get; }
     public string TimeDisplay { get; }
+    public string ApptTimeDisplay { get; }
+    public bool IsNoAppointment { get; }
+    public bool IsWalkIn { get; }
+    public string ArrivalTimeDisplay { get; }
+    public bool HasArrivalTime { get; }
+    public string PatientNameDisplay { get; }
+    public bool HasCriticalAlert { get; }
     public string PatientDisplay { get; }
     public string DoctorRoomDisplay { get; }
-    public string StatusDisplay { get; }
+    public bool IsFinished { get; }
+    public double RowContentOpacity { get; }
 
-    private static string FormatStatus(QueueStatus status) => status switch
+    public void RefreshElapsed(DateTimeOffset now)
     {
-        QueueStatus.AiBookedPending => "AI-Booked (Pending)",
-        QueueStatus.InChair => "In Chair",
-        QueueStatus.AwaitingCheckout => "Awaiting Checkout",
-        _ => status.ToString()
-    };
+        var normalized = AppointmentCalendarHelper.NormalizeQueueStatus(Source.Status);
+
+        StatusDisplay = normalized switch
+        {
+            QueueStatus.Waiting => FormatWaitingStatus(now),
+            QueueStatus.InChair => FormatInChairStatus(now),
+            QueueStatus.AwaitingCheckout => "Checkout",
+            QueueStatus.AiBookedPending => "AI Pending",
+            QueueStatus.Scheduled => "Scheduled",
+            QueueStatus.Completed => "Completed",
+            QueueStatus.Cancelled => "Cancelled",
+            _ => normalized.ToString()
+        };
+
+        var palette = normalized switch
+        {
+            QueueStatus.Waiting => AppointmentCalendarHelper.IsLongWait(Source, now) ? LongWaitPalette : WaitingPalette,
+            QueueStatus.InChair => InChairPalette,
+            QueueStatus.AwaitingCheckout => CheckoutPalette,
+            QueueStatus.AiBookedPending => AiPendingPalette,
+            QueueStatus.Completed => CompletedPalette,
+            QueueStatus.Cancelled => CancelledPalette,
+            _ => ScheduledPalette
+        };
+
+        StatusBadgeBackground = palette.Background;
+        StatusBadgeBorder = palette.Border;
+        StatusDotBrush = palette.Dot;
+        StatusBadgeForeground = palette.Foreground;
+        ToolTipText = BuildToolTip(normalized);
+    }
+
+    private string FormatWaitingStatus(DateTimeOffset now)
+    {
+        var elapsed = AppointmentCalendarHelper.FormatElapsedMinutes(Source.ArrivedAt, now);
+        return string.IsNullOrEmpty(elapsed) ? "Waiting" : $"Waiting · {elapsed}";
+    }
+
+    private string FormatInChairStatus(DateTimeOffset now)
+    {
+        var elapsed = AppointmentCalendarHelper.FormatElapsedMinutes(Source.SeatedAt, now);
+        return string.IsNullOrEmpty(elapsed) ? "In Chair" : $"In Chair · {elapsed}";
+    }
+
+    private string BuildToolTip(QueueStatus normalized)
+    {
+        var lines = new List<string>
+        {
+            $"{Source.PatientName}{(string.IsNullOrWhiteSpace(Source.PatientIc) ? string.Empty : $" ({Source.PatientIc})")}",
+            $"Visit: {(IsWalkIn ? "Walk-In (No Appointment)" : Source.VisitType == VisitType.AiBooked ? "WhatsApp AI Booking" : "Scheduled Appointment")}",
+            $"Treatment: {Source.ProcedureSummary} ({Source.DurationMinutes} min)",
+            $"Clinician: {DoctorRoomDisplay}",
+            $"Status: {StatusDisplay}"
+        };
+
+        if (!IsWalkIn)
+        {
+            lines.Add($"Appt Time: {Source.ScheduledAt.ToLocalTime():HH:mm}");
+        }
+
+        if (Source.ArrivedAt.HasValue)
+        {
+            lines.Add($"Arrived: {Source.ArrivedAt.Value.ToLocalTime():HH:mm}");
+        }
+
+        if (Source.HasCriticalMedicalAlert)
+        {
+            lines.Add($"Medical Alert: {Source.AlertSummary}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(Source.Notes))
+        {
+            lines.Add($"Notes: {Source.Notes}");
+        }
+
+        var attribution = new List<string>();
+        if (!string.IsNullOrWhiteSpace(Source.CreatedBy))
+        {
+            attribution.Add($"Added by {Source.CreatedBy}");
+        }
+        if (!string.IsNullOrWhiteSpace(Source.CheckedInBy))
+        {
+            attribution.Add($"Checked in by {Source.CheckedInBy}");
+        }
+        if (!string.IsNullOrWhiteSpace(Source.SeatedBy))
+        {
+            attribution.Add($"Seated by {Source.SeatedBy}");
+        }
+        if (!string.IsNullOrWhiteSpace(Source.CheckoutBy))
+        {
+            attribution.Add($"Checkout by {Source.CheckoutBy}");
+        }
+        if (!string.IsNullOrWhiteSpace(Source.CompletedBy))
+        {
+            attribution.Add($"Completed by {Source.CompletedBy}");
+        }
+        else if (normalized == QueueStatus.Cancelled && !string.IsNullOrWhiteSpace(Source.LastUpdatedBy))
+        {
+            attribution.Add($"Cancelled by {Source.LastUpdatedBy}");
+        }
+
+        if (attribution.Count > 0)
+        {
+            lines.Add($"Staff Trail: {string.Join(" → ", attribution)}");
+        }
+
+        lines.Add("Double-click to open Visit Details (or Odontogram if In Chair)");
+        return string.Join(Environment.NewLine, lines);
+    }
+
+    private static Brush FreezeBrush(string hex)
+    {
+        var brush = (SolidColorBrush)new BrushConverter().ConvertFromString(hex)!;
+        brush.Freeze();
+        return brush;
+    }
+
+    private static StatusPillPalette CreatePalette(string bgHex, string borderHex, string dotHex, string fgHex) =>
+        new(FreezeBrush(bgHex), FreezeBrush(borderHex), FreezeBrush(dotHex), FreezeBrush(fgHex));
+
+    private sealed record StatusPillPalette(Brush Background, Brush Border, Brush Dot, Brush Foreground);
 }
 
 /// <summary>
@@ -166,7 +349,9 @@ public sealed class AppointmentRowItem
     {
         Source = source;
         var local = source.ScheduledAt.ToLocalTime();
-        DateTimeDisplay = $"{local:dd MMM · HH:mm} ({source.DurationMinutes}m)";
+        DateTimeDisplay = source.VisitType == VisitType.WalkIn
+            ? $"{local:dd MMM} · Walk-In ({local:HH:mm})"
+            : $"{local:dd MMM · HH:mm} ({source.DurationMinutes}m)";
         PatientDisplay = source.HasCriticalMedicalAlert
             ? $"{source.PatientName} [ALERT]"
             : source.PatientName;

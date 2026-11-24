@@ -1,4 +1,5 @@
 using Occlusa.Shared.Models;
+using Occlusa.Shared.Services;
 
 namespace Occlusa.Api.Repositories;
 
@@ -22,17 +23,10 @@ public static class ClinicDomainHelpers
         [QueueStatus.AiBookedPending] = new()
         {
             QueueStatus.Scheduled,
-            QueueStatus.Arrived,
+            QueueStatus.Waiting,
             QueueStatus.Cancelled
         },
         [QueueStatus.Scheduled] = new()
-        {
-            QueueStatus.Arrived,
-            QueueStatus.Waiting,
-            QueueStatus.InChair,
-            QueueStatus.Cancelled
-        },
-        [QueueStatus.Arrived] = new()
         {
             QueueStatus.Waiting,
             QueueStatus.InChair,
@@ -41,11 +35,13 @@ public static class ClinicDomainHelpers
         [QueueStatus.Waiting] = new()
         {
             QueueStatus.InChair,
+            QueueStatus.Scheduled,
             QueueStatus.Cancelled
         },
         [QueueStatus.InChair] = new()
         {
             QueueStatus.AwaitingCheckout,
+            QueueStatus.Waiting,
             QueueStatus.Completed,
             QueueStatus.Cancelled
         },
@@ -63,12 +59,152 @@ public static class ClinicDomainHelpers
 
     public static bool IsTransitionAllowed(QueueStatus current, QueueStatus target)
     {
-        if (current == target)
+        var normalizedCurrent = AppointmentCalendarHelper.NormalizeQueueStatus(current);
+        var normalizedTarget = AppointmentCalendarHelper.NormalizeQueueStatus(target);
+
+        if (normalizedCurrent == normalizedTarget)
         {
             return true;
         }
 
-        return AllowedTransitions.TryGetValue(current, out var allowed) && allowed.Contains(target);
+        return AllowedTransitions.TryGetValue(normalizedCurrent, out var allowed) && allowed.Contains(normalizedTarget);
+    }
+
+    /// <summary>
+    /// Updates status milestone timestamps, staff attribution fields, and activity trail uniformly.
+    /// </summary>
+    public static void ApplyStatusMilestone(
+        AppointmentQueueItemDto item,
+        QueueStatus oldStatus,
+        QueueStatus newStatus,
+        string actor,
+        DateTimeOffset now,
+        string? roomDetails = null)
+    {
+        var normalizedOld = AppointmentCalendarHelper.NormalizeQueueStatus(oldStatus);
+        var normalizedNew = AppointmentCalendarHelper.NormalizeQueueStatus(newStatus);
+        var staff = string.IsNullOrWhiteSpace(actor) ? "Desktop Staff" : actor.Trim();
+
+        item.Status = normalizedNew;
+        item.LastUpdatedBy = staff;
+        item.LastUpdatedAt = now;
+
+        if (normalizedOld == normalizedNew)
+        {
+            item.ActivityLog.Add(new VisitActivityEntryDto
+            {
+                Timestamp = now,
+                Action = "Queue Updated",
+                StaffName = staff,
+                Details = string.IsNullOrWhiteSpace(roomDetails) ? item.RoomName : roomDetails.Trim()
+            });
+            return;
+        }
+
+        switch (normalizedNew)
+        {
+            case QueueStatus.Waiting:
+                if (normalizedOld == QueueStatus.InChair)
+                {
+                    item.ArrivedAt ??= now;
+                    item.ActivityLog.Add(new VisitActivityEntryDto
+                    {
+                        Timestamp = now,
+                        Action = "Returned to Waiting",
+                        StaffName = staff,
+                        Details = item.RoomName
+                    });
+                }
+                else
+                {
+                    item.ArrivedAt ??= now;
+                    item.CheckedInBy = staff;
+                    item.ActivityLog.Add(new VisitActivityEntryDto
+                    {
+                        Timestamp = now,
+                        Action = "Checked In (Waiting)",
+                        StaffName = staff,
+                        Details = $"{item.DoctorName} · {item.RoomName}"
+                    });
+                }
+                break;
+
+            case QueueStatus.Scheduled:
+                if (normalizedOld == QueueStatus.Waiting)
+                {
+                    item.ArrivedAt = null;
+                    item.CheckedInBy = string.Empty;
+                    item.ActivityLog.Add(new VisitActivityEntryDto
+                    {
+                        Timestamp = now,
+                        Action = "Check-In Reverted",
+                        StaffName = staff,
+                        Details = "Returned to Scheduled"
+                    });
+                }
+                else if (normalizedOld == QueueStatus.AiBookedPending)
+                {
+                    item.ActivityLog.Add(new VisitActivityEntryDto
+                    {
+                        Timestamp = now,
+                        Action = "AI Booking Approved",
+                        StaffName = staff,
+                        Details = $"{item.DoctorName} · {item.RoomName}"
+                    });
+                }
+                break;
+
+            case QueueStatus.InChair:
+                item.ArrivedAt ??= now;
+                if (string.IsNullOrWhiteSpace(item.CheckedInBy))
+                {
+                    item.CheckedInBy = staff;
+                }
+                item.SeatedAt = now;
+                item.SeatedBy = staff;
+                item.ActivityLog.Add(new VisitActivityEntryDto
+                {
+                    Timestamp = now,
+                    Action = "Called to Chair",
+                    StaffName = staff,
+                    Details = !string.IsNullOrWhiteSpace(roomDetails) ? roomDetails.Trim() : item.RoomName
+                });
+                break;
+
+            case QueueStatus.AwaitingCheckout:
+                item.CheckoutAt = now;
+                item.CheckoutBy = staff;
+                item.ActivityLog.Add(new VisitActivityEntryDto
+                {
+                    Timestamp = now,
+                    Action = "Sent to Checkout",
+                    StaffName = staff,
+                    Details = item.RoomName
+                });
+                break;
+
+            case QueueStatus.Completed:
+                item.CompletedAt = now;
+                item.CompletedBy = staff;
+                item.ActivityLog.Add(new VisitActivityEntryDto
+                {
+                    Timestamp = now,
+                    Action = "Completed",
+                    StaffName = staff,
+                    Details = item.ProcedureSummary
+                });
+                break;
+
+            case QueueStatus.Cancelled:
+                item.ActivityLog.Add(new VisitActivityEntryDto
+                {
+                    Timestamp = now,
+                    Action = "Cancelled",
+                    StaffName = staff,
+                    Details = item.ProcedureSummary
+                });
+                break;
+        }
     }
 
     public static string NormalizeBranch(string? branchId, string defaultBranch = "HQ-KL") =>
@@ -145,6 +281,25 @@ public static class ClinicDomainHelpers
         ProcedureSummary = a.ProcedureSummary,
         Notes = a.Notes,
         Status = a.Status,
+        VisitType = a.VisitType,
+        ArrivedAt = a.ArrivedAt,
+        SeatedAt = a.SeatedAt,
+        CheckoutAt = a.CheckoutAt,
+        CompletedAt = a.CompletedAt,
+        CreatedBy = a.CreatedBy,
+        CheckedInBy = a.CheckedInBy,
+        SeatedBy = a.SeatedBy,
+        CheckoutBy = a.CheckoutBy,
+        CompletedBy = a.CompletedBy,
+        LastUpdatedBy = a.LastUpdatedBy,
+        LastUpdatedAt = a.LastUpdatedAt,
+        ActivityLog = a.ActivityLog.Select(e => new VisitActivityEntryDto
+        {
+            Timestamp = e.Timestamp,
+            Action = e.Action,
+            StaffName = e.StaffName,
+            Details = e.Details
+        }).ToList(),
         HasCriticalMedicalAlert = a.HasCriticalMedicalAlert,
         AlertSummary = a.AlertSummary
     };

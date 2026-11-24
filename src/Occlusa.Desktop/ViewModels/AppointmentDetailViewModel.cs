@@ -11,6 +11,36 @@ using Occlusa.Shared.Services;
 namespace Occlusa.Desktop.ViewModels;
 
 /// <summary>
+/// Single staff attribution entry displayed in the paged Visit Activity Trail.
+/// </summary>
+public sealed class VisitActivityRowVm
+{
+    public VisitActivityRowVm(VisitActivityEntryDto source)
+    {
+        TimestampDisplay = source.Timestamp.ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture);
+        ActionDisplay = source.Action;
+        StaffDisplay = string.IsNullOrWhiteSpace(source.StaffName) ? "Staff" : source.StaffName;
+        DetailsDisplay = source.Details;
+        var compactDetail = string.IsNullOrWhiteSpace(DetailsDisplay)
+            ? string.Empty
+            : AppointmentCalendarHelper.FormatCompactTreatment(DetailsDisplay, 18);
+        SummaryLine = string.IsNullOrWhiteSpace(compactDetail)
+            ? $"{ActionDisplay} · {StaffDisplay}"
+            : $"{ActionDisplay} · {StaffDisplay} · {compactDetail}";
+        ToolTipText = string.IsNullOrWhiteSpace(DetailsDisplay)
+            ? $"{TimestampDisplay} — {ActionDisplay} by {StaffDisplay}"
+            : $"{TimestampDisplay} — {ActionDisplay} by {StaffDisplay}{Environment.NewLine}{DetailsDisplay}";
+    }
+
+    public string TimestampDisplay { get; }
+    public string ActionDisplay { get; }
+    public string StaffDisplay { get; }
+    public string DetailsDisplay { get; }
+    public string SummaryLine { get; }
+    public string ToolTipText { get; }
+}
+
+/// <summary>
 /// Interactive hourly availability tile shown in Step 2 of AppointmentDetailModal.
 /// </summary>
 public sealed class DentistSlotAvailabilityVm
@@ -54,6 +84,7 @@ public sealed class DentistSlotAvailabilityVm
 public partial class AppointmentDetailViewModel : ObservableObject
 {
     private const int MaxSuggestedPatients = 4;
+    private const int ActivityPageSize = 4;
 
     private readonly string _branchId;
     private readonly IReadOnlyList<PatientDto> _allPatients;
@@ -64,6 +95,9 @@ public partial class AppointmentDetailViewModel : ObservableObject
     private readonly AppointmentQueueItemDto? _existing;
     private readonly Action<AppointmentQueueItemDto>? _onSaved;
     private readonly Action<PatientDto>? _onPatientRegistered;
+    private readonly bool _isWalkInMode;
+    private readonly string _activeStaffName;
+    private readonly List<VisitActivityRowVm> _allActivityEntries = new();
     private bool _suppressDirty;
     private DateOnly? _parsedNewPatientDob;
 
@@ -177,6 +211,21 @@ public partial class AppointmentDetailViewModel : ObservableObject
     [ObservableProperty]
     private string _bannerAlertNotes = string.Empty;
 
+    [ObservableProperty]
+    private int _activityPage = 1;
+
+    [ObservableProperty]
+    private int _activityTotalPages = 1;
+
+    [ObservableProperty]
+    private string _activityPageSummary = "Page 1 of 1";
+
+    [ObservableProperty]
+    private bool _canActivityPrev;
+
+    [ObservableProperty]
+    private bool _canActivityNext;
+
     public AppointmentDetailViewModel(
         string branchId,
         IReadOnlyList<PatientDto> allPatients,
@@ -188,7 +237,10 @@ public partial class AppointmentDetailViewModel : ObservableObject
         QuickBookSlotArgs? prefill = null,
         Action<AppointmentQueueItemDto>? onSaved = null,
         Action<PatientDto>? onPatientRegistered = null,
-        bool startInNewPatientMode = false)
+        bool startInNewPatientMode = false,
+        bool isWalkInMode = false,
+        PatientDto? preselectedPatient = null,
+        string activeStaffName = "Desktop Reception")
     {
         _branchId = branchId;
         _allPatients = allPatients;
@@ -199,11 +251,14 @@ public partial class AppointmentDetailViewModel : ObservableObject
         _existing = existingAppointment;
         _onSaved = onSaved;
         _onPatientRegistered = onPatientRegistered;
+        _isWalkInMode = isWalkInMode && existingAppointment == null;
+        _activeStaffName = string.IsNullOrWhiteSpace(activeStaffName) ? "Desktop Reception" : activeStaffName.Trim();
 
         SuggestedPatients = new ObservableCollection<PatientDto>();
         EligibleDentists = new ObservableCollection<DentistDto>();
         Treatments = new ObservableCollection<TreatmentDto>(treatments);
         DentistAvailabilitySlots = new ObservableCollection<DentistSlotAvailabilityVm>();
+        PagedActivityEntries = new ObservableCollection<VisitActivityRowVm>();
 
         var roomSeed = branchId == "PJ-SS2"
             ? new[] { "PJ Room 1", "PJ Room 2", "Suite 1", "Suite 2" }
@@ -212,7 +267,16 @@ public partial class AppointmentDetailViewModel : ObservableObject
         AvailableHours = new ObservableCollection<string> { "09", "10", "11", "12", "13", "14", "15", "16", "17" };
         AvailableMinutes = new ObservableCollection<string> { "00", "15", "30", "45" };
         AvailableDurations = new ObservableCollection<int> { 15, 30, 45, 60, 90, 120 };
-        AvailableStatuses = Enum.GetValues<QueueStatus>();
+        AvailableStatuses =
+        [
+            QueueStatus.Scheduled,
+            QueueStatus.AiBookedPending,
+            QueueStatus.Waiting,
+            QueueStatus.InChair,
+            QueueStatus.AwaitingCheckout,
+            QueueStatus.Completed,
+            QueueStatus.Cancelled
+        ];
         AvailableGenders = ["Female", "Male", "Unspecified"];
 
         _suppressDirty = true;
@@ -223,8 +287,8 @@ public partial class AppointmentDetailViewModel : ObservableObject
         }
         else
         {
-            _isRegisterNewPatientMode = startInNewPatientMode;
-            InitializeForNew(prefill);
+            _isRegisterNewPatientMode = startInNewPatientMode && preselectedPatient == null;
+            InitializeForNew(prefill, preselectedPatient);
         }
 
         RefreshPatientSuggestions();
@@ -243,6 +307,7 @@ public partial class AppointmentDetailViewModel : ObservableObject
     public ObservableCollection<DentistDto> EligibleDentists { get; }
     public ObservableCollection<TreatmentDto> Treatments { get; }
     public ObservableCollection<DentistSlotAvailabilityVm> DentistAvailabilitySlots { get; }
+    public ObservableCollection<VisitActivityRowVm> PagedActivityEntries { get; }
     public ObservableCollection<string> AvailableRooms { get; }
     public ObservableCollection<string> AvailableHours { get; }
     public ObservableCollection<string> AvailableMinutes { get; }
@@ -251,6 +316,9 @@ public partial class AppointmentDetailViewModel : ObservableObject
     public string[] AvailableGenders { get; }
 
     public bool IsEditMode => _existing != null;
+    public bool IsWalkInMode => _isWalkInMode;
+    public bool HasActivityLog => IsEditMode && _allActivityEntries.Count > 0;
+    public bool ShowActivityPaging => IsEditMode && _allActivityEntries.Count > ActivityPageSize;
     public bool CanShowQuickRegisterButton => !IsEditMode && !IsRegisterNewPatientMode && SelectedPatient == null;
     public bool CanShowBackToSearchButton => !IsEditMode && IsRegisterNewPatientMode;
     public bool ShowConfirmedPatientCard => !IsRegisterNewPatientMode && SelectedPatient != null;
@@ -276,22 +344,38 @@ public partial class AppointmentDetailViewModel : ObservableObject
     public bool CanCancelAppointment => IsEditMode && Status != QueueStatus.Cancelled && Status != QueueStatus.Completed;
 
     public string ModalTitle => IsEditMode
-        ? $"Appointment Details — {_existing!.PatientName}"
-        : IsRegisterNewPatientMode
-            ? $"Register Patient & Book ({_branchId})"
-            : $"Book New Appointment ({_branchId})";
+        ? (_existing!.VisitType == VisitType.WalkIn
+            ? $"Walk-In Visit — {_existing.PatientName}"
+            : $"Appointment Details — {_existing.PatientName}")
+        : _isWalkInMode
+            ? (IsRegisterNewPatientMode
+                ? $"Register New Walk-In ({_branchId})"
+                : $"Register Walk-In Patient ({_branchId})")
+            : (IsRegisterNewPatientMode
+                ? $"Register Patient & Book ({_branchId})"
+                : $"Book New Appointment ({_branchId})");
 
     public string ModalSubtitle => IsEditMode
-        ? $"{_existing!.BranchId} · Scheduled {_existing.ScheduledAt.ToLocalTime():ddd dd MMM yyyy, HH:mm}"
-        : "1. Treatment & Qualified Dentist  ·  2. Date & Availability  ·  3. Patient IC / Name / Phone";
+        ? (_existing!.VisitType == VisitType.WalkIn
+            ? $"{_existing.BranchId} · Walk-In Arrived {(_existing.ArrivedAt ?? _existing.ScheduledAt).ToLocalTime():HH:mm} (No Appointment Time)"
+            : $"{_existing.BranchId} · Scheduled {_existing.ScheduledAt.ToLocalTime():ddd dd MMM yyyy, HH:mm}")
+        : _isWalkInMode
+            ? "Walk-In arrives now (No Appointment Time) · Blocks selected dentist slot on today's calendar"
+            : "1. Treatment & Qualified Dentist  ·  2. Date & Availability  ·  3. Patient IC / Name / Phone";
 
-    public string BadgeLabel => IsEditMode ? Status.ToString() : "New Booking";
+    public string BadgeLabel => IsEditMode
+        ? (_existing!.VisitType == VisitType.WalkIn
+            ? $"Walk-In · {AppointmentCalendarHelper.FormatStatusLabel(Status)}"
+            : AppointmentCalendarHelper.FormatStatusLabel(Status))
+        : _isWalkInMode
+            ? "Walk-In"
+            : "New Booking";
 
     public string SaveButtonText => IsEditMode
         ? "Save Changes"
-        : IsRegisterNewPatientMode
-            ? "Register & Book"
-            : "Book Appointment";
+        : _isWalkInMode
+            ? (IsRegisterNewPatientMode ? "Register & Add Walk-In" : "Add Walk-In to Queue")
+            : (IsRegisterNewPatientMode ? "Register & Book" : "Book Appointment");
 
     partial void OnIsRegisterNewPatientModeChanged(bool value) => NotifyPatientLookupStateChanged();
 
@@ -444,6 +528,26 @@ public partial class AppointmentDetailViewModel : ObservableObject
     }
 
     partial void OnNotesChanged(string value) => MarkDirty();
+
+    [RelayCommand]
+    private void PrevActivityPage()
+    {
+        if (ActivityPage > 1)
+        {
+            ActivityPage--;
+            RefreshPagedActivity();
+        }
+    }
+
+    [RelayCommand]
+    private void NextActivityPage()
+    {
+        if (ActivityPage < ActivityTotalPages)
+        {
+            ActivityPage++;
+            RefreshPagedActivity();
+        }
+    }
 
     [RelayCommand]
     private void SetDateOffset(string offsetDaysStr)
@@ -650,13 +754,22 @@ public partial class AppointmentDetailViewModel : ObservableObject
                         DurationMinutes = DurationMinutes,
                         ProcedureSummary = procedure,
                         Notes = Notes?.Trim() ?? string.Empty,
-                        Status = Status
+                        Status = Status,
+                        VisitType = _isWalkInMode
+                            ? VisitType.WalkIn
+                            : Status == QueueStatus.AiBookedPending ? VisitType.AiBooked : VisitType.Booked,
+                        ArrivedAt = _isWalkInMode || Status is QueueStatus.Waiting or QueueStatus.InChair
+                            ? DateTimeOffset.Now
+                            : null,
+                        CreatedBy = _activeStaffName
                     }
                 });
 
                 _onPatientRegistered?.Invoke(result.Patient);
                 saved = result.Appointment;
-                StatusMessage = $"Registered {result.Patient.FullName} & booked with {saved.DoctorName} at {saved.ScheduledAt.ToLocalTime():dd MMM HH:mm}.";
+                StatusMessage = _isWalkInMode
+                    ? $"Registered {result.Patient.FullName} & added Walk-In to queue ({saved.DoctorName})."
+                    : $"Registered {result.Patient.FullName} & booked with {saved.DoctorName} at {saved.ScheduledAt.ToLocalTime():dd MMM HH:mm}.";
             }
             else if (IsEditMode)
             {
@@ -678,8 +791,9 @@ public partial class AppointmentDetailViewModel : ObservableObject
                     ScheduledAt = scheduledAt,
                     DurationMinutes = DurationMinutes,
                     Status = Status,
+                    VisitType = _existing.VisitType,
                     Notes = Notes?.Trim() ?? string.Empty,
-                    UpdatedBy = "Desktop Reception"
+                    UpdatedBy = _activeStaffName
                 });
                 StatusMessage = $"Updated appointment for {saved.PatientName}.";
             }
@@ -704,9 +818,18 @@ public partial class AppointmentDetailViewModel : ObservableObject
                     DurationMinutes = DurationMinutes,
                     ProcedureSummary = procedure,
                     Notes = Notes?.Trim() ?? string.Empty,
-                    Status = Status
+                    Status = Status,
+                    VisitType = _isWalkInMode
+                        ? VisitType.WalkIn
+                        : Status == QueueStatus.AiBookedPending ? VisitType.AiBooked : VisitType.Booked,
+                    ArrivedAt = _isWalkInMode || Status is QueueStatus.Waiting or QueueStatus.InChair
+                        ? DateTimeOffset.Now
+                        : null,
+                    CreatedBy = _activeStaffName
                 });
-                StatusMessage = $"Booked {saved.PatientName} with {saved.DoctorName} at {saved.ScheduledAt.ToLocalTime():dd MMM HH:mm}.";
+                StatusMessage = _isWalkInMode
+                    ? $"Added Walk-In {saved.PatientName} with {saved.DoctorName} (by {_activeStaffName})."
+                    : $"Booked {saved.PatientName} with {saved.DoctorName} at {saved.ScheduledAt.ToLocalTime():dd MMM HH:mm}.";
             }
 
             HasUnsavedChanges = false;
@@ -736,7 +859,7 @@ public partial class AppointmentDetailViewModel : ObservableObject
         IsStatusError = false;
         try
         {
-            var approved = await _apiClient.ApproveAiBookingAsync(_existing!.Id);
+            var approved = await _apiClient.ApproveAiBookingAsync(_existing!.Id, _activeStaffName);
             _suppressDirty = true;
             Status = approved.Status;
             _suppressDirty = false;
@@ -789,8 +912,9 @@ public partial class AppointmentDetailViewModel : ObservableObject
                 ScheduledAt = _existing.ScheduledAt,
                 DurationMinutes = DurationMinutes,
                 Status = QueueStatus.Cancelled,
+                VisitType = _existing.VisitType,
                 Notes = Notes?.Trim() ?? string.Empty,
-                UpdatedBy = "Desktop Reception"
+                UpdatedBy = _activeStaffName
             });
 
             HasUnsavedChanges = false;
@@ -852,14 +976,23 @@ public partial class AppointmentDetailViewModel : ObservableObject
         }
         DurationMinutes = appt.DurationMinutes > 0 ? appt.DurationMinutes : 30;
 
-        Status = appt.Status;
+        Status = AppointmentCalendarHelper.NormalizeQueueStatus(appt.Status);
         Notes = appt.Notes;
-        StatusMessage = $"Viewing {appt.PatientName} ({appt.Status}).";
+
+        _allActivityEntries.Clear();
+        foreach (var entry in appt.ActivityLog.OrderByDescending(e => e.Timestamp))
+        {
+            _allActivityEntries.Add(new VisitActivityRowVm(entry));
+        }
+        ActivityPage = 1;
+        RefreshPagedActivity();
+
+        StatusMessage = $"Viewing {appt.PatientName} ({AppointmentCalendarHelper.FormatStatusLabel(Status)}).";
     }
 
-    private void InitializeForNew(QuickBookSlotArgs? prefill)
+    private void InitializeForNew(QuickBookSlotArgs? prefill, PatientDto? preselectedPatient)
     {
-        SelectedPatient = null;
+        SelectedPatient = preselectedPatient;
 
         SelectedTreatment = (prefill?.TreatmentId is Guid tid
             ? _treatments.FirstOrDefault(t => t.Id == tid)
@@ -894,25 +1027,56 @@ public partial class AppointmentDetailViewModel : ObservableObject
         EnsureRoomOption(room);
         RoomName = room;
 
-        if (prefill != null)
+        if (_isWalkInMode)
+        {
+            var localNow = DateTimeOffset.Now;
+            SelectedDate = DateTime.Today;
+            int snappedHour = Math.Clamp(localNow.Hour, 9, 17);
+            int snappedMin = localNow.Hour is >= 9 and <= 17 ? (localNow.Minute / 15) * 15 : 0;
+            SelectedHour = snappedHour.ToString("00", CultureInfo.InvariantCulture);
+            SelectedMinute = snappedMin.ToString("00", CultureInfo.InvariantCulture);
+            Status = QueueStatus.Waiting;
+        }
+        else if (prefill != null)
         {
             SelectedDate = prefill.Date.ToDateTime(TimeOnly.MinValue);
             SelectedHour = Math.Clamp(prefill.StartTime.Hour, 9, 17).ToString("00", CultureInfo.InvariantCulture);
             int snappedMinute = (prefill.StartTime.Minute / 15) * 15;
             SelectedMinute = snappedMinute.ToString("00", CultureInfo.InvariantCulture);
+            Status = QueueStatus.Scheduled;
         }
         else
         {
             SelectedDate = DateTime.Today;
             SelectedHour = "09";
             SelectedMinute = "00";
+            Status = QueueStatus.Scheduled;
         }
 
-        Status = QueueStatus.Scheduled;
         Notes = string.Empty;
-        StatusMessage = IsRegisterNewPatientMode
-            ? "1. Choose treatment & dentist · 2. Pick date/slot · 3. Enter new patient details."
-            : "1. Choose treatment & dentist · 2. Pick open slot · 3. Search patient IC, name, or phone.";
+        StatusMessage = _isWalkInMode
+            ? "Walk-In arrives now (No Appointment Time) · Pick treatment & dentist to place on today's floor & calendar."
+            : IsRegisterNewPatientMode
+                ? "1. Choose treatment & dentist · 2. Pick date/slot · 3. Enter new patient details."
+                : "1. Choose treatment & dentist · 2. Pick open slot · 3. Search patient IC, name, or phone.";
+    }
+
+    private void RefreshPagedActivity()
+    {
+        ActivityTotalPages = Math.Max(1, (int)Math.Ceiling(_allActivityEntries.Count / (double)ActivityPageSize));
+        ActivityPage = Math.Clamp(ActivityPage, 1, ActivityTotalPages);
+
+        PagedActivityEntries.Clear();
+        foreach (var entry in _allActivityEntries.Skip((ActivityPage - 1) * ActivityPageSize).Take(ActivityPageSize))
+        {
+            PagedActivityEntries.Add(entry);
+        }
+
+        CanActivityPrev = ActivityPage > 1;
+        CanActivityNext = ActivityPage < ActivityTotalPages;
+        ActivityPageSummary = $"{ActivityPage}/{ActivityTotalPages}";
+        OnPropertyChanged(nameof(HasActivityLog));
+        OnPropertyChanged(nameof(ShowActivityPaging));
     }
 
     private void RefreshEligibleDentists(bool preserveSelection)

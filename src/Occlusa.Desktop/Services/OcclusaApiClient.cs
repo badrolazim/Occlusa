@@ -22,6 +22,7 @@ public sealed class OcclusaApiClient : IAsyncDisposable
     private readonly DispatcherTimer _fallbackPollTimer;
     private HttpClient _http;
     private string _baseUrl;
+    private string _activeUser = "Siti (Reception)";
     private HubConnection? _hubConnection;
     private string _hubBaseUrl = string.Empty;
     private string _activeBranchId = "HQ-KL";
@@ -42,7 +43,7 @@ public sealed class OcclusaApiClient : IAsyncDisposable
         _baseUrl = baseUrl.TrimEnd('/');
         _ensureApiAvailableAsync = ensureApiAvailableAsync;
         var baseUri = new Uri(_baseUrl);
-        _http = CreateHttpClient(baseUri);
+        _http = CreateHttpClient(baseUri, _activeUser);
 
         _fallbackPollTimer = new DispatcherTimer
         {
@@ -93,8 +94,32 @@ public sealed class OcclusaApiClient : IAsyncDisposable
             }
 
             _retiredClients.Add(_http);
-            _http = CreateHttpClient(newUri);
+            _http = CreateHttpClient(newUri, _activeUser);
             _baseUrl = normalized;
+        }
+    }
+
+    public void SetActiveUser(string staffName)
+    {
+        if (string.IsNullOrWhiteSpace(staffName))
+        {
+            return;
+        }
+
+        var trimmed = staffName.Trim();
+        lock (_httpSync)
+        {
+            if (_disposed || string.Equals(_activeUser, trimmed, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            _activeUser = trimmed;
+            if (Uri.TryCreate(_baseUrl, UriKind.Absolute, out var currentUri))
+            {
+                _retiredClients.Add(_http);
+                _http = CreateHttpClient(currentUri, _activeUser);
+            }
         }
     }
 
@@ -550,10 +575,14 @@ public sealed class OcclusaApiClient : IAsyncDisposable
 
     public Task<AppointmentQueueItemDto> ApproveAiBookingAsync(
         Guid appointmentId,
+        string? approvedBy = null,
         CancellationToken ct = default) =>
         ExecuteWithRecoveryAsync(async (http, token) =>
         {
-            var resp = await http.PostAsync($"/api/whatsapp/bookings/{appointmentId}/approve", null, token);
+            var url = string.IsNullOrWhiteSpace(approvedBy)
+                ? $"/api/whatsapp/bookings/{appointmentId}/approve"
+                : $"/api/whatsapp/bookings/{appointmentId}/approve?approvedBy={Uri.EscapeDataString(approvedBy.Trim())}";
+            var resp = await http.PostAsync(url, null, token);
             return await ReadRequiredAsync<AppointmentQueueItemDto>(resp, token);
         }, ct);
 
@@ -591,7 +620,7 @@ public sealed class OcclusaApiClient : IAsyncDisposable
         }
     }
 
-    private static HttpClient CreateHttpClient(Uri baseUri)
+    private static HttpClient CreateHttpClient(Uri baseUri, string activeUser)
     {
         var client = new HttpClient(new SocketsHttpHandler
         {
@@ -601,7 +630,7 @@ public sealed class OcclusaApiClient : IAsyncDisposable
             BaseAddress = baseUri,
             Timeout = TimeSpan.FromSeconds(15)
         };
-        client.DefaultRequestHeaders.TryAddWithoutValidation("X-Occlusa-User", "desktop-clinician");
+        client.DefaultRequestHeaders.TryAddWithoutValidation("X-Occlusa-User", string.IsNullOrWhiteSpace(activeUser) ? "desktop-clinician" : activeUser);
         client.DefaultRequestHeaders.TryAddWithoutValidation("X-Occlusa-Allowed-Branches", "HQ-KL,PJ-SS2");
         return client;
     }

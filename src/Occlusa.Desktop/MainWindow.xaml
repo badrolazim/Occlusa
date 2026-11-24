@@ -37,7 +37,7 @@
                 </Grid.RowDefinitions>
 
                 <!-- Brand Header -->
-                <StackPanel Grid.Row="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="2,0,0,22">
+                <StackPanel Grid.Row="0" Orientation="Horizontal" VerticalAlignment="Center" Margin="2,0,0,16">
                     <Border Width="36"
                             Height="36"
                             CornerRadius="8"
@@ -63,15 +63,25 @@
                     </StackPanel>
                 </StackPanel>
 
-                <!-- Branch Switcher -->
-                <StackPanel Grid.Row="1" Margin="0,0,0,20">
+                <!-- Branch Switcher & Active Staff Attribution -->
+                <StackPanel Grid.Row="1" Margin="0,0,0,16">
                     <TextBlock Text="CLINIC BRANCH"
                                FontSize="10.5"
                                FontWeight="Bold"
                                Foreground="{StaticResource SidebarSectionLabelBrush}"
-                               Margin="4,0,0,6" />
+                               Margin="4,0,0,5" />
                     <ComboBox ItemsSource="{Binding AvailableBranches}"
                               SelectedItem="{Binding SelectedBranchId}"
+                              Style="{StaticResource UniformSidebarComboBoxStyle}"
+                              Margin="0,0,0,10" />
+
+                    <TextBlock Text="ACTIVE STAFF"
+                               FontSize="10.5"
+                               FontWeight="Bold"
+                               Foreground="{StaticResource SidebarSectionLabelBrush}"
+                               Margin="4,0,0,5" />
+                    <ComboBox ItemsSource="{Binding StaffMembers}"
+                              SelectedItem="{Binding SelectedStaffName}"
                               Style="{StaticResource UniformSidebarComboBoxStyle}" />
                 </StackPanel>
 
@@ -465,63 +475,86 @@
                     <!-- 1. Queue Tab Actions -->
                     <DockPanel Visibility="{Binding IsQueueWorkspace, Converter={StaticResource BoolToVisibilityConverter}}" LastChildFill="False">
                         <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
-                            <Button Content="Approve AI-Booked"
-                                    Command="{Binding ApproveSelectedAiBookingCommand}"
-                                    Style="{StaticResource UniformWarningButtonStyle}"
+                            <Button Content="+ Walk-In"
+                                    Click="NewWalkInButton_Click"
+                                    Style="{StaticResource UniformPrimaryButtonStyle}"
                                     Height="32"
                                     Padding="12,0"
                                     FontSize="12"
-                                    Margin="0,0,10,0" />
+                                    Margin="0,0,8,0" />
+
+                            <Button Content="Approve AI"
+                                    Command="{Binding ApproveSelectedAiBookingCommand}"
+                                    Visibility="{Binding CanApproveSelectedAi, Converter={StaticResource BoolToVisibilityConverter}}"
+                                    Style="{StaticResource UniformWarningButtonStyle}"
+                                    Height="32"
+                                    Padding="11,0"
+                                    FontSize="12"
+                                    Margin="0,0,8,0" />
 
                             <Border Width="1"
                                     Height="20"
                                     Background="{StaticResource BorderHairlineBrush}"
                                     VerticalAlignment="Center"
-                                    Margin="0,0,10,0" />
+                                    Margin="0,0,8,0" />
 
-                            <TextBlock Text="Status:"
-                                       Style="{StaticResource UniformLabelTextStyle}"
-                                       VerticalAlignment="Center"
-                                       Margin="0,0,8,0" />
-                            <Button Content="Arrived"
-                                    Command="{Binding AdvanceQueueStatusCommand}"
-                                    CommandParameter="Arrived"
-                                    Style="{StaticResource UniformSegmentButtonStyle}"
-                                    Margin="0,0,6,0" />
-                            <Button Content="Waiting"
+                            <Button Content="Check In"
                                     Command="{Binding AdvanceQueueStatusCommand}"
                                     CommandParameter="Waiting"
+                                    IsEnabled="{Binding CanCheckInSelected}"
                                     Style="{StaticResource UniformSegmentButtonStyle}"
-                                    Margin="0,0,6,0" />
+                                    Margin="0,0,5,0" />
                             <Button Content="In Chair"
                                     Command="{Binding AdvanceQueueStatusCommand}"
                                     CommandParameter="InChair"
+                                    IsEnabled="{Binding CanCallToChairSelected}"
                                     Style="{StaticResource UniformSegmentButtonStyle}"
-                                    Margin="0,0,6,0" />
-                            <Button Content="Awaiting Checkout"
+                                    Margin="0,0,5,0" />
+                            <Button Content="Checkout"
                                     Command="{Binding AdvanceQueueStatusCommand}"
                                     CommandParameter="AwaitingCheckout"
+                                    IsEnabled="{Binding CanSendToCheckoutSelected}"
                                     Style="{StaticResource UniformSegmentButtonStyle}"
-                                    Margin="0,0,6,0" />
-                            <Button Content="Completed"
+                                    Margin="0,0,5,0" />
+                            <Button Content="Complete"
                                     Command="{Binding AdvanceQueueStatusCommand}"
                                     CommandParameter="Completed"
-                                    Style="{StaticResource UniformSegmentButtonStyle}" />
+                                    IsEnabled="{Binding CanCompleteSelected}"
+                                    Style="{StaticResource UniformSegmentButtonStyle}"
+                                    Margin="0,0,5,0" />
+                            <Button Content="Cancel"
+                                    Command="{Binding CancelSelectedQueueItemCommand}"
+                                    IsEnabled="{Binding CanCancelSelectedQueue}"
+                                    Foreground="{StaticResource DangerBrush}"
+                                    Style="{StaticResource UniformGhostButtonStyle}"
+                                    Height="32"
+                                    Padding="9,0"
+                                    FontSize="12" />
                         </StackPanel>
 
                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                            <Button Content="Patient Chart"
-                                    Click="OpenSelectedQueuePatientButton_Click"
+                            <Button Content="Visit Details"
+                                    Click="OpenSelectedQueueVisitButton_Click"
+                                    IsEnabled="{Binding HasSelectedQueueRow}"
                                     Style="{StaticResource UniformSecondaryButtonStyle}"
                                     Height="32"
-                                    Padding="12,0"
+                                    Padding="11,0"
                                     FontSize="12"
-                                    Margin="0,0,8,0" />
-                            <Button Content="32-Tooth Odontogram"
+                                    Margin="0,0,6,0" />
+                            <Button Content="Patient Chart"
+                                    Click="OpenSelectedQueuePatientButton_Click"
+                                    IsEnabled="{Binding HasSelectedQueueRow}"
+                                    Style="{StaticResource UniformSecondaryButtonStyle}"
+                                    Height="32"
+                                    Padding="11,0"
+                                    FontSize="12"
+                                    Margin="0,0,6,0" />
+                            <Button Content="Odontogram"
                                     Click="OpenSelectedQueueOdontogramButton_Click"
+                                    IsEnabled="{Binding HasSelectedQueueRow}"
                                     Style="{StaticResource UniformPrimaryButtonStyle}"
                                     Height="32"
-                                    Padding="12,0"
+                                    Padding="11,0"
                                     FontSize="12" />
                         </StackPanel>
                     </DockPanel>
@@ -793,19 +826,173 @@
 
             <!-- Row 3: 4 Uniform 4-Column Paged Tables (Auto 11 rows @ 1080p, 17 rows @ 1440p) -->
             <Grid Grid.Row="3">
-                <!-- 1. Live Queue & Schedule -->
+                <!-- 1. Live Queue & Schedule (Unified Today Roster, Status-Pill Color Only) -->
                 <controls:UniformPagedGrid x:Name="QueuePagedGrid"
                                            Visibility="{Binding IsQueueWorkspace, Converter={StaticResource BoolToVisibilityConverter}}"
-                                           Title="Live Queue &amp; Chair Schedule"
-                                           Subtitle="Double-click any row to open Patient Chart or Odontogram"
-                                           EmptyMessage="No queued appointments for this branch yet."
+                                           Title="Today's Live Queue"
+                                           Subtitle="{Binding QueuePulseSummary}"
+                                           EmptyMessage="No patients in today's queue yet — click + Walk-In or scan a MyKad."
+                                           EnforceColumnLimit="False"
                                            ItemsSource="{Binding QueueRows}"
                                            SelectedItem="{Binding SelectedQueueRow, Mode=TwoWay}"
                                            RowDoubleClicked="QueuePagedGrid_RowDoubleClicked">
-                    <controls:UniformColumnDef Header="Time" BindingPath="TimeDisplay" WidthRatio="0.7" IsMonospace="True" />
-                    <controls:UniformColumnDef Header="Patient" BindingPath="PatientDisplay" WidthRatio="2.1" IsBold="True" />
-                    <controls:UniformColumnDef Header="Doctor &amp; Room" BindingPath="DoctorRoomDisplay" WidthRatio="1.7" />
-                    <controls:UniformColumnDef Header="Status" BindingPath="StatusDisplay" WidthRatio="1.3" />
+                    <controls:UniformColumnDef Header="Appt Time" WidthRatio="0.95" MinWidth="115">
+                        <controls:UniformColumnDef.CellTemplate>
+                            <DataTemplate>
+                                <Grid Margin="10,0"
+                                      Background="Transparent"
+                                      Opacity="{Binding RowContentOpacity}"
+                                      ToolTip="{Binding ToolTipText}">
+                                    <TextBlock Text="{Binding ApptTimeDisplay}"
+                                               VerticalAlignment="Center"
+                                               TextWrapping="NoWrap"
+                                               TextTrimming="None">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="FontFamily" Value="{StaticResource FontFamilyMono}" />
+                                                <Setter Property="FontSize" Value="12" />
+                                                <Setter Property="FontWeight" Value="SemiBold" />
+                                                <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding IsNoAppointment}" Value="True">
+                                                        <Setter Property="FontFamily" Value="{StaticResource FontFamilyPrimary}" />
+                                                        <Setter Property="FontSize" Value="11.5" />
+                                                        <Setter Property="FontWeight" Value="Normal" />
+                                                        <Setter Property="Foreground" Value="#94A3B8" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </Grid>
+                            </DataTemplate>
+                        </controls:UniformColumnDef.CellTemplate>
+                    </controls:UniformColumnDef>
+
+                    <controls:UniformColumnDef Header="Arrived / Walk-In" WidthRatio="1.15" MinWidth="135">
+                        <controls:UniformColumnDef.CellTemplate>
+                            <DataTemplate>
+                                <Grid Margin="10,0"
+                                      Background="Transparent"
+                                      Opacity="{Binding RowContentOpacity}"
+                                      ToolTip="{Binding ToolTipText}">
+                                    <TextBlock Text="{Binding ArrivalTimeDisplay}"
+                                               VerticalAlignment="Center"
+                                               TextWrapping="NoWrap"
+                                               TextTrimming="None">
+                                        <TextBlock.Style>
+                                            <Style TargetType="TextBlock">
+                                                <Setter Property="FontFamily" Value="{StaticResource FontFamilyMono}" />
+                                                <Setter Property="FontSize" Value="12" />
+                                                <Setter Property="FontWeight" Value="Medium" />
+                                                <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+                                                <Style.Triggers>
+                                                    <DataTrigger Binding="{Binding HasArrivalTime}" Value="False">
+                                                        <Setter Property="Foreground" Value="#94A3B8" />
+                                                    </DataTrigger>
+                                                    <DataTrigger Binding="{Binding IsWalkIn}" Value="True">
+                                                        <Setter Property="Foreground" Value="#B45309" />
+                                                        <Setter Property="FontWeight" Value="SemiBold" />
+                                                    </DataTrigger>
+                                                </Style.Triggers>
+                                            </Style>
+                                        </TextBlock.Style>
+                                    </TextBlock>
+                                </Grid>
+                            </DataTemplate>
+                        </controls:UniformColumnDef.CellTemplate>
+                    </controls:UniformColumnDef>
+
+                    <controls:UniformColumnDef Header="Patient" WidthRatio="2.1" MinWidth="220">
+                        <controls:UniformColumnDef.CellTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal"
+                                            Margin="10,0"
+                                            Background="Transparent"
+                                            VerticalAlignment="Center"
+                                            Opacity="{Binding RowContentOpacity}"
+                                            ToolTip="{Binding ToolTipText}">
+                                    <TextBlock Text="{Binding PatientNameDisplay}"
+                                               FontFamily="{StaticResource FontFamilyPrimary}"
+                                               FontSize="12"
+                                               FontWeight="SemiBold"
+                                               Foreground="{StaticResource TextPrimaryBrush}"
+                                               VerticalAlignment="Center"
+                                               TextWrapping="NoWrap"
+                                               TextTrimming="None" />
+                                    <Border Visibility="{Binding HasCriticalAlert, Converter={StaticResource BoolToVisibilityConverter}}"
+                                            Background="#FEF2F2"
+                                            BorderBrush="#FECACA"
+                                            BorderThickness="1"
+                                            CornerRadius="4"
+                                            Padding="5,1"
+                                            Margin="8,0,0,0"
+                                            VerticalAlignment="Center">
+                                        <TextBlock Text="ALERT"
+                                                   FontSize="9.5"
+                                                   FontWeight="Bold"
+                                                   Foreground="#DC2626"
+                                                   TextWrapping="NoWrap"
+                                                   TextTrimming="None" />
+                                    </Border>
+                                </StackPanel>
+                            </DataTemplate>
+                        </controls:UniformColumnDef.CellTemplate>
+                    </controls:UniformColumnDef>
+
+                    <controls:UniformColumnDef Header="Doctor &amp; Room" WidthRatio="1.65" MinWidth="180">
+                        <controls:UniformColumnDef.CellTemplate>
+                            <DataTemplate>
+                                <Grid Margin="10,0"
+                                      Background="Transparent"
+                                      Opacity="{Binding RowContentOpacity}"
+                                      ToolTip="{Binding ToolTipText}">
+                                    <TextBlock Text="{Binding DoctorRoomDisplay}"
+                                               FontFamily="{StaticResource FontFamilyPrimary}"
+                                               FontSize="12"
+                                               Foreground="#334155"
+                                               VerticalAlignment="Center"
+                                               TextWrapping="NoWrap"
+                                               TextTrimming="None" />
+                                </Grid>
+                            </DataTemplate>
+                        </controls:UniformColumnDef.CellTemplate>
+                    </controls:UniformColumnDef>
+
+                    <controls:UniformColumnDef Header="Status" WidthRatio="1.35" MinWidth="160">
+                        <controls:UniformColumnDef.CellTemplate>
+                            <DataTemplate>
+                                <Grid Margin="10,0"
+                                      Background="Transparent"
+                                      ToolTip="{Binding ToolTipText}">
+                                    <Border Background="{Binding StatusBadgeBackground}"
+                                            BorderBrush="{Binding StatusBadgeBorder}"
+                                            BorderThickness="1"
+                                            CornerRadius="12"
+                                            Height="24"
+                                            Padding="9,0"
+                                            HorizontalAlignment="Left"
+                                            VerticalAlignment="Center">
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <Ellipse Width="6"
+                                                     Height="6"
+                                                     Fill="{Binding StatusDotBrush}"
+                                                     VerticalAlignment="Center"
+                                                     Margin="0,0,6,0" />
+                                            <TextBlock Text="{Binding StatusDisplay}"
+                                                       FontFamily="{StaticResource FontFamilyPrimary}"
+                                                       FontSize="11.5"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{Binding StatusBadgeForeground}"
+                                                       VerticalAlignment="Center"
+                                                       TextWrapping="NoWrap"
+                                                       TextTrimming="None" />
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+                            </DataTemplate>
+                        </controls:UniformColumnDef.CellTemplate>
+                    </controls:UniformColumnDef>
                 </controls:UniformPagedGrid>
 
                 <!-- 2. Appointments (Calendar + Paged Table) -->

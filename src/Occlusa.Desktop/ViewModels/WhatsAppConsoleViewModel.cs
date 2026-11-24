@@ -17,6 +17,7 @@ public partial class WhatsAppConsoleViewModel : ObservableObject
 
     private readonly OcclusaApiClient _apiClient;
     private readonly string _branchId;
+    private readonly string _activeStaffName;
     private readonly Action _onUpdated;
     private readonly List<WhatsAppMessageDto> _allMessages = new();
 
@@ -70,11 +71,13 @@ public partial class WhatsAppConsoleViewModel : ObservableObject
         string branchId,
         IReadOnlyList<AppointmentQueueItemDto> queueItems,
         OcclusaApiClient apiClient,
-        Action onUpdated)
+        Action onUpdated,
+        string activeStaffName = "Desktop Reception")
     {
         _branchId = branchId;
         _apiClient = apiClient;
         _onUpdated = onUpdated;
+        _activeStaffName = string.IsNullOrWhiteSpace(activeStaffName) ? "Desktop Reception" : activeStaffName.Trim();
 
         _thread = thread ?? new WhatsAppThreadDto
         {
@@ -197,7 +200,7 @@ public partial class WhatsAppConsoleViewModel : ObservableObject
 
         try
         {
-            var approved = await _apiClient.ApproveAiBookingAsync(PendingBookingId.Value);
+            var approved = await _apiClient.ApproveAiBookingAsync(PendingBookingId.Value, _activeStaffName);
             HasPendingAiBooking = false;
             PendingBookingId = null;
             _onUpdated();
@@ -231,7 +234,7 @@ public partial class WhatsAppConsoleViewModel : ObservableObject
                 new WhatsAppTakeoverReplyRequest
                 {
                     MessageText = TakeoverReplyText.Trim(),
-                    StaffName = "Front Desk Staff"
+                    StaffName = _activeStaffName
                 });
 
             Thread = updated;

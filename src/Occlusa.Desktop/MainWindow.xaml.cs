@@ -25,6 +25,10 @@ public partial class MainWindow : Window
             OpenAppointmentModal(appt, prefill: null);
         _viewModel.Appointments.QuickBookRequested += (_, prefill) =>
             OpenAppointmentModal(existing: null, prefill: prefill);
+        _viewModel.WalkInIntakeRequested += (_, patient) =>
+            OpenWalkInModal(patient);
+
+        Closed += (_, _) => _viewModel.StopTimers();
     }
 
     private void QueuePagedGrid_RowDoubleClicked(object? sender, object? rowObj)
@@ -40,7 +44,7 @@ public partial class MainWindow : Window
         }
         else
         {
-            OpenPatientModalById(row.Source.PatientId, row.Source.PatientName, row.Source.PatientIc);
+            OpenAppointmentModal(row.Source, prefill: null);
         }
     }
 
@@ -66,6 +70,19 @@ public partial class MainWindow : Window
         {
             OpenWhatsAppModal(row.Source);
         }
+    }
+
+    private void OpenSelectedQueueVisitButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel.SelectedQueueRow is { } row)
+        {
+            OpenAppointmentModal(row.Source, prefill: null);
+        }
+    }
+
+    private void NewWalkInButton_Click(object sender, RoutedEventArgs e)
+    {
+        OpenWalkInModal(preselectedPatient: null);
     }
 
     private void OpenSelectedQueuePatientButton_Click(object sender, RoutedEventArgs e)
@@ -142,10 +159,22 @@ public partial class MainWindow : Window
         OpenAppointmentModal(existing: null, prefill: null, startInNewPatientMode: true);
     }
 
+    private void OpenWalkInModal(PatientDto? preselectedPatient)
+    {
+        OpenAppointmentModal(
+            existing: null,
+            prefill: null,
+            startInNewPatientMode: false,
+            isWalkInMode: true,
+            preselectedPatient: preselectedPatient);
+    }
+
     private void OpenAppointmentModal(
         AppointmentQueueItemDto? existing,
         QuickBookSlotArgs? prefill,
-        bool startInNewPatientMode = false)
+        bool startInNewPatientMode = false,
+        bool isWalkInMode = false,
+        PatientDto? preselectedPatient = null)
     {
         AppointmentDetailModal? modal = null;
         var vm = new AppointmentDetailViewModel(
@@ -167,7 +196,10 @@ public partial class MainWindow : Window
                 _viewModel.MergePatient(registeredPatient);
                 _viewModel.SelectedPatient = registeredPatient;
             },
-            startInNewPatientMode);
+            startInNewPatientMode,
+            isWalkInMode,
+            preselectedPatient,
+            _viewModel.SelectedStaffName);
 
         modal = new AppointmentDetailModal(
             vm,
@@ -260,7 +292,8 @@ public partial class MainWindow : Window
             _viewModel.SelectedBranchId,
             _viewModel.AllQueueItems,
             _apiClient,
-            () => _ = _viewModel.RefreshSnapshotAsync());
+            () => _ = _viewModel.RefreshSnapshotAsync(),
+            _viewModel.SelectedStaffName);
 
         var modal = new WhatsAppConsoleModal(vm)
         {

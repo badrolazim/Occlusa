@@ -168,6 +168,7 @@ public sealed class TimelineAppointmentBlockVm
     public bool ShowStatusBadge { get; }
     public bool HasCriticalAlert => Source.HasCriticalMedicalAlert;
     public bool IsCancelled => Source.Status == QueueStatus.Cancelled;
+    public bool IsWalkIn => Source.VisitType == VisitType.WalkIn;
 
     public Brush CardBackground { get; }
     public Brush CardBorderBrush { get; }
@@ -329,6 +330,9 @@ public partial class AppointmentsViewModel : ObservableObject
 
     private static readonly CardPalette AiPendingPalette =
         CreatePalette("#FFFBEB", "#FDE68A", "#D97706", "#78350F", "#92400E", "#FEF3C7", "#B45309");
+
+    private static readonly CardPalette WalkInPalette =
+        CreatePalette("#FFF7ED", "#FDBA74", "#EA580C", "#7C2D12", "#9A3412", "#FFEDD5", "#C2410C");
 
     private static readonly CardPalette CancelledPalette =
         CreatePalette("#F8FAFC", "#E2E8F0", "#94A3B8", "#64748B", "#94A3B8", "#F1F5F9", "#64748B");
@@ -1129,7 +1133,11 @@ public partial class AppointmentsViewModel : ObservableObject
         var shortName = AppointmentCalendarHelper.FormatCompactPatientName(appt.PatientName, shortForm: true);
         var fullCompactName = AppointmentCalendarHelper.FormatCompactPatientName(appt.PatientName, shortForm: false);
         var alertPrefix = appt.HasCriticalMedicalAlert ? "[!] " : string.Empty;
-        var statusLabel = AppointmentCalendarHelper.FormatStatusLabel(appt.Status);
+        var isWalkIn = appt.VisitType == VisitType.WalkIn;
+        var walkInTag = isWalkIn ? "W · " : string.Empty;
+        var statusLabel = isWalkIn
+            ? "Walk-In"
+            : AppointmentCalendarHelper.FormatStatusLabel(appt.Status);
 
         var palette = ResolvePalette(appt);
         bool isNarrowSplit = layout.LaneCount >= 3 || (isWeekView && layout.LaneCount >= 2);
@@ -1147,8 +1155,8 @@ public partial class AppointmentsViewModel : ObservableObject
         {
             timeRangeLabel = string.Empty;
             patientDisplay = isNarrowSplit
-                ? $"{startStr} {shortName}"
-                : $"{startStr} · {alertPrefix}{shortName}";
+                ? $"{startStr} {walkInTag}{shortName}"
+                : $"{startStr} · {walkInTag}{alertPrefix}{shortName}";
             secondaryDisplay = string.Empty;
             tertiaryDisplay = string.Empty;
             showHeaderRow = false;
@@ -1159,7 +1167,7 @@ public partial class AppointmentsViewModel : ObservableObject
         else if (isNarrowSplit)
         {
             timeRangeLabel = $"{startStr}–{endStr}";
-            patientDisplay = $"{alertPrefix}{shortName}";
+            patientDisplay = $"{walkInTag}{alertPrefix}{shortName}";
             showHeaderRow = layout.RowSpan >= 3;
             secondaryDisplay = layout.RowSpan == 2
                 ? $"{startStr}–{endStr}"
@@ -1181,7 +1189,7 @@ public partial class AppointmentsViewModel : ObservableObject
             {
                 showHeaderRow = false;
                 timeRangeLabel = $"{startStr}–{endStr}";
-                patientDisplay = $"{alertPrefix}{displayName}";
+                patientDisplay = $"{walkInTag}{alertPrefix}{displayName}";
                 secondaryDisplay = isWeekView && layout.LaneCount == 1
                     ? $"{startStr}–{endStr} · {AppointmentCalendarHelper.FormatCompactDentistName(appt.DoctorName)}"
                     : $"{startStr}–{endStr} · {AppointmentCalendarHelper.FormatCompactTreatment(appt.ProcedureSummary, 18)}";
@@ -1202,7 +1210,8 @@ public partial class AppointmentsViewModel : ObservableObject
                 showSecondaryLine = true;
                 showTertiaryLine = false;
                 showStatusBadge = layout.LaneCount == 1
-                    && (appt.Status == QueueStatus.InChair
+                    && (isWalkIn
+                        || appt.Status == QueueStatus.InChair
                         || appt.Status == QueueStatus.AiBookedPending
                         || appt.Status == QueueStatus.Cancelled);
             }
@@ -1273,6 +1282,11 @@ public partial class AppointmentsViewModel : ObservableObject
             return AiPendingPalette;
         }
 
+        if (appt.VisitType == VisitType.WalkIn)
+        {
+            return WalkInPalette;
+        }
+
         return DentistPalettes[GetDentistPaletteIndex(appt.DentistId, appt.DoctorName)];
     }
 
@@ -1329,11 +1343,12 @@ public partial class AppointmentsViewModel : ObservableObject
         var timeLabel = local.ToString("HH:mm", CultureInfo.InvariantCulture);
         var patientShort = AppointmentCalendarHelper.FormatCompactPatientName(appt.PatientName, shortForm: true);
         var alertPrefix = appt.HasCriticalMedicalAlert ? "[!] " : string.Empty;
+        var walkInTag = appt.VisitType == VisitType.WalkIn ? "W · " : string.Empty;
 
         return new CalendarAppointmentCardVm(
             appt,
             timeLabel,
-            $"{timeLabel} {alertPrefix}{patientShort}",
+            $"{timeLabel} {walkInTag}{alertPrefix}{patientShort}",
             string.Empty,
             BuildTooltip(appt, local));
     }
@@ -1341,14 +1356,36 @@ public partial class AppointmentsViewModel : ObservableObject
     private static string BuildTooltip(AppointmentQueueItemDto appt, DateTimeOffset localStart)
     {
         var localEnd = localStart.AddMinutes(Math.Max(15, appt.DurationMinutes));
+        var visitLabel = appt.VisitType switch
+        {
+            VisitType.WalkIn => "Walk-In (No Appointment)",
+            VisitType.AiBooked => "WhatsApp AI Booking",
+            _ => "Scheduled Appointment"
+        };
         var lines = new List<string>
         {
             $"{appt.PatientName} ({(string.IsNullOrWhiteSpace(appt.PatientIc) ? "No IC" : appt.PatientIc)})",
+            $"Visit Type: {visitLabel}",
             $"{localStart:ddd dd MMM yyyy, HH:mm} – {localEnd:HH:mm} ({appt.DurationMinutes} min)",
             $"Dentist: {appt.DoctorName} · {appt.RoomName}",
             $"Treatment: {appt.ProcedureSummary}",
             $"Status: {AppointmentCalendarHelper.FormatStatusLabel(appt.Status)}"
         };
+
+        if (appt.ArrivedAt.HasValue)
+        {
+            lines.Add($"Arrived: {appt.ArrivedAt.Value.ToLocalTime():HH:mm}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(appt.CreatedBy))
+        {
+            lines.Add($"Added By: {appt.CreatedBy}");
+        }
+
+        if (!string.IsNullOrWhiteSpace(appt.LastUpdatedBy))
+        {
+            lines.Add($"Last Updated By: {appt.LastUpdatedBy}");
+        }
 
         if (appt.HasCriticalMedicalAlert)
         {

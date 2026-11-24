@@ -6,6 +6,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.3.0] - 2026-11-24
+### Added
+- Unified **Today's Live Queue** 5-column paged floor board (`Appt Time` | `Arrived / Walk-In` | `Patient` | `Doctor & Room` | `Status`) with separated appointment vs. arrival/walk-in times (`No Appointment` for walk-ins), status-pill-only color badges, live 30-second wait/chair timers (`Waiting · Xm` with ≥ 30m long-wait highlight, `In Chair · Xm`), and `UniformColumnDef.CellTemplate` support in `UniformPagedGrid`.
+- Shared **Walk-In** intake (`VisitType`: `Booked`, `WalkIn`, `AiBooked`) directly from the Live Queue `+ Walk-In` toolbar action (`AppointmentDetailModal` walk-in mode) that automatically appears on today's **Appointments Calendar** (warm orange dashed cards + `Walk-In` badge) and blocks dentist slots in `GetDentistDaySlotAvailability`.
+- **Active Staff Attribution ("Who Did What"):** Sidebar `ACTIVE STAFF` selector synced to `X-Occlusa-User` (`OcclusaApiClient.SetActiveUser`), stage milestone timestamps (`ArrivedAt`, `SeatedAt`, `CheckoutAt`, `CompletedAt`), per-stage staff fields (`CreatedBy`, `CheckedInBy`, `SeatedBy`, `CheckoutBy`, `CompletedBy`, `LastUpdatedBy`), and a paged **Staff Activity Trail** (`VisitActivityEntryDto`) in `AppointmentDetailModal` and row hover tooltips.
+- Smart **MyKad Check-In** on Live Queue detecting today's scheduled/AI booking for 1-click check-in to `Waiting` or prompting Walk-In intake.
+- Supabase PostgreSQL migration `supabase/migrations/004_live_queue_walkins_and_attribution.sql` and mirrored `NpgsqlSupabaseRepository` / `InMemoryOcclusaRepository` persistence.
+- 5 new xUnit tests (`79` total tests in `Occlusa.Tests`) covering Live Queue sorting, legacy `Arrived` normalization & elapsed timers, walk-in calendar slot blocking, milestone staff attribution, check-in revert, and end-to-end HTTP pipeline round-trips.
+
+### Changed
+- Merged legacy `QueueStatus.Arrived` into `QueueStatus.Waiting` across Live Queue toolbar, booking status dropdown, transitions (`ClinicDomainHelpers.ApplyStatusMilestone`), and SQL backfill (`NormalizeQueueStatus`).
+- Sorted unified Live Queue (`AppointmentCalendarHelper.SortLiveQueue`) so active visits remain on top (longest-waiting first) and `Completed` / `Cancelled` visits are automatically pushed to the bottom with softened row opacity.
+- Enabled contextual Live Queue toolbar buttons (`Approve AI`, `Check In`, `In Chair`, `Checkout`, `Complete`, `Cancel`, `Visit Details`, `Patient Chart`, `Odontogram`) and routed non-`InChair` row double-click to `AppointmentDetailModal`.
+
 ## [0.2.0] - 2026-11-24
 ### Added
 - 15-minute proportional Appointments schedule timeline (`4 rows/hour` across `Full Day` `09:00`-`18:00` = `36` rows, `AM` `09:00`-`13:30` = `18` rows, and `PM` `13:30`-`18:00` = `18` rows; 2-hour bookings consume `8` rows) across **Day View** and **Week View** via `ScheduleTimelinePanel`, `TimelineBackdropControl`, and `AppointmentCalendarHelper.ComputeTimelineLayout`.

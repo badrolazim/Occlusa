@@ -7,7 +7,7 @@ using Occlusa.Shared.Models;
 namespace Occlusa.Desktop;
 
 /// <summary>
-/// Main 4-workspace single-screen clinical window opening True Modal Popups via ShowDialog().
+/// Main 5-workspace single-screen clinical window opening True Modal Popups via ShowDialog().
 /// </summary>
 public partial class MainWindow : Window
 {
@@ -31,16 +31,16 @@ public partial class MainWindow : Window
         Closed += (_, _) => _viewModel.StopTimers();
     }
 
-    private void QueuePagedGrid_RowDoubleClicked(object? sender, object? rowObj)
+    private async void QueuePagedGrid_RowDoubleClicked(object? sender, object? rowObj)
     {
         if (rowObj is not QueueRowItem row)
         {
             return;
         }
 
-        if (row.Source.Status == QueueStatus.InChair)
+        if (row.Source.Status is QueueStatus.InChair or QueueStatus.AwaitingCheckout || row.Source.VisitId.HasValue)
         {
-            OpenOdontogramForPatientId(row.Source.PatientId, row.Source.PatientName, row.Source.PatientIc);
+            await OpenVisitForQueueItemAsync(row.Source, this);
         }
         else
         {
@@ -97,16 +97,21 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OpenSelectedQueueOdontogramButton_Click(object sender, RoutedEventArgs e)
+    private async void OpenSelectedQueueOdontogramButton_Click(object sender, RoutedEventArgs e)
     {
         if (_viewModel.SelectedQueueRow is { } row)
         {
-            OpenOdontogramForPatientId(row.Source.PatientId, row.Source.PatientName, row.Source.PatientIc);
+            await OpenVisitForQueueItemAsync(row.Source, this);
         }
         else if (_viewModel.SelectedPatient != null)
         {
-            OpenOdontogramModal(_viewModel.SelectedPatient, this);
+            await OpenLatestOrCreateVisitForPatientAsync(_viewModel.SelectedPatient, this);
         }
+    }
+
+    private void RegisterStandalonePatientButton_Click(object sender, RoutedEventArgs e)
+    {
+        OpenPatientModal(patient: null);
     }
 
     private void OpenSelectedPatientButton_Click(object sender, RoutedEventArgs e)
@@ -204,7 +209,17 @@ public partial class MainWindow : Window
         modal = new AppointmentDetailModal(
             vm,
             patient => OpenPatientModal(patient),
-            patient => OpenOdontogramModal(patient, modal))
+            async patient =>
+            {
+                if (existing is not null)
+                {
+                    await OpenVisitForQueueItemAsync(existing, modal);
+                }
+                else
+                {
+                    await OpenLatestOrCreateVisitForPatientAsync(patient, modal);
+                }
+            })
         {
             Owner = this
         };
@@ -223,25 +238,15 @@ public partial class MainWindow : Window
         OpenPatientModal(patient);
     }
 
-    private void OpenOdontogramForPatientId(Guid patientId, string fallbackName, string fallbackIc)
-    {
-        var patient = _viewModel.FindPatient(patientId) ?? new PatientDto
-        {
-            Id = patientId,
-            FullName = fallbackName,
-            IcNumber = fallbackIc,
-            PrimaryBranchId = _viewModel.SelectedBranchId
-        };
-        OpenOdontogramModal(patient, this);
-    }
-
-    private void OpenPatientModal(PatientDto patient)
+    private void OpenPatientModal(PatientDto? patient)
     {
         PatientDetailModal? modal = null;
+        var defaultDoc = _viewModel.Dentists.FirstOrDefault()?.FullName ?? "Dr. Aina Rahman";
         var vm = new PatientDetailViewModel(
             patient,
             _viewModel.SelectedBranchId,
-            _viewModel.SoapMacros,
+            _viewModel.SelectedStaffName,
+            defaultDoc,
             _apiClient,
             updated =>
             {
@@ -249,26 +254,90 @@ public partial class MainWindow : Window
                 _ = _viewModel.RefreshSnapshotAsync();
             });
 
-        modal = new PatientDetailModal(vm, () => OpenOdontogramModal(vm.Patient, modal))
+        modal = new PatientDetailModal(
+            vm,
+            (pat, visit) => OpenVisitRecordModal(pat, visit, modal))
         {
             Owner = this
         };
         modal.ShowDialog();
     }
 
-    private void OpenOdontogramModal(PatientDto patient, Window? owner)
+    private async Task OpenVisitForQueueItemAsync(AppointmentQueueItemDto queueItem, Window? owner)
     {
-        var vm = new OdontogramViewModel(
+        try
+        {
+            var visit = await _apiClient.EnsureVisitForAppointmentAsync(queueItem.Id, _viewModel.SelectedStaffName);
+            var patient = _viewModel.FindPatient(queueItem.PatientId) ?? new PatientDto
+            {
+                Id = queueItem.PatientId,
+                FullName = queueItem.PatientName,
+                IcNumber = queueItem.PatientIc,
+                PrimaryBranchId = queueItem.BranchId
+            };
+
+            _ = _viewModel.RefreshSnapshotAsync();
+            OpenVisitRecordModal(patient, visit, owner);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                $"Could not open clinical visit record: {ex.Message}",
+                "Visit Record Error",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+    }
+
+    private async Task OpenLatestOrCreateVisitForPatientAsync(PatientDto patient, Window? owner)
+    {
+        try
+        {
+            var visits = await _apiClient.GetPatientVisitsAsync(patient.Id);
+            var target = visits.OrderByDescending(v => v.VisitDate).ThenByDescending(v => v.VisitNumber).FirstOrDefault();
+            if (target is null)
+            {
+                target = await _apiClient.CreatePatientVisitAsync(patient.Id, new CreatePatientVisitRequest
+                {
+                    BranchId = _viewModel.SelectedBranchId,
+                    DoctorName = _viewModel.Dentists.FirstOrDefault()?.FullName ?? "Dr. Aina Rahman",
+                    InitMode = OdontogramInitMode.CarryForward,
+                    CreatedBy = _viewModel.SelectedStaffName
+                });
+                _ = _viewModel.RefreshSnapshotAsync();
+            }
+
+            OpenVisitRecordModal(patient, target, owner);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                $"Could not open visit chart: {ex.Message}",
+                "Visit Chart Error",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+    }
+
+    private void OpenVisitRecordModal(PatientDto patient, PatientVisitDto visit, Window? owner)
+    {
+        var vm = new VisitRecordViewModel(
             patient,
-            _viewModel.SelectedBranchId,
+            visit,
+            _viewModel.Dentists,
+            _viewModel.SoapMacros,
             _apiClient,
+            _viewModel.SelectedStaffName,
+            VisitWorkspaceTab.Odontogram,
+            savedVisit => { _ = _viewModel.RefreshSnapshotAsync(); },
             () => _ = _viewModel.RefreshSnapshotAsync());
 
-        var modal = new OdontogramModal(vm)
+        var modal = new VisitRecordModal(vm)
         {
             Owner = owner ?? this
         };
         modal.ShowDialog();
+        _ = _viewModel.RefreshSnapshotAsync();
     }
 
     private void OpenInvoiceModal(InvoiceDto invoice)

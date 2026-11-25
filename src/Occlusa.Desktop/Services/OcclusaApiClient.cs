@@ -438,6 +438,80 @@ public sealed class OcclusaApiClient : IAsyncDisposable
             return await ReadRequiredAsync<AppointmentQueueItemDto>(resp, token);
         }, ct);
 
+    public Task<List<PatientVisitDto>> GetPatientVisitsAsync(Guid patientId, CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(
+            async (http, token) => await http.GetFromJsonAsync<List<PatientVisitDto>>(
+                $"/api/patients/{patientId}/visits",
+                JsonOptions,
+                token) ?? new(),
+            ct);
+
+    public Task<PatientVisitDto> CreatePatientVisitAsync(
+        Guid patientId,
+        CreatePatientVisitRequest request,
+        CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(async (http, token) =>
+        {
+            var resp = await http.PostAsJsonAsync($"/api/patients/{patientId}/visits", request, JsonOptions, token);
+            return await ReadRequiredAsync<PatientVisitDto>(resp, token);
+        }, ct);
+
+    public Task<PatientVisitDto> EnsureVisitForAppointmentAsync(
+        Guid appointmentId,
+        string? actor = null,
+        CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(async (http, token) =>
+        {
+            var url = string.IsNullOrWhiteSpace(actor)
+                ? $"/api/appointments/{appointmentId}/ensure-visit"
+                : $"/api/appointments/{appointmentId}/ensure-visit?actor={Uri.EscapeDataString(actor.Trim())}";
+            var resp = await http.PostAsync(url, null, token);
+            return await ReadRequiredAsync<PatientVisitDto>(resp, token);
+        }, ct);
+
+    public Task<PatientVisitDto?> GetVisitAsync(Guid visitId, CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(
+            (http, token) => http.GetFromJsonAsync<PatientVisitDto>($"/api/visits/{visitId}", JsonOptions, token),
+            ct);
+
+    public Task<PatientVisitDto> UpdatePatientVisitAsync(
+        Guid visitId,
+        UpdatePatientVisitRequest request,
+        CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(async (http, token) =>
+        {
+            var resp = await http.PutAsJsonAsync($"/api/visits/{visitId}", request, JsonOptions, token);
+            return await ReadRequiredAsync<PatientVisitDto>(resp, token);
+        }, ct);
+
+    public Task<List<OdontogramToothDto>> GetVisitOdontogramAsync(Guid visitId, CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(
+            async (http, token) => await http.GetFromJsonAsync<List<OdontogramToothDto>>(
+                $"/api/visits/{visitId}/odontogram",
+                JsonOptions,
+                token) ?? new(),
+            ct);
+
+    public Task<OdontogramToothDto> UpdateVisitOdontogramToothAsync(
+        Guid visitId,
+        UpdateOdontogramRequest request,
+        CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(async (http, token) =>
+        {
+            var resp = await http.PutAsJsonAsync($"/api/visits/{visitId}/odontogram", request, JsonOptions, token);
+            return await ReadRequiredAsync<OdontogramToothDto>(resp, token);
+        }, ct);
+
+    public Task<PatientVisitDto> ResetVisitOdontogramAsync(
+        Guid visitId,
+        ResetVisitOdontogramRequest request,
+        CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(async (http, token) =>
+        {
+            var resp = await http.PostAsJsonAsync($"/api/visits/{visitId}/odontogram/reset", request, JsonOptions, token);
+            return await ReadRequiredAsync<PatientVisitDto>(resp, token);
+        }, ct);
+
     public Task<List<OdontogramToothDto>> GetOdontogramAsync(Guid patientId, CancellationToken ct = default) =>
         ExecuteWithRecoveryAsync(
             async (http, token) => await http.GetFromJsonAsync<List<OdontogramToothDto>>(

@@ -1,0 +1,134 @@
+<UserControl x:Class="Occlusa.Desktop.Controls.AnatomicalToothControl"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             x:Name="RootControl"
+             ScrollViewer.VerticalScrollBarVisibility="Disabled"
+             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+    <Grid x:Name="LayoutRoot" Background="Transparent">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Slot A: Label + Stage Badge (Row 0 for Upper Arch, Row 2 for Lower Arch) -->
+        <StackPanel x:Name="HeaderBlock"
+                    Grid.Row="0"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Center"
+                    Margin="0,1,0,1">
+            <TextBlock x:Name="ToothNumberText"
+                       FontFamily="{StaticResource FontFamilyMono}"
+                       FontSize="11"
+                       FontWeight="Bold"
+                       Foreground="{StaticResource TextPrimaryBrush}"
+                       VerticalAlignment="Center"
+                       TextTrimming="None" />
+            <Border x:Name="StagePill"
+                    CornerRadius="3"
+                    Padding="3,0"
+                    Margin="3,0,0,0"
+                    VerticalAlignment="Center"
+                    Visibility="Collapsed">
+                <TextBlock x:Name="StageText"
+                           FontSize="8.5"
+                           FontWeight="Bold"
+                           TextTrimming="None" />
+            </Border>
+        </StackPanel>
+
+        <!-- Slot B: Anatomical Buccal/Labial Crown + Multi-Root Vector Silhouette -->
+        <Viewbox Grid.Row="1"
+                 Width="32"
+                 Height="46"
+                 Stretch="Uniform"
+                 HorizontalAlignment="Center"
+                 Margin="0,1">
+            <Canvas x:Name="AnatomyCanvas" Width="44" Height="88">
+                <Canvas.RenderTransformOrigin>0.5,0.5</Canvas.RenderTransformOrigin>
+                <Canvas.RenderTransform>
+                    <ScaleTransform x:Name="AnatomyTransform" ScaleX="1" ScaleY="1" />
+                </Canvas.RenderTransform>
+
+                <!-- Gingival CEJ Guide -->
+                <Line x:Name="GumLine"
+                      X1="2" X2="42"
+                      Stroke="#FDA4AF"
+                      StrokeThickness="1.8"
+                      Opacity="0.65" />
+
+                <!-- Natural Roots -->
+                <Path x:Name="RootsPath"
+                      Fill="#FEF9EC"
+                      Stroke="#64748B"
+                      StrokeThickness="1.5" />
+
+                <!-- Implant Titanium Screw Fixture -->
+                <Path x:Name="ImplantPath"
+                      Stroke="#0D9488"
+                      Fill="#CCFBF1"
+                      StrokeThickness="2.0"
+                      StrokeStartLineCap="Round"
+                      StrokeEndLineCap="Round"
+                      Visibility="Collapsed" />
+
+                <!-- Crown Cap -->
+                <Path x:Name="CrownPath"
+                      Fill="#FFFFFF"
+                      Stroke="#475569"
+                      StrokeThickness="1.6" />
+
+                <!-- Missing Ghost Outline -->
+                <Path x:Name="MissingGhostPath"
+                      Fill="Transparent"
+                      Stroke="#94A3B8"
+                      StrokeThickness="1.5"
+                      StrokeDashArray="3 2.5"
+                      Opacity="0.45"
+                      Visibility="Collapsed" />
+
+                <!-- Root Canal Gutta-Percha Lines -->
+                <Path x:Name="RootCanalPath"
+                      Stroke="#EA580C"
+                      StrokeThickness="2.6"
+                      StrokeStartLineCap="Round"
+                      StrokeEndLineCap="Round"
+                      Visibility="Collapsed" />
+
+                <!-- Caries / Restoration Lesion Core -->
+                <Ellipse x:Name="CrownLesionDot"
+                         Width="15"
+                         Height="11"
+                         Opacity="0.86"
+                         Visibility="Collapsed" />
+
+                <!-- Extraction Red Cross -->
+                <Canvas x:Name="ExtractionCross" Visibility="Collapsed">
+                    <Line X1="6" Y1="12" X2="38" Y2="76" Stroke="#DC2626" StrokeThickness="4.0" StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
+                    <Line X1="38" Y1="12" X2="6" Y2="76" Stroke="#DC2626" StrokeThickness="4.0" StrokeStartLineCap="Round" StrokeEndLineCap="Round" />
+                </Canvas>
+            </Canvas>
+        </Viewbox>
+
+        <!-- Slot C: Kreloses-Style 5-Surface Occlusal Cross (Row 2 for Upper Arch, Row 0 for Lower Arch) -->
+        <Viewbox x:Name="OcclusalBox"
+                 Grid.Row="2"
+                 Width="24"
+                 Height="24"
+                 HorizontalAlignment="Center"
+                 Margin="0,1">
+            <Canvas Width="36" Height="36">
+                <!-- B: Buccal / Labial -->
+                <Polygon x:Name="SurfBuccal" Points="3,3 33,3 24,12 12,12" Stroke="#64748B" StrokeThickness="1.3" Fill="#FFFFFF" />
+                <!-- L: Lingual / Palatal -->
+                <Polygon x:Name="SurfLingual" Points="3,33 12,24 24,24 33,33" Stroke="#64748B" StrokeThickness="1.3" Fill="#FFFFFF" />
+                <!-- M / D Left & Right Quadrants -->
+                <Polygon x:Name="SurfLeft" Points="3,3 12,12 12,24 3,33" Stroke="#64748B" StrokeThickness="1.3" Fill="#FFFFFF" />
+                <Polygon x:Name="SurfRight" Points="33,3 33,33 24,24 24,12" Stroke="#64748B" StrokeThickness="1.3" Fill="#FFFFFF" />
+                <!-- O / I: Occlusal / Incisal -->
+                <Rectangle x:Name="SurfOcclusal" Canvas.Left="12" Canvas.Top="12" Width="12" Height="12" RadiusX="1.5" RadiusY="1.5" Stroke="#475569" StrokeThickness="1.4" Fill="#FFFFFF" />
+            </Canvas>
+        </Viewbox>
+    </Grid>
+</UserControl>
+

@@ -100,7 +100,9 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
                 SELECT p.id, p.full_name, p.ic_number, p.date_of_birth, p.gender, p.phone, p.address,
                        p.primary_branch_id, p.is_mykad_verified, p.consent_signed_at,
                        COALESCE(m.allergies, ''), COALESCE(m.on_anticoagulants, FALSE),
-                       COALESCE(m.has_diabetes, FALSE), COALESCE(m.is_pregnant, FALSE), COALESCE(m.notes, '')
+                       COALESCE(m.has_diabetes, FALSE), COALESCE(m.is_pregnant, FALSE), COALESCE(m.notes, ''),
+                       (SELECT COUNT(*)::INT FROM public.patient_visits pv WHERE pv.patient_id = p.id AND pv.is_deleted = FALSE),
+                       (SELECT MAX(pv.visit_date) FROM public.patient_visits pv WHERE pv.patient_id = p.id AND pv.is_deleted = FALSE)
                 FROM public.patients p
                 LEFT JOIN public.medical_alerts m ON m.patient_id = p.id
                 WHERE p.is_deleted = FALSE
@@ -145,7 +147,9 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
                 SELECT p.id, p.full_name, p.ic_number, p.date_of_birth, p.gender, p.phone, p.address,
                        p.primary_branch_id, p.is_mykad_verified, p.consent_signed_at,
                        COALESCE(m.allergies, ''), COALESCE(m.on_anticoagulants, FALSE),
-                       COALESCE(m.has_diabetes, FALSE), COALESCE(m.is_pregnant, FALSE), COALESCE(m.notes, '')
+                       COALESCE(m.has_diabetes, FALSE), COALESCE(m.is_pregnant, FALSE), COALESCE(m.notes, ''),
+                       (SELECT COUNT(*)::INT FROM public.patient_visits pv WHERE pv.patient_id = p.id AND pv.is_deleted = FALSE),
+                       (SELECT MAX(pv.visit_date) FROM public.patient_visits pv WHERE pv.patient_id = p.id AND pv.is_deleted = FALSE)
                 FROM public.patients p
                 LEFT JOIN public.medical_alerts m ON m.patient_id = p.id
                 WHERE p.is_deleted = FALSE
@@ -202,25 +206,65 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
         var verified = forceMyKadVerified || request.IsMyKadVerified;
 
         var id = request.Id ?? Guid.NewGuid();
-        const string upsertPatientSql = """
-            INSERT INTO public.patients
-                (id, clinic_group_id, primary_branch_id, full_name, ic_number, date_of_birth, gender, phone, address, is_mykad_verified, consent_signed_at, updated_at)
-            VALUES
-                (@id, @groupId, @branchId, @fullName, @ic, @dob, @gender, @phone, @address, @verified, @consentAt, NOW())
-            ON CONFLICT (clinic_group_id, ic_number) DO UPDATE SET
-                full_name = CASE WHEN EXCLUDED.full_name <> '' THEN EXCLUDED.full_name ELSE public.patients.full_name END,
-                date_of_birth = EXCLUDED.date_of_birth,
-                gender = CASE WHEN EXCLUDED.gender <> '' THEN EXCLUDED.gender ELSE public.patients.gender END,
-                phone = CASE WHEN EXCLUDED.phone <> '' THEN EXCLUDED.phone ELSE public.patients.phone END,
-                address = CASE WHEN EXCLUDED.address <> '' THEN EXCLUDED.address ELSE public.patients.address END,
-                is_mykad_verified = public.patients.is_mykad_verified OR EXCLUDED.is_mykad_verified,
-                consent_signed_at = COALESCE(EXCLUDED.consent_signed_at, public.patients.consent_signed_at),
-                updated_at = NOW()
-            RETURNING id;
-            """;
-
-        await using (var cmd = new NpgsqlCommand(upsertPatientSql, conn, tx))
+        bool updatedById = false;
+        if (request.Id.HasValue)
         {
+            const string updateByIdSql = """
+                UPDATE public.patients
+                SET primary_branch_id = @branchId,
+                    full_name = CASE WHEN @fullName <> '' THEN @fullName ELSE full_name END,
+                    ic_number = CASE WHEN @ic <> '' THEN @ic ELSE ic_number END,
+                    date_of_birth = @dob,
+                    gender = CASE WHEN @gender <> '' THEN @gender ELSE gender END,
+                    phone = @phone,
+                    address = @address,
+                    is_mykad_verified = is_mykad_verified OR @verified,
+                    consent_signed_at = COALESCE(@consentAt, consent_signed_at),
+                    updated_at = NOW()
+                WHERE id = @id AND is_deleted = FALSE
+                RETURNING id;
+                """;
+
+            await using var updCmd = new NpgsqlCommand(updateByIdSql, conn, tx);
+            updCmd.Parameters.AddWithValue("id", id);
+            updCmd.Parameters.AddWithValue("branchId", branchId);
+            updCmd.Parameters.AddWithValue("fullName", request.FullName?.Trim() ?? string.Empty);
+            updCmd.Parameters.AddWithValue("ic", normalizedIc);
+            updCmd.Parameters.AddWithValue("dob", dob);
+            updCmd.Parameters.AddWithValue("gender", gender ?? string.Empty);
+            updCmd.Parameters.AddWithValue("phone", request.Phone?.Trim() ?? string.Empty);
+            updCmd.Parameters.AddWithValue("address", request.Address?.Trim() ?? string.Empty);
+            updCmd.Parameters.AddWithValue("verified", verified);
+            updCmd.Parameters.AddWithValue("consentAt", (object?)request.ConsentSignedAt ?? DBNull.Value);
+
+            var scalar = await updCmd.ExecuteScalarAsync(ct);
+            if (scalar is Guid matchedId)
+            {
+                id = matchedId;
+                updatedById = true;
+            }
+        }
+
+        if (!updatedById)
+        {
+            const string upsertPatientSql = """
+                INSERT INTO public.patients
+                    (id, clinic_group_id, primary_branch_id, full_name, ic_number, date_of_birth, gender, phone, address, is_mykad_verified, consent_signed_at, updated_at)
+                VALUES
+                    (@id, @groupId, @branchId, @fullName, @ic, @dob, @gender, @phone, @address, @verified, @consentAt, NOW())
+                ON CONFLICT (clinic_group_id, ic_number) DO UPDATE SET
+                    full_name = CASE WHEN EXCLUDED.full_name <> '' THEN EXCLUDED.full_name ELSE public.patients.full_name END,
+                    date_of_birth = EXCLUDED.date_of_birth,
+                    gender = CASE WHEN EXCLUDED.gender <> '' THEN EXCLUDED.gender ELSE public.patients.gender END,
+                    phone = CASE WHEN EXCLUDED.phone <> '' THEN EXCLUDED.phone ELSE public.patients.phone END,
+                    address = CASE WHEN EXCLUDED.address <> '' THEN EXCLUDED.address ELSE public.patients.address END,
+                    is_mykad_verified = public.patients.is_mykad_verified OR EXCLUDED.is_mykad_verified,
+                    consent_signed_at = COALESCE(EXCLUDED.consent_signed_at, public.patients.consent_signed_at),
+                    updated_at = NOW()
+                RETURNING id;
+                """;
+
+            await using var cmd = new NpgsqlCommand(upsertPatientSql, conn, tx);
             cmd.Parameters.AddWithValue("id", id);
             cmd.Parameters.AddWithValue("groupId", _claimsContext.ClinicGroupId);
             cmd.Parameters.AddWithValue("branchId", branchId);
@@ -423,7 +467,7 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
                        notes, status, has_critical_medical_alert, alert_summary,
                        visit_type, arrived_at, seated_at, checkout_at, completed_at,
                        created_by, checked_in_by, seated_by, checkout_by, completed_by,
-                       last_updated_by, updated_at, activity_log
+                       last_updated_by, updated_at, activity_log, visit_id
                 FROM public.appointments
                 WHERE is_deleted = FALSE
                   AND (@branchId IS NULL OR branch_id = @branchId)
@@ -629,6 +673,11 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
             ct,
             actor);
 
+        if (normalizedStatus == QueueStatus.InChair)
+        {
+            await EnsureVisitForAppointmentInternalAsync(conn, tx, id, actor, ct);
+        }
+
         return (await GetAppointmentInternalAsync(conn, tx, id, ct))!;
     }
 
@@ -773,6 +822,11 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
                 ct,
                 actor);
 
+            if (existing.Status == QueueStatus.InChair)
+            {
+                await EnsureVisitForAppointmentInternalAsync(conn, tx, appointmentId, actor, ct);
+            }
+
             var updated = (await GetAppointmentInternalAsync(conn, tx, appointmentId, ct))!;
             await tx.CommitAsync(ct);
             return (updated, null);
@@ -810,6 +864,11 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
             ClinicDomainHelpers.ApplyStatusMilestone(existing, oldStatus, normalizedNew, actor, DateTimeOffset.UtcNow, request.RoomName);
             await PersistAppointmentLifecycleAsync(conn, tx, existing, ct);
 
+            if (normalizedNew == QueueStatus.InChair)
+            {
+                await EnsureVisitForAppointmentInternalAsync(conn, tx, appointmentId, actor, ct);
+            }
+
             await InsertAuditLogInternalAsync(
                 conn,
                 tx,
@@ -825,6 +884,263 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
             var updated = (await GetAppointmentInternalAsync(conn, tx, appointmentId, ct))!;
             await tx.CommitAsync(ct);
             return (updated, null);
+        }
+    }
+
+    public async Task<IReadOnlyList<PatientVisitDto>> GetPatientVisitsAsync(Guid patientId, CancellationToken ct = default)
+    {
+        var (conn, tx) = await OpenScopedTransactionAsync(ct);
+        await using (conn)
+        await using (tx)
+        {
+            var visits = await QueryVisitsInternalAsync(conn, tx, patientId, null, ct);
+            await tx.CommitAsync(ct);
+            return visits;
+        }
+    }
+
+    public async Task<PatientVisitDto?> GetVisitByIdAsync(Guid visitId, CancellationToken ct = default)
+    {
+        var (conn, tx) = await OpenScopedTransactionAsync(ct);
+        await using (conn)
+        await using (tx)
+        {
+            var visits = await QueryVisitsInternalAsync(conn, tx, null, visitId, ct);
+            await tx.CommitAsync(ct);
+            return visits.FirstOrDefault();
+        }
+    }
+
+    public async Task<(PatientVisitDto? Visit, AppointmentQueueItemDto? UpdatedAppointment, string? Error)> CreatePatientVisitAsync(
+        Guid patientId,
+        CreatePatientVisitRequest request,
+        CancellationToken ct = default)
+    {
+        var (conn, tx) = await OpenScopedTransactionAsync(ct);
+        await using (conn)
+        await using (tx)
+        {
+            var patient = await GetPatientInternalAsync(conn, tx, patientId, ct);
+            if (patient is null)
+            {
+                return (null, null, "Patient not found.");
+            }
+
+            var (visit, updatedAppt) = await CreatePatientVisitInternalAsync(conn, tx, patient, request, ct);
+            await tx.CommitAsync(ct);
+            return (visit, updatedAppt, null);
+        }
+    }
+
+    public async Task<(PatientVisitDto? Visit, AppointmentQueueItemDto? UpdatedAppointment, string? Error)> EnsureVisitForAppointmentAsync(
+        Guid appointmentId,
+        string? actor = null,
+        CancellationToken ct = default)
+    {
+        var (conn, tx) = await OpenScopedTransactionAsync(ct);
+        await using (conn)
+        await using (tx)
+        {
+            var appt = await GetAppointmentInternalAsync(conn, tx, appointmentId, ct);
+            if (appt is null)
+            {
+                return (null, null, "Appointment not found.");
+            }
+
+            var effectiveActor = string.IsNullOrWhiteSpace(actor) ? _claimsContext.UserId : actor.Trim();
+            var (visit, modified) = await EnsureVisitForAppointmentInternalAsync(conn, tx, appointmentId, effectiveActor, ct);
+            var refreshedAppt = modified ? await GetAppointmentInternalAsync(conn, tx, appointmentId, ct) : null;
+            await tx.CommitAsync(ct);
+            return (visit, refreshedAppt, null);
+        }
+    }
+
+    public async Task<(PatientVisitDto? Visit, string? Error)> UpdatePatientVisitAsync(
+        Guid visitId,
+        UpdatePatientVisitRequest request,
+        CancellationToken ct = default)
+    {
+        var (conn, tx) = await OpenScopedTransactionAsync(ct);
+        await using (conn)
+        await using (tx)
+        {
+            var existing = (await QueryVisitsInternalAsync(conn, tx, null, visitId, ct)).FirstOrDefault();
+            if (existing is null)
+            {
+                return (null, "Visit record not found.");
+            }
+
+            var actor = string.IsNullOrWhiteSpace(request.UpdatedBy) ? _claimsContext.UserId : request.UpdatedBy.Trim();
+            var branch = string.IsNullOrWhiteSpace(request.BranchId)
+                ? existing.BranchId
+                : ClinicDomainHelpers.NormalizeBranch(request.BranchId, existing.BranchId);
+            var doctor = string.IsNullOrWhiteSpace(request.DoctorName) ? existing.DoctorName : request.DoctorName.Trim();
+            var visitDate = request.VisitDate ?? existing.VisitDate;
+            var oldSummary = $"Visit #{existing.VisitNumber} ({existing.VisitDate:yyyy-MM-dd}) | {existing.DoctorName} | A:{existing.Assessment}";
+
+            const string sql = """
+                UPDATE public.patient_visits
+                SET branch_id = @branchId,
+                    dentist_id = @dentistId,
+                    doctor_name = @doctor,
+                    visit_date = @visitDate,
+                    subjective = @s,
+                    objective = @o,
+                    assessment = @a,
+                    plan = @p,
+                    anesthesia_used = @anesth,
+                    tooth_shade = @shade,
+                    post_op_instructions = @postOp,
+                    last_updated_by = @actor,
+                    updated_at = NOW()
+                WHERE id = @id AND is_deleted = FALSE;
+                """;
+
+            await using (var cmd = new NpgsqlCommand(sql, conn, tx))
+            {
+                cmd.Parameters.AddWithValue("branchId", branch);
+                cmd.Parameters.AddWithValue("dentistId", (object?)(request.DentistId ?? existing.DentistId) ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("doctor", doctor);
+                cmd.Parameters.AddWithValue("visitDate", visitDate);
+                cmd.Parameters.AddWithValue("s", request.Subjective?.Trim() ?? string.Empty);
+                cmd.Parameters.AddWithValue("o", request.Objective?.Trim() ?? string.Empty);
+                cmd.Parameters.AddWithValue("a", request.Assessment?.Trim() ?? string.Empty);
+                cmd.Parameters.AddWithValue("p", request.Plan?.Trim() ?? string.Empty);
+                cmd.Parameters.AddWithValue("anesth", request.AnesthesiaUsed?.Trim() ?? string.Empty);
+                cmd.Parameters.AddWithValue("shade", request.ToothShade?.Trim() ?? string.Empty);
+                cmd.Parameters.AddWithValue("postOp", request.PostOpInstructions?.Trim() ?? string.Empty);
+                cmd.Parameters.AddWithValue("actor", actor);
+                cmd.Parameters.AddWithValue("id", visitId);
+                await cmd.ExecuteNonQueryAsync(ct);
+            }
+
+            await InsertAuditLogInternalAsync(
+                conn,
+                tx,
+                branch,
+                "PATIENT_VISIT_UPDATED",
+                "PatientVisit",
+                visitId.ToString(),
+                oldSummary,
+                $"Visit #{existing.VisitNumber} ({visitDate:yyyy-MM-dd}) | {doctor} | A:{request.Assessment?.Trim()}",
+                ct,
+                actor);
+
+            var updated = (await QueryVisitsInternalAsync(conn, tx, null, visitId, ct)).First();
+            await tx.CommitAsync(ct);
+            return (updated, null);
+        }
+    }
+
+    public async Task<IReadOnlyList<OdontogramToothDto>> GetVisitOdontogramAsync(Guid visitId, CancellationToken ct = default)
+    {
+        var visit = await GetVisitByIdAsync(visitId, ct);
+        return visit is null ? Array.Empty<OdontogramToothDto>() : visit.Odontogram;
+    }
+
+    public async Task<(OdontogramToothDto? Tooth, InvoiceDto? UpdatedInvoice, string? Error)> UpdateVisitOdontogramAsync(
+        Guid visitId,
+        UpdateOdontogramRequest request,
+        CancellationToken ct = default)
+    {
+        if (!ClinicDomainHelpers.IsValidFdiTooth(request.ToothNumber))
+        {
+            return (null, null, $"Invalid FDI tooth number '{request.ToothNumber}'. Expected 11-48 or 51-85.");
+        }
+
+        if (request.Fee < 0m)
+        {
+            return (null, null, "Procedure fee cannot be negative.");
+        }
+
+        var (conn, tx) = await OpenScopedTransactionAsync(ct);
+        await using (conn)
+        await using (tx)
+        {
+            var visit = (await QueryVisitsInternalAsync(conn, tx, null, visitId, ct)).FirstOrDefault();
+            if (visit is null)
+            {
+                return (null, null, "Visit record not found.");
+            }
+
+            var patient = await GetPatientInternalAsync(conn, tx, visit.PatientId, ct);
+            if (patient is null)
+            {
+                return (null, null, "Patient not found.");
+            }
+
+            var result = await UpdateVisitOdontogramInternalAsync(conn, tx, visit, patient, request, ct);
+            await tx.CommitAsync(ct);
+            return result;
+        }
+    }
+
+    public async Task<(PatientVisitDto? Visit, string? Error)> ResetVisitOdontogramAsync(
+        Guid visitId,
+        ResetVisitOdontogramRequest request,
+        CancellationToken ct = default)
+    {
+        var (conn, tx) = await OpenScopedTransactionAsync(ct);
+        await using (conn)
+        await using (tx)
+        {
+            var visit = (await QueryVisitsInternalAsync(conn, tx, null, visitId, ct)).FirstOrDefault();
+            if (visit is null)
+            {
+                return (null, "Visit record not found.");
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            var actor = string.IsNullOrWhiteSpace(request.UpdatedBy) ? _claimsContext.UserId : request.UpdatedBy.Trim();
+            int prevCharted = visit.ChartedTeethCount;
+
+            await using (var softClearCmd = new NpgsqlCommand(
+                "UPDATE public.visit_odontogram_entries SET is_deleted = TRUE, updated_at = @now WHERE visit_id = @vid;",
+                conn, tx))
+            {
+                softClearCmd.Parameters.AddWithValue("now", now);
+                softClearCmd.Parameters.AddWithValue("vid", visitId);
+                await softClearCmd.ExecuteNonQueryAsync(ct);
+            }
+
+            if (request.Mode == OdontogramInitMode.CarryForward)
+            {
+                var allVisits = await QueryVisitsInternalAsync(conn, tx, visit.PatientId, null, ct);
+                var prior = allVisits
+                    .Where(v => v.Id != visit.Id && v.VisitDate <= visit.VisitDate)
+                    .OrderByDescending(v => v.VisitDate)
+                    .ThenByDescending(v => v.VisitNumber)
+                    .FirstOrDefault();
+
+                var carried = OdontogramHelper.BuildCarryForwardOdontogram(visit.PatientId, visitId, prior?.Odontogram, now);
+                await PersistInitialVisitOdontogramEntriesAsync(conn, tx, visitId, visit.PatientId, carried, ct);
+            }
+
+            await using (var touchCmd = new NpgsqlCommand(
+                "UPDATE public.patient_visits SET last_updated_by = @actor, updated_at = @now WHERE id = @vid;",
+                conn, tx))
+            {
+                touchCmd.Parameters.AddWithValue("actor", actor);
+                touchCmd.Parameters.AddWithValue("now", now);
+                touchCmd.Parameters.AddWithValue("vid", visitId);
+                await touchCmd.ExecuteNonQueryAsync(ct);
+            }
+
+            var refreshed = (await QueryVisitsInternalAsync(conn, tx, null, visitId, ct)).First();
+            await InsertAuditLogInternalAsync(
+                conn,
+                tx,
+                visit.BranchId,
+                "VISIT_ODONTOGRAM_RESET",
+                "PatientVisit",
+                visitId.ToString(),
+                $"ChartedTeeth={prevCharted}",
+                $"Mode={request.Mode}; ChartedTeeth={refreshed.ChartedTeethCount}",
+                ct,
+                actor);
+
+            await tx.CommitAsync(ct);
+            return (refreshed, null);
         }
     }
 
@@ -1775,7 +2091,9 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
             SELECT p.id, p.full_name, p.ic_number, p.date_of_birth, p.gender, p.phone, p.address,
                    p.primary_branch_id, p.is_mykad_verified, p.consent_signed_at,
                    COALESCE(m.allergies, ''), COALESCE(m.on_anticoagulants, FALSE),
-                   COALESCE(m.has_diabetes, FALSE), COALESCE(m.is_pregnant, FALSE), COALESCE(m.notes, '')
+                   COALESCE(m.has_diabetes, FALSE), COALESCE(m.is_pregnant, FALSE), COALESCE(m.notes, ''),
+                   (SELECT COUNT(*)::INT FROM public.patient_visits pv WHERE pv.patient_id = p.id AND pv.is_deleted = FALSE),
+                   (SELECT MAX(pv.visit_date) FROM public.patient_visits pv WHERE pv.patient_id = p.id AND pv.is_deleted = FALSE)
             FROM public.patients p
             LEFT JOIN public.medical_alerts m ON m.patient_id = p.id
             WHERE p.id = @id AND p.is_deleted = FALSE;
@@ -1889,7 +2207,7 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
                    notes, status, has_critical_medical_alert, alert_summary,
                    visit_type, arrived_at, seated_at, checkout_at, completed_at,
                    created_by, checked_in_by, seated_by, checkout_by, completed_by,
-                   last_updated_by, updated_at, activity_log
+                   last_updated_by, updated_at, activity_log, visit_id
             FROM public.appointments
             WHERE id = @id AND is_deleted = FALSE;
             """;
@@ -1898,6 +2216,561 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
         cmd.Parameters.AddWithValue("id", id);
         await using var reader = await cmd.ExecuteReaderAsync(ct);
         return await reader.ReadAsync(ct) ? ReadAppointment(reader) : null;
+    }
+
+    private async Task<(PatientVisitDto Visit, bool AppointmentModified)> EnsureVisitForAppointmentInternalAsync(
+        NpgsqlConnection conn,
+        NpgsqlTransaction tx,
+        Guid appointmentId,
+        string actor,
+        CancellationToken ct)
+    {
+        var appt = (await GetAppointmentInternalAsync(conn, tx, appointmentId, ct))!;
+        if (appt.VisitId.HasValue)
+        {
+            var existingById = (await QueryVisitsInternalAsync(conn, tx, null, appt.VisitId.Value, ct)).FirstOrDefault();
+            if (existingById is not null)
+            {
+                return (existingById, false);
+            }
+        }
+
+        Guid? existingVisitId = null;
+        await using (var findCmd = new NpgsqlCommand(
+            "SELECT id FROM public.patient_visits WHERE appointment_id = @aid AND is_deleted = FALSE LIMIT 1;",
+            conn, tx))
+        {
+            findCmd.Parameters.AddWithValue("aid", appointmentId);
+            if (await findCmd.ExecuteScalarAsync(ct) is Guid g)
+            {
+                existingVisitId = g;
+            }
+        }
+
+        if (existingVisitId.HasValue)
+        {
+            await using var linkCmd = new NpgsqlCommand(
+                "UPDATE public.appointments SET visit_id = @vid WHERE id = @aid;",
+                conn, tx);
+            linkCmd.Parameters.AddWithValue("vid", existingVisitId.Value);
+            linkCmd.Parameters.AddWithValue("aid", appointmentId);
+            await linkCmd.ExecuteNonQueryAsync(ct);
+
+            var found = (await QueryVisitsInternalAsync(conn, tx, null, existingVisitId.Value, ct)).First();
+            return (found, true);
+        }
+
+        var patient = (await GetPatientInternalAsync(conn, tx, appt.PatientId, ct))!;
+        var (created, _) = await CreatePatientVisitInternalAsync(
+            conn,
+            tx,
+            patient,
+            new CreatePatientVisitRequest
+            {
+                BranchId = appt.BranchId,
+                AppointmentId = appt.Id,
+                DentistId = appt.DentistId,
+                DoctorName = appt.DoctorName,
+                VisitDate = appt.SeatedAt ?? DateTimeOffset.UtcNow,
+                InitMode = OdontogramInitMode.CarryForward,
+                Subjective = appt.Notes ?? string.Empty,
+                Plan = appt.ProcedureSummary ?? string.Empty,
+                CreatedBy = actor
+            },
+            ct);
+
+        return (created, true);
+    }
+
+    private async Task<(PatientVisitDto Visit, AppointmentQueueItemDto? UpdatedAppointment)> CreatePatientVisitInternalAsync(
+        NpgsqlConnection conn,
+        NpgsqlTransaction tx,
+        PatientDto patient,
+        CreatePatientVisitRequest request,
+        CancellationToken ct)
+    {
+        if (request.AppointmentId.HasValue)
+        {
+            await using var existingCheck = new NpgsqlCommand(
+                "SELECT id FROM public.patient_visits WHERE appointment_id = @aid AND is_deleted = FALSE LIMIT 1;",
+                conn, tx);
+            existingCheck.Parameters.AddWithValue("aid", request.AppointmentId.Value);
+            if (await existingCheck.ExecuteScalarAsync(ct) is Guid existingId)
+            {
+                var existingVisit = (await QueryVisitsInternalAsync(conn, tx, null, existingId, ct)).First();
+                var existingAppt = await GetAppointmentInternalAsync(conn, tx, request.AppointmentId.Value, ct);
+                return (existingVisit, existingAppt);
+            }
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var visitId = Guid.NewGuid();
+        var branch = ClinicDomainHelpers.NormalizeBranch(request.BranchId, patient.PrimaryBranchId);
+        var doctor = string.IsNullOrWhiteSpace(request.DoctorName) ? "Dr. Aina Rahman" : request.DoctorName.Trim();
+        var actor = string.IsNullOrWhiteSpace(request.CreatedBy) ? _claimsContext.UserId : request.CreatedBy.Trim();
+        var visitDate = request.VisitDate ?? now;
+
+        var existingVisits = await QueryVisitsInternalAsync(conn, tx, patient.Id, null, ct);
+        int nextNumber = existingVisits.Count == 0 ? 1 : existingVisits.Max(v => v.VisitNumber) + 1;
+        var priorVisit = existingVisits.FirstOrDefault(v => v.VisitDate <= visitDate) ?? existingVisits.FirstOrDefault();
+
+        const string insVisitSql = """
+            INSERT INTO public.patient_visits (
+                id, clinic_group_id, branch_id, patient_id, appointment_id, dentist_id, doctor_name,
+                visit_number, visit_date, subjective, objective, assessment, plan,
+                anesthesia_used, tooth_shade, post_op_instructions, created_by, last_updated_by, created_at, updated_at
+            )
+            VALUES (
+                @id, @groupId, @branchId, @pid, @apptId, @dentistId, @doctor,
+                @vnum, @vdate, @s, @o, @a, @p,
+                @anesth, @shade, @postOp, @actor, @actor, @now, @now
+            );
+            """;
+
+        await using (var cmd = new NpgsqlCommand(insVisitSql, conn, tx))
+        {
+            cmd.Parameters.AddWithValue("id", visitId);
+            cmd.Parameters.AddWithValue("groupId", _claimsContext.ClinicGroupId);
+            cmd.Parameters.AddWithValue("branchId", branch);
+            cmd.Parameters.AddWithValue("pid", patient.Id);
+            cmd.Parameters.AddWithValue("apptId", (object?)request.AppointmentId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("dentistId", (object?)request.DentistId ?? DBNull.Value);
+            cmd.Parameters.AddWithValue("doctor", doctor);
+            cmd.Parameters.AddWithValue("vnum", nextNumber);
+            cmd.Parameters.AddWithValue("vdate", visitDate);
+            cmd.Parameters.AddWithValue("s", request.Subjective?.Trim() ?? string.Empty);
+            cmd.Parameters.AddWithValue("o", request.Objective?.Trim() ?? string.Empty);
+            cmd.Parameters.AddWithValue("a", request.Assessment?.Trim() ?? string.Empty);
+            cmd.Parameters.AddWithValue("p", request.Plan?.Trim() ?? string.Empty);
+            cmd.Parameters.AddWithValue("anesth", request.AnesthesiaUsed?.Trim() ?? string.Empty);
+            cmd.Parameters.AddWithValue("shade", request.ToothShade?.Trim() ?? string.Empty);
+            cmd.Parameters.AddWithValue("postOp", request.PostOpInstructions?.Trim() ?? string.Empty);
+            cmd.Parameters.AddWithValue("actor", actor);
+            cmd.Parameters.AddWithValue("now", now);
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+
+        if (request.InitMode == OdontogramInitMode.CarryForward)
+        {
+            var carried = OdontogramHelper.BuildCarryForwardOdontogram(patient.Id, visitId, priorVisit?.Odontogram, now);
+            await PersistInitialVisitOdontogramEntriesAsync(conn, tx, visitId, patient.Id, carried, ct);
+        }
+
+        AppointmentQueueItemDto? updatedAppt = null;
+        if (request.AppointmentId.HasValue)
+        {
+            await using var linkCmd = new NpgsqlCommand(
+                "UPDATE public.appointments SET visit_id = @vid WHERE id = @aid;",
+                conn, tx);
+            linkCmd.Parameters.AddWithValue("vid", visitId);
+            linkCmd.Parameters.AddWithValue("aid", request.AppointmentId.Value);
+            await linkCmd.ExecuteNonQueryAsync(ct);
+
+            await using var linkInvCmd = new NpgsqlCommand(
+                "UPDATE public.invoices SET visit_id = @vid WHERE appointment_id = @aid AND visit_id IS NULL;",
+                conn, tx);
+            linkInvCmd.Parameters.AddWithValue("vid", visitId);
+            linkInvCmd.Parameters.AddWithValue("aid", request.AppointmentId.Value);
+            await linkInvCmd.ExecuteNonQueryAsync(ct);
+
+            updatedAppt = await GetAppointmentInternalAsync(conn, tx, request.AppointmentId.Value, ct);
+        }
+
+        await InsertAuditLogInternalAsync(
+            conn,
+            tx,
+            branch,
+            "PATIENT_VISIT_CREATED",
+            "PatientVisit",
+            visitId.ToString(),
+            null,
+            $"{patient.FullName} | Visit #{nextNumber} | {doctor} | Init={request.InitMode}",
+            ct,
+            actor);
+
+        var created = (await QueryVisitsInternalAsync(conn, tx, null, visitId, ct)).First();
+        return (created, updatedAppt);
+    }
+
+    private async Task PersistInitialVisitOdontogramEntriesAsync(
+        NpgsqlConnection conn,
+        NpgsqlTransaction tx,
+        Guid visitId,
+        Guid patientId,
+        IEnumerable<OdontogramToothDto> entries,
+        CancellationToken ct)
+    {
+        foreach (var entry in entries.Where(e => e.Condition != ToothCondition.Healthy || !string.IsNullOrWhiteSpace(e.ProcedureName)))
+        {
+            const string sql = """
+                INSERT INTO public.visit_odontogram_entries
+                    (id, clinic_group_id, visit_id, patient_id, tooth_number, condition, surfaces, procedure_name, fee, stage, doctor_name, updated_at, is_deleted)
+                VALUES
+                    (@id, @groupId, @vid, @pid, @tooth, @cond, @surf, @proc, @fee, @stage, @doctor, @now, FALSE)
+                ON CONFLICT (visit_id, tooth_number) DO UPDATE SET
+                    condition = EXCLUDED.condition,
+                    surfaces = EXCLUDED.surfaces,
+                    procedure_name = EXCLUDED.procedure_name,
+                    fee = EXCLUDED.fee,
+                    stage = EXCLUDED.stage,
+                    doctor_name = EXCLUDED.doctor_name,
+                    updated_at = EXCLUDED.updated_at,
+                    is_deleted = FALSE;
+                """;
+
+            await using var cmd = new NpgsqlCommand(sql, conn, tx);
+            cmd.Parameters.AddWithValue("id", entry.Id == Guid.Empty ? Guid.NewGuid() : entry.Id);
+            cmd.Parameters.AddWithValue("groupId", _claimsContext.ClinicGroupId);
+            cmd.Parameters.AddWithValue("vid", visitId);
+            cmd.Parameters.AddWithValue("pid", patientId);
+            cmd.Parameters.AddWithValue("tooth", entry.ToothNumber);
+            cmd.Parameters.AddWithValue("cond", entry.Condition.ToString());
+            cmd.Parameters.AddWithValue("surf", OdontogramHelper.NormalizeSurfaces(entry.Surfaces));
+            cmd.Parameters.AddWithValue("proc", entry.ProcedureName ?? string.Empty);
+            cmd.Parameters.AddWithValue("fee", entry.Fee);
+            cmd.Parameters.AddWithValue("stage", entry.Stage.ToString());
+            cmd.Parameters.AddWithValue("doctor", entry.DoctorName ?? string.Empty);
+            cmd.Parameters.AddWithValue("now", entry.UpdatedAt);
+            await cmd.ExecuteNonQueryAsync(ct);
+        }
+    }
+
+    private async Task<(OdontogramToothDto? Tooth, InvoiceDto? UpdatedInvoice, string? Error)> UpdateVisitOdontogramInternalAsync(
+        NpgsqlConnection conn,
+        NpgsqlTransaction tx,
+        PatientVisitDto visit,
+        PatientDto patient,
+        UpdateOdontogramRequest request,
+        CancellationToken ct)
+    {
+        var branchId = ClinicDomainHelpers.NormalizeBranch(request.BranchId, visit.BranchId);
+        var doctorName = string.IsNullOrWhiteSpace(request.DoctorName)
+            ? (string.IsNullOrWhiteSpace(visit.DoctorName) ? "Dr. Aina Rahman" : visit.DoctorName)
+            : request.DoctorName.Trim();
+        var surfaces = OdontogramHelper.NormalizeSurfaces(request.Surfaces);
+        var fee = BillingCalculator.Round2(request.Fee);
+        var now = DateTimeOffset.UtcNow;
+        var actor = string.IsNullOrWhiteSpace(request.UpdatedBy) ? _claimsContext.UserId : request.UpdatedBy.Trim();
+
+        var prevTooth = visit.Odontogram.FirstOrDefault(t => t.ToothNumber == request.ToothNumber);
+        string oldSummary = prevTooth is null
+            ? "Healthy"
+            : $"{prevTooth.Condition}({prevTooth.Surfaces}) | {prevTooth.ProcedureName} | {prevTooth.Stage} | RM{prevTooth.Fee:F2}";
+
+        const string upsertSql = """
+            INSERT INTO public.visit_odontogram_entries
+                (id, clinic_group_id, visit_id, patient_id, tooth_number, condition, surfaces, procedure_name, fee, stage, doctor_name, updated_at, is_deleted)
+            VALUES
+                (@id, @groupId, @vid, @pid, @tooth, @cond, @surf, @proc, @fee, @stage, @doctor, @now, FALSE)
+            ON CONFLICT (visit_id, tooth_number) DO UPDATE SET
+                condition = EXCLUDED.condition,
+                surfaces = EXCLUDED.surfaces,
+                procedure_name = EXCLUDED.procedure_name,
+                fee = EXCLUDED.fee,
+                stage = EXCLUDED.stage,
+                doctor_name = EXCLUDED.doctor_name,
+                updated_at = EXCLUDED.updated_at,
+                is_deleted = FALSE
+            RETURNING id;
+            """;
+
+        Guid toothId;
+        await using (var cmd = new NpgsqlCommand(upsertSql, conn, tx))
+        {
+            cmd.Parameters.AddWithValue("id", Guid.NewGuid());
+            cmd.Parameters.AddWithValue("groupId", _claimsContext.ClinicGroupId);
+            cmd.Parameters.AddWithValue("vid", visit.Id);
+            cmd.Parameters.AddWithValue("pid", visit.PatientId);
+            cmd.Parameters.AddWithValue("tooth", request.ToothNumber);
+            cmd.Parameters.AddWithValue("cond", request.Condition.ToString());
+            cmd.Parameters.AddWithValue("surf", surfaces);
+            cmd.Parameters.AddWithValue("proc", request.ProcedureName?.Trim() ?? string.Empty);
+            cmd.Parameters.AddWithValue("fee", fee);
+            cmd.Parameters.AddWithValue("stage", request.Stage.ToString());
+            cmd.Parameters.AddWithValue("doctor", doctorName);
+            cmd.Parameters.AddWithValue("now", now);
+            toothId = (Guid)(await cmd.ExecuteScalarAsync(ct))!;
+        }
+
+        await using (var touchCmd = new NpgsqlCommand(
+            "UPDATE public.patient_visits SET last_updated_by = @actor, updated_at = @now WHERE id = @vid;",
+            conn, tx))
+        {
+            touchCmd.Parameters.AddWithValue("actor", actor);
+            touchCmd.Parameters.AddWithValue("now", now);
+            touchCmd.Parameters.AddWithValue("vid", visit.Id);
+            await touchCmd.ExecuteNonQueryAsync(ct);
+        }
+
+        var updatedTooth = new OdontogramToothDto
+        {
+            Id = toothId,
+            VisitId = visit.Id,
+            PatientId = visit.PatientId,
+            ToothNumber = request.ToothNumber,
+            Condition = request.Condition,
+            Surfaces = surfaces,
+            ProcedureName = request.ProcedureName?.Trim() ?? string.Empty,
+            Fee = fee,
+            Stage = request.Stage,
+            DoctorName = doctorName,
+            UpdatedAt = now
+        };
+
+        InvoiceDto? updatedInvoice = null;
+        if (_claimsContext.CanAccessBranch(branchId))
+        {
+            Guid? linkedInvId = null;
+            await using (var findInv = new NpgsqlCommand("""
+                SELECT id FROM public.invoices
+                WHERE is_voided = FALSE
+                  AND (visit_id = @vid OR (@apptId IS NOT NULL AND appointment_id = @apptId))
+                ORDER BY created_at DESC LIMIT 1;
+                """, conn, tx))
+            {
+                findInv.Parameters.AddWithValue("vid", visit.Id);
+                findInv.Parameters.Add(new NpgsqlParameter("apptId", NpgsqlDbType.Uuid)
+                {
+                    Value = (object?)visit.AppointmentId ?? DBNull.Value
+                });
+                if (await findInv.ExecuteScalarAsync(ct) is Guid g)
+                {
+                    linkedInvId = g;
+                }
+            }
+
+            InvoiceDto? linkedInv = linkedInvId.HasValue
+                ? (await QueryInvoicesInternalAsync(conn, tx, null, linkedInvId.Value, ct)).FirstOrDefault()
+                : null;
+
+            bool settledHistorical = linkedInv is not null && linkedInv.Payments.Count > 0;
+            if (!settledHistorical
+                && request.Stage == TreatmentStage.Completed
+                && !string.IsNullOrWhiteSpace(updatedTooth.ProcedureName)
+                && (fee > 0m || linkedInv is not null))
+            {
+                if (linkedInv is null)
+                {
+                    var code = branchId.StartsWith("PJ", StringComparison.OrdinalIgnoreCase) ? "PJ" : "KL";
+                    linkedInv = new InvoiceDto
+                    {
+                        Id = Guid.NewGuid(),
+                        InvoiceNumber = $"INV-{code}-{DateTime.UtcNow:yyyyMMdd}-{Random.Shared.Next(1000, 9999)}",
+                        BranchId = branchId,
+                        PatientId = patient.Id,
+                        PatientName = patient.FullName,
+                        DoctorName = doctorName,
+                        AppointmentId = visit.AppointmentId,
+                        VisitId = visit.Id,
+                        CreatedAt = now
+                    };
+
+                    await using var insInv = new NpgsqlCommand("""
+                        INSERT INTO public.invoices
+                            (id, invoice_number, branch_id, patient_id, patient_name, doctor_name, appointment_id, visit_id, created_at)
+                        VALUES
+                            (@id, @invNo, @branchId, @pid, @pname, @doctor, @apptId, @vid, @createdAt);
+                        """, conn, tx);
+                    insInv.Parameters.AddWithValue("id", linkedInv.Id);
+                    insInv.Parameters.AddWithValue("invNo", linkedInv.InvoiceNumber);
+                    insInv.Parameters.AddWithValue("branchId", linkedInv.BranchId);
+                    insInv.Parameters.AddWithValue("pid", linkedInv.PatientId);
+                    insInv.Parameters.AddWithValue("pname", linkedInv.PatientName);
+                    insInv.Parameters.AddWithValue("doctor", linkedInv.DoctorName);
+                    insInv.Parameters.AddWithValue("apptId", (object?)linkedInv.AppointmentId ?? DBNull.Value);
+                    insInv.Parameters.AddWithValue("vid", visit.Id);
+                    insInv.Parameters.AddWithValue("createdAt", linkedInv.CreatedAt);
+                    await insInv.ExecuteNonQueryAsync(ct);
+                }
+
+                var label = ClinicDomainHelpers.BuildCompletedToothProcedureLabel(new UpdateOdontogramRequest
+                {
+                    ToothNumber = request.ToothNumber,
+                    Condition = request.Condition,
+                    Surfaces = surfaces,
+                    ProcedureName = updatedTooth.ProcedureName,
+                    Fee = fee,
+                    Stage = request.Stage,
+                    DoctorName = doctorName,
+                    BranchId = branchId
+                });
+
+                var existingLine = linkedInv.Lines.FirstOrDefault(l =>
+                    l.ToothNumber == request.ToothNumber && l.SourceStage == TreatmentStage.Completed);
+
+                if (existingLine is not null)
+                {
+                    existingLine.ProcedureName = label;
+                    existingLine.UnitPrice = fee;
+                    existingLine.Quantity = 1;
+                    existingLine.LineTotal = BillingCalculator.ComputeLineTotal(fee, 1);
+
+                    await using var updLine = new NpgsqlCommand(
+                        "UPDATE public.invoice_lines SET procedure_name = @proc, unit_price = @price, quantity = 1, line_total = @total WHERE id = @id;",
+                        conn, tx);
+                    updLine.Parameters.AddWithValue("proc", existingLine.ProcedureName);
+                    updLine.Parameters.AddWithValue("price", existingLine.UnitPrice);
+                    updLine.Parameters.AddWithValue("total", existingLine.LineTotal);
+                    updLine.Parameters.AddWithValue("id", existingLine.Id);
+                    await updLine.ExecuteNonQueryAsync(ct);
+                }
+                else
+                {
+                    var newLine = new InvoiceLineDto
+                    {
+                        Id = Guid.NewGuid(),
+                        ToothNumber = request.ToothNumber,
+                        ProcedureName = label,
+                        UnitPrice = fee,
+                        Quantity = 1,
+                        LineTotal = BillingCalculator.ComputeLineTotal(fee, 1),
+                        SourceStage = TreatmentStage.Completed
+                    };
+                    linkedInv.Lines.Add(newLine);
+
+                    await using var insLine = new NpgsqlCommand("""
+                        INSERT INTO public.invoice_lines
+                            (id, invoice_id, branch_id, tooth_number, procedure_name, unit_price, quantity, line_total, source_stage)
+                        VALUES
+                            (@id, @invId, @branchId, @tooth, @proc, @price, 1, @total, 'Completed');
+                        """, conn, tx);
+                    insLine.Parameters.AddWithValue("id", newLine.Id);
+                    insLine.Parameters.AddWithValue("invId", linkedInv.Id);
+                    insLine.Parameters.AddWithValue("branchId", branchId);
+                    insLine.Parameters.AddWithValue("tooth", request.ToothNumber);
+                    insLine.Parameters.AddWithValue("proc", newLine.ProcedureName);
+                    insLine.Parameters.AddWithValue("price", newLine.UnitPrice);
+                    insLine.Parameters.AddWithValue("total", newLine.LineTotal);
+                    await insLine.ExecuteNonQueryAsync(ct);
+                }
+
+                BillingCalculator.RecalculateInvoice(linkedInv, _clinicOptions.CommissionRate);
+                await PersistInvoiceTotalsInternalAsync(conn, tx, linkedInv, ct);
+                updatedInvoice = linkedInv;
+            }
+        }
+
+        await InsertAuditLogInternalAsync(
+            conn,
+            tx,
+            branchId,
+            "VISIT_ODONTOGRAM_UPDATED",
+            "VisitOdontogramTooth",
+            $"{visit.Id}:{request.ToothNumber}",
+            oldSummary,
+            $"{updatedTooth.Condition}({updatedTooth.Surfaces}) | {updatedTooth.ProcedureName} | {updatedTooth.Stage} | RM{updatedTooth.Fee:F2}",
+            ct,
+            actor);
+
+        return (updatedTooth, updatedInvoice, null);
+    }
+
+    private static async Task<List<PatientVisitDto>> QueryVisitsInternalAsync(
+        NpgsqlConnection conn,
+        NpgsqlTransaction tx,
+        Guid? patientId,
+        Guid? visitId,
+        CancellationToken ct)
+    {
+        const string sql = """
+            SELECT v.id, v.patient_id, p.full_name, p.ic_number, v.appointment_id,
+                   (SELECT i.id FROM public.invoices i WHERE i.visit_id = v.id AND i.is_voided = FALSE ORDER BY i.created_at DESC LIMIT 1),
+                   v.branch_id, v.dentist_id, v.doctor_name, v.visit_number, v.visit_date,
+                   v.subjective, v.objective, v.assessment, v.plan,
+                   v.anesthesia_used, v.tooth_shade, v.post_op_instructions,
+                   v.created_by, v.last_updated_by, v.created_at, v.updated_at
+            FROM public.patient_visits v
+            JOIN public.patients p ON p.id = v.patient_id
+            WHERE v.is_deleted = FALSE
+              AND (@pid IS NULL OR v.patient_id = @pid)
+              AND (@vid IS NULL OR v.id = @vid)
+            ORDER BY v.visit_date DESC, v.visit_number DESC;
+            """;
+
+        var list = new List<PatientVisitDto>();
+        var map = new Dictionary<Guid, PatientVisitDto>();
+        await using (var cmd = new NpgsqlCommand(sql, conn, tx))
+        {
+            cmd.Parameters.Add(new NpgsqlParameter("pid", NpgsqlDbType.Uuid) { Value = (object?)patientId ?? DBNull.Value });
+            cmd.Parameters.Add(new NpgsqlParameter("vid", NpgsqlDbType.Uuid) { Value = (object?)visitId ?? DBNull.Value });
+
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var v = new PatientVisitDto
+                {
+                    Id = reader.GetGuid(0),
+                    PatientId = reader.GetGuid(1),
+                    PatientName = reader.GetString(2),
+                    PatientIc = reader.GetString(3),
+                    AppointmentId = reader.IsDBNull(4) ? null : reader.GetGuid(4),
+                    InvoiceId = reader.IsDBNull(5) ? null : reader.GetGuid(5),
+                    BranchId = reader.GetString(6),
+                    DentistId = reader.IsDBNull(7) ? null : reader.GetGuid(7),
+                    DoctorName = reader.GetString(8),
+                    VisitNumber = reader.GetInt32(9),
+                    VisitDate = reader.GetFieldValue<DateTimeOffset>(10),
+                    Subjective = reader.GetString(11),
+                    Objective = reader.GetString(12),
+                    Assessment = reader.GetString(13),
+                    Plan = reader.GetString(14),
+                    AnesthesiaUsed = reader.GetString(15),
+                    ToothShade = reader.GetString(16),
+                    PostOpInstructions = reader.GetString(17),
+                    CreatedBy = reader.GetString(18),
+                    LastUpdatedBy = reader.GetString(19),
+                    CreatedAt = reader.GetFieldValue<DateTimeOffset>(20),
+                    UpdatedAt = reader.GetFieldValue<DateTimeOffset>(21)
+                };
+                v.Odontogram = OdontogramHelper.BuildBlankOdontogram(v.PatientId, v.Id, v.UpdatedAt);
+                list.Add(v);
+                map[v.Id] = v;
+            }
+        }
+
+        if (list.Count == 0)
+        {
+            return list;
+        }
+
+        const string teethSql = """
+            SELECT id, visit_id, patient_id, tooth_number, condition, surfaces, procedure_name, fee, stage, doctor_name, updated_at
+            FROM public.visit_odontogram_entries
+            WHERE visit_id = ANY(@vids) AND is_deleted = FALSE;
+            """;
+
+        await using (var tCmd = new NpgsqlCommand(teethSql, conn, tx))
+        {
+            tCmd.Parameters.AddWithValue("vids", list.Select(x => x.Id).ToArray());
+            await using var reader = await tCmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                var vid = reader.GetGuid(1);
+                var toothNo = reader.GetInt32(3);
+                if (map.TryGetValue(vid, out var visit))
+                {
+                    var idx = visit.Odontogram.FindIndex(t => t.ToothNumber == toothNo);
+                    var dto = new OdontogramToothDto
+                    {
+                        Id = reader.GetGuid(0),
+                        VisitId = vid,
+                        PatientId = reader.GetGuid(2),
+                        ToothNumber = toothNo,
+                        Condition = Enum.Parse<ToothCondition>(reader.GetString(4)),
+                        Surfaces = OdontogramHelper.NormalizeSurfaces(reader.GetString(5)),
+                        ProcedureName = reader.GetString(6),
+                        Fee = reader.GetDecimal(7),
+                        Stage = Enum.Parse<TreatmentStage>(reader.GetString(8)),
+                        DoctorName = reader.GetString(9),
+                        UpdatedAt = reader.GetFieldValue<DateTimeOffset>(10)
+                    };
+                    if (idx >= 0) visit.Odontogram[idx] = dto;
+                    else visit.Odontogram.Add(dto);
+                }
+            }
+        }
+
+        return list;
     }
 
     private async Task<InvoiceDto> FindOrCreateDraftInvoiceAsync(
@@ -2024,7 +2897,7 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
         const string sql = """
             SELECT id, invoice_number, branch_id, patient_id, patient_name, doctor_name, appointment_id,
                    subtotal, discount_amount, panel_covered_amount, panel_name, patient_payable_amount,
-                   paid_amount, doctor_commission_amount, is_voided, void_reason, created_at
+                   paid_amount, doctor_commission_amount, is_voided, void_reason, created_at, visit_id
             FROM public.invoices
             WHERE (@branchId IS NULL OR branch_id = @branchId)
               AND (@invoiceId IS NULL OR id = @invoiceId)
@@ -2060,7 +2933,8 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
                     DoctorCommissionAmount = reader.GetDecimal(13),
                     IsVoided = reader.GetBoolean(14),
                     VoidReason = reader.IsDBNull(15) ? null : reader.GetString(15),
-                    CreatedAt = reader.GetFieldValue<DateTimeOffset>(16)
+                    CreatedAt = reader.GetFieldValue<DateTimeOffset>(16),
+                    VisitId = reader.IsDBNull(17) ? null : reader.GetGuid(17)
                 };
                 list.Add(inv);
                 map[inv.Id] = inv;
@@ -2264,7 +3138,9 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
             HasDiabetes = reader.GetBoolean(12),
             IsPregnant = reader.GetBoolean(13),
             Notes = reader.GetString(14)
-        }
+        },
+        VisitCount = reader.FieldCount > 15 && !reader.IsDBNull(15) ? reader.GetInt32(15) : 0,
+        LastVisitAt = reader.FieldCount > 16 && !reader.IsDBNull(16) ? reader.GetFieldValue<DateTimeOffset>(16) : null
     };
 
     private static AppointmentQueueItemDto ReadAppointment(NpgsqlDataReader reader)
@@ -2313,7 +3189,8 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
             CompletedBy = reader.IsDBNull(25) ? string.Empty : reader.GetString(25),
             LastUpdatedBy = reader.IsDBNull(26) ? string.Empty : reader.GetString(26),
             LastUpdatedAt = reader.IsDBNull(27) ? null : reader.GetFieldValue<DateTimeOffset>(27),
-            ActivityLog = activity
+            ActivityLog = activity,
+            VisitId = reader.FieldCount > 29 && !reader.IsDBNull(29) ? reader.GetGuid(29) : null
         };
     }
 }

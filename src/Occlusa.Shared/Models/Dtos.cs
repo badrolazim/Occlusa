@@ -100,6 +100,8 @@ public class PatientDto
     public MedicalAlertDto MedicalAlerts { get; set; } = new();
     public bool IsMyKadVerified { get; set; }
     public DateTimeOffset? ConsentSignedAt { get; set; }
+    public int VisitCount { get; set; }
+    public DateTimeOffset? LastVisitAt { get; set; }
 }
 
 /// <summary>
@@ -147,25 +149,75 @@ public class AppointmentQueueItemDto
     public List<VisitActivityEntryDto> ActivityLog { get; set; } = new();
     public bool HasCriticalMedicalAlert { get; set; }
     public string AlertSummary { get; set; } = string.Empty;
+    public Guid? VisitId { get; set; }
 
     [JsonIgnore]
     public DateTimeOffset EndsAt => ScheduledAt.AddMinutes(Math.Max(15, DurationMinutes));
 }
 
 /// <summary>
-/// Single tooth state in a patient's FDI (11-48) odontogram.
+/// Single tooth state in a visit's FDI (11-48 permanent / 51-85 primary) odontogram.
 /// </summary>
 public class OdontogramToothDto
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid? VisitId { get; set; }
     public Guid PatientId { get; set; }
     public int ToothNumber { get; set; }
     public ToothCondition Condition { get; set; } = ToothCondition.Healthy;
+    public string Surfaces { get; set; } = string.Empty;
     public string ProcedureName { get; set; } = string.Empty;
     public decimal Fee { get; set; }
     public TreatmentStage Stage { get; set; } = TreatmentStage.Proposed;
     public string DoctorName { get; set; } = string.Empty;
     public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+
+    [JsonIgnore]
+    public bool IsBaselineOnly =>
+        Condition != ToothCondition.Healthy && string.IsNullOrWhiteSpace(ProcedureName);
+}
+
+/// <summary>
+/// First-class clinical visit record (0..N per patient) owning its own SOAP narrative
+/// and independent 52-tooth FDI odontogram snapshot per MDA/MDC and KKM requirements.
+/// </summary>
+public class PatientVisitDto
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid PatientId { get; set; }
+    public string PatientName { get; set; } = string.Empty;
+    public string PatientIc { get; set; } = string.Empty;
+    public Guid? AppointmentId { get; set; }
+    public Guid? InvoiceId { get; set; }
+    public string BranchId { get; set; } = "HQ-KL";
+    public Guid? DentistId { get; set; }
+    public string DoctorName { get; set; } = string.Empty;
+    public int VisitNumber { get; set; } = 1;
+    public DateTimeOffset VisitDate { get; set; } = DateTimeOffset.UtcNow;
+    public string Subjective { get; set; } = string.Empty;
+    public string Objective { get; set; } = string.Empty;
+    public string Assessment { get; set; } = string.Empty;
+    public string Plan { get; set; } = string.Empty;
+    public string AnesthesiaUsed { get; set; } = string.Empty;
+    public string ToothShade { get; set; } = string.Empty;
+    public string PostOpInstructions { get; set; } = string.Empty;
+    public string CreatedBy { get; set; } = string.Empty;
+    public string LastUpdatedBy { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
+    public List<OdontogramToothDto> Odontogram { get; set; } = new();
+
+    [JsonIgnore]
+    public int ChartedTeethCount =>
+        Odontogram.Count(t => t.Condition != ToothCondition.Healthy || !string.IsNullOrWhiteSpace(t.ProcedureName));
+
+    [JsonIgnore]
+    public int CompletedProceduresCount =>
+        Odontogram.Count(t => t.Stage == TreatmentStage.Completed && !string.IsNullOrWhiteSpace(t.ProcedureName));
+
+    [JsonIgnore]
+    public decimal CompletedTotalFee =>
+        Odontogram.Where(t => t.Stage == TreatmentStage.Completed && !string.IsNullOrWhiteSpace(t.ProcedureName)).Sum(t => t.Fee);
 }
 
 /// <summary>
@@ -239,6 +291,7 @@ public class InvoiceDto
     public string PatientName { get; set; } = string.Empty;
     public string DoctorName { get; set; } = string.Empty;
     public Guid? AppointmentId { get; set; }
+    public Guid? VisitId { get; set; }
     public List<InvoiceLineDto> Lines { get; set; } = new();
     public decimal Subtotal { get; set; }
     public decimal DiscountAmount { get; set; }
@@ -459,11 +512,53 @@ public class UpdateOdontogramRequest
 {
     public int ToothNumber { get; set; }
     public ToothCondition Condition { get; set; } = ToothCondition.Healthy;
+    public string Surfaces { get; set; } = string.Empty;
     public string ProcedureName { get; set; } = string.Empty;
     public decimal Fee { get; set; }
     public TreatmentStage Stage { get; set; } = TreatmentStage.Proposed;
     public string DoctorName { get; set; } = string.Empty;
     public string BranchId { get; set; } = "HQ-KL";
+    public string? UpdatedBy { get; set; }
+}
+
+public class CreatePatientVisitRequest
+{
+    public string BranchId { get; set; } = "HQ-KL";
+    public Guid? AppointmentId { get; set; }
+    public Guid? DentistId { get; set; }
+    public string DoctorName { get; set; } = string.Empty;
+    public DateTimeOffset? VisitDate { get; set; }
+    public OdontogramInitMode InitMode { get; set; } = OdontogramInitMode.CarryForward;
+    public string Subjective { get; set; } = string.Empty;
+    public string Objective { get; set; } = string.Empty;
+    public string Assessment { get; set; } = string.Empty;
+    public string Plan { get; set; } = string.Empty;
+    public string AnesthesiaUsed { get; set; } = string.Empty;
+    public string ToothShade { get; set; } = string.Empty;
+    public string PostOpInstructions { get; set; } = string.Empty;
+    public string? CreatedBy { get; set; }
+}
+
+public class UpdatePatientVisitRequest
+{
+    public string BranchId { get; set; } = "HQ-KL";
+    public Guid? DentistId { get; set; }
+    public string DoctorName { get; set; } = string.Empty;
+    public DateTimeOffset? VisitDate { get; set; }
+    public string Subjective { get; set; } = string.Empty;
+    public string Objective { get; set; } = string.Empty;
+    public string Assessment { get; set; } = string.Empty;
+    public string Plan { get; set; } = string.Empty;
+    public string AnesthesiaUsed { get; set; } = string.Empty;
+    public string ToothShade { get; set; } = string.Empty;
+    public string PostOpInstructions { get; set; } = string.Empty;
+    public string? UpdatedBy { get; set; }
+}
+
+public class ResetVisitOdontogramRequest
+{
+    public OdontogramInitMode Mode { get; set; } = OdontogramInitMode.Blank;
+    public string? UpdatedBy { get; set; }
 }
 
 public class CreateSoapNoteRequest

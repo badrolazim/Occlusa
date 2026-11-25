@@ -32,9 +32,9 @@ graph TD
 | :--- | :--- | :--- |
 | **Shared Domain & Math** | `src/Occlusa.Shared` | Cross-platform `net8.0` DTOs, enums, `AppointmentCalendarHelper` (calendar grids, slot availability, treatment capability & flexible patient matching), deterministic `BillingCalculator`, Malaysian `MyKadParser`, and `EmergencyTriageClassifier`. |
 | **Web API & SignalR Hub** | `src/Occlusa.Api` | ASP.NET Core 8 REST API, SignalR `/hubs/queue`, `InMemoryOcclusaRepository` (0-config fallback) / `NpgsqlSupabaseRepository`, and WhatsApp AI Receptionist. |
-| **Native WPF Desktop** | `src/Occlusa.Desktop` | `net8.0-windows` desktop client with uniform 3–5 column paged tables (zero scrollbars, zero ellipsis truncation), 1080p/1440p responsiveness, `LocalApiHostService` embedded in-process Kestrel host with auto-recovery, true modal dialogs with unsaved-changes guard, pinned medical alerts, unified Live Queue with shared Walk-In intake & Active Staff attribution, FDI 32-tooth odontogram, 15-minute proportional Appointments timeline with drag-and-drop rescheduling, and PC/SC MyKad reader. |
+| **Native WPF Desktop** | `src/Occlusa.Desktop` | `net8.0-windows` desktop client with uniform 3–5 column paged tables (zero scrollbars, zero ellipsis truncation), 1080p/1440p responsiveness, `LocalApiHostService` embedded in-process Kestrel host with auto-recovery, true modal dialogs with unsaved-changes guard, pinned medical alerts, unified Live Queue with shared Walk-In intake & Active Staff attribution, per-visit anatomical 52-tooth FDI odontogram (5-surface charting), 15-minute proportional Appointments timeline with drag-and-drop rescheduling, and PC/SC MyKad reader. |
 | **xUnit Test Suite** | `src/Occlusa.Tests` | 81 deterministic unit and Kestrel HTTP pipeline tests covering Live Queue sorting, reception note formatting & walk-in note lifecycle persistence, Walk-In slot blocking, staff attribution, appointments, 15-minute timeline layout & overlap splitting, dentist-locked drag rescheduling, treatment capability filtering, patient lookup, billing, NRIC parsing, and WhatsApp emergency triage. |
-| **Supabase Schema & RLS** | `supabase/migrations/` | PostgreSQL schema migrations (`001` core schema & RLS, `002` dentists/treatments/appointments relations, `003` dentist treatment capabilities, `004` live queue walk-ins & staff attribution) with clinic-group clinical sharing, branch-isolated financials, and immutable append-only audit logs. |
+| **Supabase Schema & RLS** | `supabase/migrations/` | PostgreSQL schema migrations (`001` core schema & RLS, `002` dentists/treatments/appointments relations, `003` dentist treatment capabilities, `004` live queue walk-ins & staff attribution, `005` patient visits & per-visit odontograms) with clinic-group clinical sharing, branch-isolated financials, and immutable append-only audit logs. |
 | **Architecture Docs** | `docs/` | UI uniformity rules (`docs/UI_UNIFORMITY_RULES.md`) and Appointments scheduling specification (`docs/architecture/APPOINTMENTS_SCHEDULING.md`). |
 | **Backup Verification** | `scripts/verify-daily-backup.ps1` | Daily AES-256 encrypted `pg_dump` / dry-run archive verification with SHA-256 checksums and API logging. |
 
@@ -74,7 +74,8 @@ graph TD
 │       ├── 001_occlusa_tier1_tier2_schema_rls.sql
 │       ├── 002_appointments_dentists_treatments.sql
 │       ├── 003_dentist_treatment_capabilities.sql
-│       └── 004_live_queue_walkins_and_attribution.sql
+│       ├── 004_live_queue_walkins_and_attribution.sql
+       └── 005_patient_visits_and_visit_odontograms.sql
 ├── CHANGELOG.md                       # SemVer release history
 ├── Directory.Build.props              # Synchronized SemVer version metadata
 ├── Occlusa.sln                        # Visual Studio / .NET solution
@@ -102,7 +103,9 @@ graph TD
 - [x] **Unified Live Queue, Shared Walk-Ins & Staff Attribution:** Single today roster (`Appt Time` | `Arrived / Walk-In` | `Status` | `Patient` | `Doctor & Room`) with uniform right-aligned status pills beside patient names, compact Reception Note subtitles under patient names (collapsed when empty), live 30s wait/chair timers (`Waiting · Xm` ≥ 30m highlight), merged `Waiting` state (`Arrived` normalized), `+ Walk-In` intake synced to today's Appointments calendar & availability grid, smart MyKad check-in, `ACTIVE STAFF` attribution trails (`ActivityLog` + `X-Occlusa-User`), and a fixed-height zero-shift `MedicalAlertsBanner`.
 - [x] **Appointments Calendar & Table:** 15-minute proportional timeline (`4 rows/hour`) in **Day View** and **Week View** (`Full Day` / `AM` / `PM`) with overlap lane splitting and dentist-locked cross-date drag-and-drop rescheduling, plus **Month View** and 4-column paged Table synced with Live Queue (`IsTodayForLiveQueue`).
 - [x] **4-Step Booking & Inline Registration:** Treatment-to-dentist capability filtering, hourly slot availability lookup, dash-tolerant IC / name / phone search, and atomic `POST /api/appointments/register-and-book`.
-- [x] **FDI 32-Tooth Odontogram & Billing:** Split-payment invoices, panel/TPA deductions, practitioner commission calculations, and auto-invoicing on completed procedures.
+- [x] **Patient Registry & Per-Visit Records (MDA / MDC / KKM):** Patients hold `0..N` visit records. Reception can register standalone patients (`+ Register Patient`, 0 visits); seating an appointment `InChair` auto-creates a linked visit, and clinicians can add `+ New Visit Record` manually. `PatientDetailModal` shows editable demographics plus a 4-column paged visit grid; each visit opens `VisitRecordModal` with its own SOAP notes and **its own independent odontogram**. Historical edits are allowed and audited (`PATIENT_VISIT_UPDATED`, `VISIT_ODONTOGRAM_UPDATED`), while settled invoices are never mutated.
+- [x] **Kreloses-Style Anatomical Odontogram (52 FDI teeth):** `AnatomicalToothControl` renders crown + root vector silhouettes with a midline-aware 5-surface (`M`, `O/I`, `D`, `B`, `L`) occlusal chart for Permanent (`11–48`) and Primary (`51–85`) dentition. New visits carry forward the prior visit's chart (completed work becomes an RM 0 baseline, completed extractions become `Missing`, unfinished Proposed/Accepted items carry intact), with `Reset to Blank` / `Re-Sync Prior Visit`. Tooth outlines adapted from [ZoliQua/React-Advanced-Odontogram](https://github.com/ZoliQua/React-Advanced-Odontogram) (MIT).
+- [x] **Visit-Scoped Billing:** Completed procedures sync into that visit's draft invoice with surface labels (e.g. `Tooth #16 (OD) - Composite Filling`), plus split-payment invoices, panel/TPA deductions, and practitioner commission calculations.
 - [x] **Malaysian MyKad PC/SC Reader:** Hardware USB smartcard parsing via `winscard.dll` plus built-in **Simulate MyKad Insert** for testing.
 - [x] **WhatsApp AI Receptionist & Emergency Triage:** Guardrailed booking flow with front-desk approval and SignalR emergency escalation.
 - [x] **Zero-Config Local Mode & Embedded API Host:** `Occlusa.Desktop` probes `http://localhost:5188/api/health` for an external API or hosts `Occlusa.Api` in-process on Kestrel with ephemeral loopback port fallback (`http://127.0.0.1:0`) and transparent `HttpRequestException` recovery.
@@ -167,6 +170,7 @@ Never commit real credentials. Configure secrets using `src/Occlusa.Api/appsetti
    2. `supabase/migrations/002_appointments_dentists_treatments.sql`
    3. `supabase/migrations/003_dentist_treatment_capabilities.sql`
    4. `supabase/migrations/004_live_queue_walkins_and_attribution.sql`
+   5. `supabase/migrations/005_patient_visits_and_visit_odontograms.sql` (creates `patient_visits` & `visit_odontogram_entries`, links `appointments`/`invoices` via `visit_id`, and idempotently backfills legacy `soap_notes` / `odontogram_entries`)
 2. Set `Supabase:ConnectionString` (Transaction/Session Pooler connection string) in `appsettings.Development.json` or environment variable `Supabase__ConnectionString`.
 3. Ensure your authentication JWTs include `clinic_group_id` (e.g. `"OCCLUSA-MY"`) and `allowed_branches` (e.g. `["HQ-KL"]`). `Occlusa.Api` automatically calls `set_config('request.jwt.claims', ...)` per transaction.
 

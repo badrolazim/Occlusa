@@ -549,7 +549,7 @@
                                     Padding="11,0"
                                     FontSize="12"
                                     Margin="0,0,6,0" />
-                            <Button Content="Odontogram"
+                            <Button Content="Visit Chart"
                                     Click="OpenSelectedQueueOdontogramButton_Click"
                                     IsEnabled="{Binding HasSelectedQueueRow}"
                                     Style="{StaticResource UniformPrimaryButtonStyle}"
@@ -761,6 +761,13 @@
                         </StackPanel>
 
                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                            <Button Content="+ Register Patient"
+                                    Click="RegisterStandalonePatientButton_Click"
+                                    Style="{StaticResource UniformSecondaryButtonStyle}"
+                                    Height="32"
+                                    Padding="12,0"
+                                    FontSize="12"
+                                    Margin="0,0,8,0" />
                             <Button Content="+ Register &amp; Book"
                                     Click="RegisterPatientAndBookButton_Click"
                                     Style="{StaticResource UniformSecondaryButtonStyle}"
@@ -775,7 +782,7 @@
                                     Padding="12,0"
                                     FontSize="12"
                                     Margin="0,0,8,0" />
-                            <Button Content="Open Patient Chart"
+                            <Button Content="Open Patient Profile"
                                     Click="OpenSelectedPatientButton_Click"
                                     Style="{StaticResource UniformPrimaryButtonStyle}"
                                     Height="32"
@@ -1019,15 +1026,15 @@
                 <controls:UniformPagedGrid x:Name="PatientsPagedGrid"
                                            Visibility="{Binding IsPatientsWorkspace, Converter={StaticResource BoolToVisibilityConverter}}"
                                            Title="Malaysian Patients Registry"
-                                           Subtitle="Double-click any patient for Clinical Record, SOAP Notes &amp; Odontogram"
+                                           Subtitle="Double-click any patient for Demographics, 0..N Visit Records &amp; Per-Visit Odontograms"
                                            EmptyMessage="No matching patients found."
                                            ItemsSource="{Binding PatientRows}"
                                            SelectedItem="{Binding SelectedPatientRow, Mode=TwoWay}"
                                            RowDoubleClicked="PatientsPagedGrid_RowDoubleClicked">
                     <controls:UniformColumnDef Header="IC / MyKad" BindingPath="IcDisplay" WidthRatio="1.2" IsMonospace="True" />
-                    <controls:UniformColumnDef Header="Full Name" BindingPath="FullName" WidthRatio="2.1" IsBold="True" />
-                    <controls:UniformColumnDef Header="Phone" BindingPath="Phone" WidthRatio="1.1" IsMonospace="True" />
-                    <controls:UniformColumnDef Header="Alerts" BindingPath="AlertsDisplay" WidthRatio="1.8" />
+                    <controls:UniformColumnDef Header="Full Name" BindingPath="FullName" WidthRatio="2.0" IsBold="True" />
+                    <controls:UniformColumnDef Header="Phone &amp; Visits" BindingPath="ContactVisitsDisplay" WidthRatio="1.45" IsMonospace="True" />
+                    <controls:UniformColumnDef Header="Alerts" BindingPath="AlertsDisplay" WidthRatio="1.65" />
                 </controls:UniformPagedGrid>
 
                 <!-- 3. Billing & Invoices -->

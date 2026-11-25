@@ -1,0 +1,664 @@
+<Window x:Class="Occlusa.Desktop.Views.VisitRecordModal"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:Occlusa.Desktop.Controls"
+        Title="Patient Visit Record &amp; Anatomical Odontogram"
+        Width="1320"
+        Height="860"
+        MinWidth="1140"
+        MinHeight="770"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="{StaticResource SurfaceCanvasBrush}"
+        ScrollViewer.VerticalScrollBarVisibility="Disabled"
+        ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+
+    <Window.Resources>
+        <DataTemplate x:Key="AnatomicalToothCellTemplate">
+            <Button Command="{Binding DataContext.SelectToothCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                    CommandParameter="{Binding ToothNumber}"
+                    ToolTip="{Binding ToolTipText}"
+                    Margin="1.5,1"
+                    Padding="2,3"
+                    Cursor="Hand">
+                <Button.Style>
+                    <Style TargetType="Button">
+                        <Setter Property="Background" Value="{StaticResource SurfaceCardBrush}" />
+                        <Setter Property="BorderBrush" Value="{StaticResource BorderHairlineBrush}" />
+                        <Setter Property="BorderThickness" Value="1" />
+                        <Setter Property="Template">
+                            <Setter.Value>
+                                <ControlTemplate TargetType="Button">
+                                    <Border x:Name="CellBorder"
+                                            Background="{TemplateBinding Background}"
+                                            BorderBrush="{TemplateBinding BorderBrush}"
+                                            BorderThickness="{TemplateBinding BorderThickness}"
+                                            CornerRadius="6"
+                                            Padding="{TemplateBinding Padding}">
+                                        <controls:AnatomicalToothControl ToothNumber="{Binding ToothNumber}"
+                                                                         Condition="{Binding Condition}"
+                                                                         Surfaces="{Binding Surfaces}"
+                                                                         StageCode="{Binding StageCode}" />
+                                    </Border>
+                                    <ControlTemplate.Triggers>
+                                        <Trigger Property="IsMouseOver" Value="True">
+                                            <Setter TargetName="CellBorder" Property="Background" Value="{StaticResource SurfaceHoverBrush}" />
+                                            <Setter TargetName="CellBorder" Property="BorderBrush" Value="{StaticResource BrandPrimaryBrush}" />
+                                        </Trigger>
+                                    </ControlTemplate.Triggers>
+                                </ControlTemplate>
+                            </Setter.Value>
+                        </Setter>
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                <Setter Property="Background" Value="{StaticResource BrandPrimarySoftBrush}" />
+                                <Setter Property="BorderBrush" Value="{StaticResource BrandPrimaryBrush}" />
+                                <Setter Property="BorderThickness" Value="2" />
+                            </DataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </Button.Style>
+            </Button>
+        </DataTemplate>
+    </Window.Resources>
+
+    <controls:ModalDialogShell x:Name="DialogShell"
+                               Title="{Binding ModalTitle}"
+                               Subtitle="{Binding ModalSubtitle}"
+                               BadgeText="{Binding BadgeText}"
+                               HasUnsavedChanges="{Binding HasUnsavedChanges, Mode=TwoWay}"
+                               SaveCommand="{Binding SaveAllVisitChangesCommand}"
+                               UnsavedPromptTitle="Unsaved Visit Record Changes"
+                               UnsavedPromptMessage="You have unsaved odontogram or clinical SOAP note edits for this visit. Save before closing?">
+
+        <controls:ModalDialogShell.DialogContent>
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <!-- Row 0: Pinned Clinical Safety Banner -->
+                <controls:MedicalAlertsBanner Grid.Row="0"
+                                              Margin="0,0,0,10"
+                                              PatientName="{Binding Patient.FullName}"
+                                              IcNumber="{Binding Patient.IcNumber}"
+                                              IsMyKadVerified="{Binding Patient.IsMyKadVerified}"
+                                              Allergies="{Binding Patient.MedicalAlerts.Allergies}"
+                                              OnAnticoagulants="{Binding Patient.MedicalAlerts.OnAnticoagulants}"
+                                              HasDiabetes="{Binding Patient.MedicalAlerts.HasDiabetes}"
+                                              IsPregnant="{Binding Patient.MedicalAlerts.IsPregnant}"
+                                              AlertNotes="{Binding Patient.MedicalAlerts.Notes}" />
+
+                <!-- Row 1: Visit Context Strip & Segmented Workspace Switcher (Odontogram vs SOAP Notes) -->
+                <Border Grid.Row="1" Style="{StaticResource UniformCardBorderStyle}" Padding="12,8" Margin="0,0,0,10">
+                    <DockPanel LastChildFill="False">
+                        <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                            <RadioButton GroupName="VisitRecordTabs"
+                                         Content="1. Visit Odontogram (Anatomical FDI)"
+                                         IsChecked="{Binding IsOdontogramTab, Mode=OneWay}"
+                                         Command="{Binding SelectTabCommand}"
+                                         CommandParameter="Odontogram"
+                                         Style="{StaticResource UniformSegmentedToggleRadioStyle}"
+                                         Margin="0,0,6,0" />
+                            <RadioButton GroupName="VisitRecordTabs"
+                                         Content="2. Clinical Visit Notes (SOAP)"
+                                         IsChecked="{Binding IsSoapTab, Mode=OneWay}"
+                                         Command="{Binding SelectTabCommand}"
+                                         CommandParameter="SoapNotes"
+                                         Style="{StaticResource UniformSegmentedToggleRadioStyle}" />
+                        </StackPanel>
+
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                            <TextBlock Text="Visit Date:"
+                                       Style="{StaticResource UniformLabelTextStyle}"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,6,0" />
+                            <DatePicker SelectedDate="{Binding VisitDateInput, Mode=TwoWay}"
+                                        Width="132"
+                                        Height="30"
+                                        VerticalContentAlignment="Center"
+                                        Margin="0,0,12,0" />
+
+                            <TextBlock Text="Clinician:"
+                                       Style="{StaticResource UniformLabelTextStyle}"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,6,0" />
+                            <ComboBox ItemsSource="{Binding DentistNames}"
+                                      SelectedItem="{Binding DoctorName, Mode=TwoWay}"
+                                      Width="190"
+                                      Height="30"
+                                      Style="{StaticResource UniformComboBoxStyle}" />
+                        </StackPanel>
+                    </DockPanel>
+                </Border>
+
+                <!-- Row 2A: WORKSPACE 1 — KRELOSES-STYLE ANATOMICAL + 5-SURFACE VISIT ODONTOGRAM -->
+                <Grid Grid.Row="2" Visibility="{Binding IsOdontogramTab, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="*" />
+                    </Grid.RowDefinitions>
+
+                    <!-- Anatomical Upper & Lower Arches Card -->
+                    <Border Grid.Row="0" Style="{StaticResource UniformCardBorderStyle}" Padding="12,10" Margin="0,0,0,10">
+                        <StackPanel>
+                            <!-- Arch Toolbar: Permanent (11-48) / Primary (51-85) Toggle + Legend + Carry-Forward/Reset -->
+                            <DockPanel Margin="0,0,0,8" LastChildFill="False">
+                                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <RadioButton GroupName="DentitionToggle"
+                                                 Content="{Binding PermanentTabLabel}"
+                                                 IsChecked="{Binding IsPermanentDentition, Mode=OneWay}"
+                                                 Command="{Binding SetDentitionModeCommand}"
+                                                 CommandParameter="Permanent"
+                                                 Style="{StaticResource UniformSegmentedToggleRadioStyle}"
+                                                 Margin="0,0,6,0" />
+                                    <RadioButton GroupName="DentitionToggle"
+                                                 Content="{Binding PrimaryTabLabel}"
+                                                 IsChecked="{Binding IsPrimaryDentition, Mode=OneWay}"
+                                                 Command="{Binding SetDentitionModeCommand}"
+                                                 CommandParameter="Primary"
+                                                 Style="{StaticResource UniformSegmentedToggleRadioStyle}"
+                                                 Margin="0,0,12,0" />
+
+                                    <Button Content="Re-Sync Prior Visit"
+                                            Command="{Binding ResetOdontogramCommand}"
+                                            CommandParameter="CarryForward"
+                                            Style="{StaticResource UniformChipButtonStyle}"
+                                            Margin="0,0,6,0" />
+                                    <Button Content="Reset to Blank"
+                                            Command="{Binding ResetOdontogramCommand}"
+                                            CommandParameter="Blank"
+                                            Style="{StaticResource UniformChipButtonStyle}" />
+                                </StackPanel>
+
+                                <!-- Compact Anatomical Legend -->
+                                <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Border Width="9" Height="9" CornerRadius="2" Background="#EF4444" Margin="0,0,4,0" VerticalAlignment="Center" />
+                                    <TextBlock Text="Caries" Style="{StaticResource UniformMutedTextStyle}" Margin="0,0,9,0" VerticalAlignment="Center" />
+                                    <Border Width="9" Height="9" CornerRadius="2" Background="#0EA5E9" Margin="0,0,4,0" VerticalAlignment="Center" />
+                                    <TextBlock Text="Filling" Style="{StaticResource UniformMutedTextStyle}" Margin="0,0,9,0" VerticalAlignment="Center" />
+                                    <Border Width="9" Height="9" CornerRadius="2" Background="#8B5CF6" Margin="0,0,4,0" VerticalAlignment="Center" />
+                                    <TextBlock Text="Crown" Style="{StaticResource UniformMutedTextStyle}" Margin="0,0,9,0" VerticalAlignment="Center" />
+                                    <Border Width="9" Height="9" CornerRadius="2" Background="#F97316" Margin="0,0,4,0" VerticalAlignment="Center" />
+                                    <TextBlock Text="RCT" Style="{StaticResource UniformMutedTextStyle}" Margin="0,0,9,0" VerticalAlignment="Center" />
+                                    <Border Width="9" Height="9" CornerRadius="2" Background="#14B8A6" Margin="0,0,4,0" VerticalAlignment="Center" />
+                                    <TextBlock Text="Implant" Style="{StaticResource UniformMutedTextStyle}" Margin="0,0,9,0" VerticalAlignment="Center" />
+                                    <Border Width="9" Height="9" CornerRadius="2" Background="#CBD5E1" Margin="0,0,4,0" VerticalAlignment="Center" />
+                                    <TextBlock Text="Missing" Style="{StaticResource UniformMutedTextStyle}" VerticalAlignment="Center" />
+                                </StackPanel>
+                            </DockPanel>
+
+                            <!-- PERMANENT DENTITION ARCHES (11-48 · 32 Teeth) -->
+                            <StackPanel Visibility="{Binding IsPermanentDentition, Converter={StaticResource BoolToVisibilityConverter}}">
+                                <Grid Margin="2,0,2,2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="14" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Q1 · Upper Right (18–11)" Style="{StaticResource UniformMutedTextStyle}" FontWeight="SemiBold" />
+                                    <TextBlock Grid.Column="2" Text="Q2 · Upper Left (21–28)" Style="{StaticResource UniformMutedTextStyle}" FontWeight="SemiBold" HorizontalAlignment="Right" />
+                                </Grid>
+
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="14" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <ItemsControl Grid.Column="0" ItemsSource="{Binding UpperRightPermanent}" ItemTemplate="{StaticResource AnatomicalToothCellTemplate}">
+                                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="8" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                    </ItemsControl>
+                                    <Border Grid.Column="1" Width="2" Background="{StaticResource BorderStrongBrush}" HorizontalAlignment="Center" />
+                                    <ItemsControl Grid.Column="2" ItemsSource="{Binding UpperLeftPermanent}" ItemTemplate="{StaticResource AnatomicalToothCellTemplate}">
+                                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="8" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                    </ItemsControl>
+                                </Grid>
+
+                                <Border Height="1" Background="{StaticResource BorderStrongBrush}" Margin="0,4" Opacity="0.6" />
+
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="14" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <ItemsControl Grid.Column="0" ItemsSource="{Binding LowerRightPermanent}" ItemTemplate="{StaticResource AnatomicalToothCellTemplate}">
+                                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="8" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                    </ItemsControl>
+                                    <Border Grid.Column="1" Width="2" Background="{StaticResource BorderStrongBrush}" HorizontalAlignment="Center" />
+                                    <ItemsControl Grid.Column="2" ItemsSource="{Binding LowerLeftPermanent}" ItemTemplate="{StaticResource AnatomicalToothCellTemplate}">
+                                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="8" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                    </ItemsControl>
+                                </Grid>
+
+                                <Grid Margin="2,2,2,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="14" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Q4 · Lower Right (48–41)" Style="{StaticResource UniformMutedTextStyle}" FontWeight="SemiBold" />
+                                    <TextBlock Grid.Column="2" Text="Q3 · Lower Left (31–38)" Style="{StaticResource UniformMutedTextStyle}" FontWeight="SemiBold" HorizontalAlignment="Right" />
+                                </Grid>
+                            </StackPanel>
+
+                            <!-- PRIMARY / DECIDUOUS DENTITION ARCHES (51-85 · 20 Teeth) -->
+                            <StackPanel Visibility="{Binding IsPrimaryDentition, Converter={StaticResource BoolToVisibilityConverter}}">
+                                <Grid Width="860" HorizontalAlignment="Center" Margin="0,0,0,2">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="18" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Q5 · Upper Right Primary (55–51)" Style="{StaticResource UniformMutedTextStyle}" FontWeight="SemiBold" />
+                                    <TextBlock Grid.Column="2" Text="Q6 · Upper Left Primary (61–65)" Style="{StaticResource UniformMutedTextStyle}" FontWeight="SemiBold" HorizontalAlignment="Right" />
+                                </Grid>
+
+                                <Grid Width="860" HorizontalAlignment="Center">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="18" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <ItemsControl Grid.Column="0" ItemsSource="{Binding UpperRightPrimary}" ItemTemplate="{StaticResource AnatomicalToothCellTemplate}">
+                                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="5" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                    </ItemsControl>
+                                    <Border Grid.Column="1" Width="2" Background="{StaticResource BorderStrongBrush}" HorizontalAlignment="Center" />
+                                    <ItemsControl Grid.Column="2" ItemsSource="{Binding UpperLeftPrimary}" ItemTemplate="{StaticResource AnatomicalToothCellTemplate}">
+                                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="5" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                    </ItemsControl>
+                                </Grid>
+
+                                <Border Width="860" HorizontalAlignment="Center" Height="1" Background="{StaticResource BorderStrongBrush}" Margin="0,4" Opacity="0.6" />
+
+                                <Grid Width="860" HorizontalAlignment="Center">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="18" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <ItemsControl Grid.Column="0" ItemsSource="{Binding LowerRightPrimary}" ItemTemplate="{StaticResource AnatomicalToothCellTemplate}">
+                                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="5" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                    </ItemsControl>
+                                    <Border Grid.Column="1" Width="2" Background="{StaticResource BorderStrongBrush}" HorizontalAlignment="Center" />
+                                    <ItemsControl Grid.Column="2" ItemsSource="{Binding LowerLeftPrimary}" ItemTemplate="{StaticResource AnatomicalToothCellTemplate}">
+                                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><UniformGrid Columns="5" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                    </ItemsControl>
+                                </Grid>
+
+                                <Grid Width="860" HorizontalAlignment="Center" Margin="0,2,0,0">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="18" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <TextBlock Grid.Column="0" Text="Q8 · Lower Right Primary (85–81)" Style="{StaticResource UniformMutedTextStyle}" FontWeight="SemiBold" />
+                                    <TextBlock Grid.Column="2" Text="Q7 · Lower Left Primary (71–75)" Style="{StaticResource UniformMutedTextStyle}" FontWeight="SemiBold" HorizontalAlignment="Right" />
+                                </Grid>
+                            </StackPanel>
+                        </StackPanel>
+                    </Border>
+
+                    <!-- Bottom Inspector: Interactive 5-Surface Picker + Tooth Procedure & 4-Button Staging -->
+                    <Border Grid.Row="1" Style="{StaticResource UniformCardBorderStyle}" Padding="14,10">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="196" />
+                                <ColumnDefinition Width="16" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <!-- Left: Interactive Clickable 5-Surface Diagram (M, O/I, D, B, L) -->
+                            <Border Grid.Column="0" Style="{StaticResource UniformSubtleCardBorderStyle}" Padding="10,8">
+                                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                                    <TextBlock Text="5-Surface Selector"
+                                               Style="{StaticResource UniformLabelTextStyle}"
+                                               HorizontalAlignment="Center"
+                                               Margin="0,0,0,4" />
+
+                                    <Viewbox Width="106" Height="106">
+                                        <Canvas Width="120" Height="120">
+                                            <!-- Top Surface (B on upper, L on lower) -->
+                                            <Polygon Points="12,12 108,12 80,40 40,40"
+                                                     Fill="{Binding SurfaceTopFill}"
+                                                     Stroke="#475569"
+                                                     StrokeThickness="1.8"
+                                                     Cursor="Hand"
+                                                     MouseLeftButtonDown="SurfaceTop_MouseDown" />
+                                            <TextBlock Canvas.Left="54" Canvas.Top="18" Text="{Binding SurfaceTopLabel}" FontFamily="Consolas" FontSize="13" FontWeight="Bold" IsHitTestVisible="False" />
+
+                                            <!-- Bottom Surface (L on upper, B on lower) -->
+                                            <Polygon Points="12,108 40,80 80,80 108,108"
+                                                     Fill="{Binding SurfaceBottomFill}"
+                                                     Stroke="#475569"
+                                                     StrokeThickness="1.8"
+                                                     Cursor="Hand"
+                                                     MouseLeftButtonDown="SurfaceBottom_MouseDown" />
+                                            <TextBlock Canvas.Left="54" Canvas.Top="86" Text="{Binding SurfaceBottomLabel}" FontFamily="Consolas" FontSize="13" FontWeight="Bold" IsHitTestVisible="False" />
+
+                                            <!-- Left Surface (Midline-aware M or D) -->
+                                            <Polygon Points="12,12 40,40 40,80 12,108"
+                                                     Fill="{Binding SurfaceLeftFill}"
+                                                     Stroke="#475569"
+                                                     StrokeThickness="1.8"
+                                                     Cursor="Hand"
+                                                     MouseLeftButtonDown="SurfaceLeft_MouseDown" />
+                                            <TextBlock Canvas.Left="20" Canvas.Top="52" Text="{Binding SurfaceLeftLabel}" FontFamily="Consolas" FontSize="13" FontWeight="Bold" IsHitTestVisible="False" />
+
+                                            <!-- Right Surface (Midline-aware M or D) -->
+                                            <Polygon Points="108,12 108,108 80,80 80,40"
+                                                     Fill="{Binding SurfaceRightFill}"
+                                                     Stroke="#475569"
+                                                     StrokeThickness="1.8"
+                                                     Cursor="Hand"
+                                                     MouseLeftButtonDown="SurfaceRight_MouseDown" />
+                                            <TextBlock Canvas.Left="88" Canvas.Top="52" Text="{Binding SurfaceRightLabel}" FontFamily="Consolas" FontSize="13" FontWeight="Bold" IsHitTestVisible="False" />
+
+                                            <!-- Center Surface (Occlusal / Incisal) -->
+                                            <Rectangle Canvas.Left="40" Canvas.Top="40"
+                                                       Width="40" Height="40"
+                                                       RadiusX="4" RadiusY="4"
+                                                       Fill="{Binding SurfaceCenterFill}"
+                                                       Stroke="#334155"
+                                                       StrokeThickness="1.9"
+                                                       Cursor="Hand"
+                                                       MouseLeftButtonDown="SurfaceCenter_MouseDown" />
+                                            <TextBlock Canvas.Left="54" Canvas.Top="52" Text="O" FontFamily="Consolas" FontSize="13" FontWeight="Bold" IsHitTestVisible="False" />
+                                        </Canvas>
+                                    </Viewbox>
+
+                                    <DockPanel Margin="0,4,0,0" LastChildFill="False">
+                                        <TextBlock DockPanel.Dock="Left"
+                                                   Text="{Binding SelectedSurfacesDisplay}"
+                                                   FontFamily="{StaticResource FontFamilyMono}"
+                                                   FontSize="11"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{StaticResource BrandPrimaryBrush}"
+                                                   VerticalAlignment="Center" />
+                                        <Button DockPanel.Dock="Right"
+                                                Content="Clear"
+                                                Command="{Binding ClearSurfacesCommand}"
+                                                Style="{StaticResource UniformGhostButtonStyle}"
+                                                Height="22"
+                                                Padding="6,0"
+                                                FontSize="10.5"
+                                                Margin="6,0,0,0" />
+                                    </DockPanel>
+                                </StackPanel>
+                            </Border>
+
+                            <!-- Right: Condition, Treatment Procedure, Presets & 4-Button Staging -->
+                            <Grid Grid.Column="2">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+
+                                <DockPanel Grid.Row="0" Margin="0,0,0,8" LastChildFill="False">
+                                    <TextBlock DockPanel.Dock="Left"
+                                               Text="{Binding SelectedToothHeader}"
+                                               Style="{StaticResource UniformSectionTitleTextStyle}"
+                                               VerticalAlignment="Center" />
+                                    <TextBlock DockPanel.Dock="Right"
+                                               Text="Baseline (RM 0)  ·  Proposed → Accepted → Completed (Visit Billing)"
+                                               Style="{StaticResource UniformMutedTextStyle}"
+                                               VerticalAlignment="Center" />
+                                </DockPanel>
+
+                                <Grid Grid.Row="1" Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="195" />
+                                        <ColumnDefinition Width="10" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="10" />
+                                        <ColumnDefinition Width="135" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="Tooth Condition" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,3" />
+                                        <ComboBox ItemsSource="{Binding Conditions}"
+                                                  SelectedItem="{Binding SelectedCondition, Mode=TwoWay}"
+                                                  Style="{StaticResource UniformComboBoxStyle}" />
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="Treatment Procedure (Leave blank for Baseline)" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,3" />
+                                        <TextBox Text="{Binding ProcedureName, UpdateSourceTrigger=PropertyChanged}"
+                                                 Style="{StaticResource UniformInputTextBoxStyle}" />
+                                    </StackPanel>
+
+                                    <StackPanel Grid.Column="4">
+                                        <TextBlock Text="Fee (RM)" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,3" />
+                                        <TextBox Text="{Binding FeeInput, UpdateSourceTrigger=PropertyChanged}"
+                                                 Style="{StaticResource UniformInputTextBoxStyle}" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <DockPanel Grid.Row="2" Margin="0,0,0,8" LastChildFill="True">
+                                    <TextBlock DockPanel.Dock="Left"
+                                               Text="Quick Presets:"
+                                               Style="{StaticResource UniformLabelTextStyle}"
+                                               VerticalAlignment="Center"
+                                               Margin="0,0,8,0" />
+                                    <ItemsControl ItemsSource="{Binding ProcedurePresets}" VerticalAlignment="Center">
+                                        <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
+                                        <ItemsControl.ItemTemplate>
+                                            <DataTemplate>
+                                                <Button Content="{Binding}"
+                                                        Command="{Binding DataContext.ApplyProcedurePresetCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                        CommandParameter="{Binding}"
+                                                        Style="{StaticResource UniformChipButtonStyle}"
+                                                        Margin="0,0,6,2" />
+                                            </DataTemplate>
+                                        </ItemsControl.ItemTemplate>
+                                    </ItemsControl>
+                                </DockPanel>
+
+                                <StackPanel Grid.Row="3"
+                                            Orientation="Horizontal"
+                                            HorizontalAlignment="Right"
+                                            VerticalAlignment="Bottom">
+                                    <Button Content="0. Record Baseline (RM 0)"
+                                            Command="{Binding RecordBaselineToothCommand}"
+                                            Style="{StaticResource UniformSecondaryButtonStyle}"
+                                            Margin="0,0,8,0" />
+                                    <Button Content="1. Mark Proposed"
+                                            Command="{Binding StageAndSaveToothCommand}"
+                                            CommandParameter="Proposed"
+                                            Style="{StaticResource UniformSecondaryButtonStyle}"
+                                            Margin="0,0,8,0" />
+                                    <Button Content="2. Mark Accepted"
+                                            Command="{Binding StageAndSaveToothCommand}"
+                                            CommandParameter="Accepted"
+                                            Style="{StaticResource UniformSecondaryButtonStyle}"
+                                            Margin="0,0,8,0" />
+                                    <Button Content="3. Mark Completed (Push to Billing)"
+                                            Command="{Binding StageAndSaveToothCommand}"
+                                            CommandParameter="Completed"
+                                            Style="{StaticResource UniformPrimaryButtonStyle}" />
+                                </StackPanel>
+                            </Grid>
+                        </Grid>
+                    </Border>
+                </Grid>
+
+                <!-- Row 2B: WORKSPACE 2 — CLINICAL VISIT NOTES (SOAP) & SMART MACROS -->
+                <Border Grid.Row="2"
+                        Visibility="{Binding IsSoapTab, Converter={StaticResource BoolToVisibilityConverter}}"
+                        Style="{StaticResource UniformCardBorderStyle}"
+                        Padding="16,14">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <DockPanel Grid.Row="0" Margin="0,0,0,10" LastChildFill="False">
+                            <TextBlock DockPanel.Dock="Left"
+                                       Text="Visit Clinical Narrative (S.O.A.P.)"
+                                       Style="{StaticResource UniformSectionTitleTextStyle}"
+                                       VerticalAlignment="Center" />
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                <ComboBox ItemsSource="{Binding SoapMacros}"
+                                          SelectedItem="{Binding SelectedMacro}"
+                                          DisplayMemberPath="Title"
+                                          Width="280"
+                                          Style="{StaticResource UniformComboBoxStyle}"
+                                          Margin="0,0,8,0" />
+                                <Button Content="Apply Smart Macro"
+                                        Command="{Binding ApplySelectedMacroCommand}"
+                                        Style="{StaticResource UniformSecondaryButtonStyle}" />
+                            </StackPanel>
+                        </DockPanel>
+
+                        <!-- Quick 1-Click Clinical Macro Chips -->
+                        <Border Grid.Row="1" Style="{StaticResource UniformSubtleCardBorderStyle}" Padding="12,8" Margin="0,0,0,12">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="84" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="6" />
+                                    <RowDefinition Height="Auto" />
+                                </Grid.RowDefinitions>
+
+                                <TextBlock Grid.Row="0" Grid.Column="0" Text="Anesthesia:" Style="{StaticResource UniformLabelTextStyle}" VerticalAlignment="Center" />
+                                <StackPanel Grid.Row="0" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Button Content="2% Lidocaine 1:80k" Command="{Binding ApplyAnesthesiaMacroCommand}" CommandParameter="2% Lidocaine w/ 1:80k Adrenaline" Style="{StaticResource UniformChipButtonStyle}" Margin="0,0,6,0" />
+                                    <Button Content="2% Mepivacaine" Command="{Binding ApplyAnesthesiaMacroCommand}" CommandParameter="2% Mepivacaine 1:100k" Style="{StaticResource UniformChipButtonStyle}" Margin="0,0,6,0" />
+                                    <Button Content="4% Articaine" Command="{Binding ApplyAnesthesiaMacroCommand}" CommandParameter="4% Articaine 1:100k" Style="{StaticResource UniformChipButtonStyle}" Margin="0,0,6,0" />
+                                    <Button Content="Topical Gel" Command="{Binding ApplyAnesthesiaMacroCommand}" CommandParameter="20% Benzocaine Topical" Style="{StaticResource UniformChipButtonStyle}" />
+
+                                    <Border Width="1" Height="16" Background="{StaticResource BorderHairlineBrush}" Margin="12,0" VerticalAlignment="Center" />
+
+                                    <TextBlock Text="Shade:" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,8,0" VerticalAlignment="Center" />
+                                    <Button Content="A1" Command="{Binding ApplyShadeMacroCommand}" CommandParameter="A1" Style="{StaticResource UniformChipButtonStyle}" Margin="0,0,6,0" />
+                                    <Button Content="A2" Command="{Binding ApplyShadeMacroCommand}" CommandParameter="A2" Style="{StaticResource UniformChipButtonStyle}" Margin="0,0,6,0" />
+                                    <Button Content="A3" Command="{Binding ApplyShadeMacroCommand}" CommandParameter="A3" Style="{StaticResource UniformChipButtonStyle}" Margin="0,0,6,0" />
+                                    <Button Content="B1" Command="{Binding ApplyShadeMacroCommand}" CommandParameter="B1" Style="{StaticResource UniformChipButtonStyle}" />
+                                </StackPanel>
+
+                                <TextBlock Grid.Row="2" Grid.Column="0" Text="Post-Op:" Style="{StaticResource UniformLabelTextStyle}" VerticalAlignment="Center" />
+                                <StackPanel Grid.Row="2" Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Button Content="Routine Hygiene" Command="{Binding ApplyPostOpMacroCommand}" CommandParameter="Warm saline rinse, soft brush tonight." Style="{StaticResource UniformChipButtonStyle}" Margin="0,0,6,0" />
+                                    <Button Content="Filling Care" Command="{Binding ApplyPostOpMacroCommand}" CommandParameter="Avoid hard biting for 2h until numbness resolves; return if high bite." Style="{StaticResource UniformChipButtonStyle}" Margin="0,0,6,0" />
+                                    <Button Content="Extraction Care" Command="{Binding ApplyPostOpMacroCommand}" CommandParameter="Bite gauze 30 min, no straw/spitting 24h, soft cool diet." Style="{StaticResource UniformChipButtonStyle}" />
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <!-- Spacious 2x2 S.O.A.P. Grid (Zero Scrollbars) -->
+                        <Grid Grid.Row="2" Margin="0,0,0,12">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="14" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="*" />
+                                <RowDefinition Height="12" />
+                                <RowDefinition Height="*" />
+                            </Grid.RowDefinitions>
+
+                            <Grid Grid.Row="0" Grid.Column="0">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="S — Subjective (Chief Complaint &amp; History)" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,4" />
+                                <TextBox Grid.Row="1" Text="{Binding Subjective, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource UniformMultiLineTextBoxStyle}" />
+                            </Grid>
+
+                            <Grid Grid.Row="0" Grid.Column="2">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="O — Objective (Extra/Intra-Oral Exam &amp; Radiographs)" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,4" />
+                                <TextBox Grid.Row="1" Text="{Binding Objective, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource UniformMultiLineTextBoxStyle}" />
+                            </Grid>
+
+                            <Grid Grid.Row="2" Grid.Column="0">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="A — Assessment / Clinical Diagnosis" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,4" />
+                                <TextBox Grid.Row="1" Text="{Binding Assessment, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource UniformMultiLineTextBoxStyle}" />
+                            </Grid>
+
+                            <Grid Grid.Row="2" Grid.Column="2">
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
+                                <TextBlock Grid.Row="0" Text="P — Plan &amp; Procedures Performed Today" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,4" />
+                                <TextBox Grid.Row="1" Text="{Binding Plan, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource UniformMultiLineTextBoxStyle}" />
+                            </Grid>
+                        </Grid>
+
+                        <!-- Anesthesia / Shade / Post-Op Footer Inputs -->
+                        <Grid Grid.Row="3">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="1.2*" />
+                                <ColumnDefinition Width="12" />
+                                <ColumnDefinition Width="0.55*" />
+                                <ColumnDefinition Width="12" />
+                                <ColumnDefinition Width="1.5*" />
+                            </Grid.ColumnDefinitions>
+                            <StackPanel Grid.Column="0">
+                                <TextBlock Text="Local Anesthesia Used" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,4" />
+                                <TextBox Text="{Binding AnesthesiaUsed, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource UniformInputTextBoxStyle}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="2">
+                                <TextBlock Text="Tooth Shade" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,4" />
+                                <TextBox Text="{Binding ToothShade, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource UniformInputTextBoxStyle}" />
+                            </StackPanel>
+                            <StackPanel Grid.Column="4">
+                                <TextBlock Text="Post-Operative Instructions" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,4" />
+                                <TextBox Text="{Binding PostOpInstructions, UpdateSourceTrigger=PropertyChanged}" Style="{StaticResource UniformInputTextBoxStyle}" />
+                            </StackPanel>
+                        </Grid>
+                    </Grid>
+                </Border>
+            </Grid>
+        </controls:ModalDialogShell.DialogContent>
+
+        <controls:ModalDialogShell.FooterLeftContent>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <TextBlock Text="{Binding VisitSummaryLabel}"
+                           Style="{StaticResource UniformMutedTextStyle}"
+                           FontWeight="SemiBold"
+                           VerticalAlignment="Center"
+                           Margin="0,0,14,0" />
+                <TextBlock Text="{Binding StatusMessage}"
+                           Style="{StaticResource UniformBodyTextStyle}"
+                           Foreground="{StaticResource BrandPrimaryBrush}"
+                           FontWeight="SemiBold"
+                           VerticalAlignment="Center" />
+            </StackPanel>
+        </controls:ModalDialogShell.FooterLeftContent>
+
+        <controls:ModalDialogShell.FooterContent>
+            <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                <Button Content="{Binding SwitchTabButtonText}"
+                        Command="{Binding ToggleTabCommand}"
+                        Style="{StaticResource UniformSecondaryButtonStyle}"
+                        Margin="0,0,8,0" />
+                <Button Content="Save Visit Record"
+                        Command="{Binding SaveAllVisitChangesCommand}"
+                        Style="{StaticResource UniformPrimaryButtonStyle}" />
+            </StackPanel>
+        </controls:ModalDialogShell.FooterContent>
+    </controls:ModalDialogShell>
+</Window>
+

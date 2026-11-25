@@ -114,3 +114,23 @@ public enum DaySlotSession
     Morning,
     Afternoon
 }
+
+/// <summary>
+/// FDI dentition arch mode on a per-visit odontogram (Permanent 11-48 vs Primary/Deciduous 51-85).
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum DentitionMode
+{
+    Permanent,
+    Primary
+}
+
+/// <summary>
+/// Initialization or reset strategy for a visit record's odontogram.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum OdontogramInitMode
+{
+    CarryForward,
+    Blank
+}

@@ -130,9 +130,16 @@ Merge `Themes/UniformTheme.xaml` inside `App.xaml`:
   - `SaveCommandParameter` (`object?`)
   - `AutoAttachWindowHooks` (`bool`, default `true`) — binds `Esc` key and `Window.Closing` guard automatically.
 - **Events & Methods:**
-  - `SaveBeforeCloseRequested` (`EventHandler<CancelEventArgs>`)
+- `SaveBeforeCloseRequested` (`EventHandler<CancelEventArgs>`)
   - `CloseRequested` (`EventHandler<CancelEventArgs>`)
   - `RequestClose()`, `ForceCloseWithoutPrompt()`
+
+### D. `AnatomicalToothControl` & `ToothAnatomyCatalog`
+
+- **Namespace:** `Occlusa.Desktop.Controls`
+- **Purpose:** Renders Kreloses-style anatomical buccal/labial crown + root vector silhouettes paired with a midline-aware 5-surface (`M`, `O`/`I`, `D`, `B`, `L`) occlusal diagram and stage badge inside `VisitRecordModal`.
+- **Dentition Coverage:** Supports all **52 FDI teeth** — **Permanent (`11–48`)** and **Primary / Pediatric (`51–85`)** — switched via a zero-scrollbar mode toggle inside `VisitRecordModal`.
+- **Attribution:** Anatomical crown and root vector curves adapted from `ZoliQua/React-Advanced-Odontogram` (MIT License) and frozen as immutable WPF `Geometry` instances.
 
 ---
 
@@ -144,5 +151,5 @@ Every `.xaml` file under `src\Occlusa.Desktop\` MUST pass all checks:
 - [ ] Zero occurrences of `<ScrollViewer` without `VerticalScrollBarVisibility="Disabled"` and `HorizontalScrollBarVisibility="Disabled"` (and zero scrollable containers wrapping views/modals).
 - [ ] Zero occurrences of `CharacterEllipsis` or `WordEllipsis`.
 - [ ] Every list/table view uses `UniformPagedGrid` with **3 or 4 columns** and double-click modal opening.
-- [ ] `MedicalAlertsBanner` pinned on top of `MainWindow`, `PatientDetailModal`, and `OdontogramModal`.
+- [ ] `MedicalAlertsBanner` pinned on top of `MainWindow`, `PatientDetailModal`, and `VisitRecordModal`.
 - [ ] Every modal (`Views\*Modal.xaml`) uses `ModalDialogShell` (`ShowDialog()`), has NO back-navigation buttons, and sets `HasUnsavedChanges` on editable clinical/billing modals.

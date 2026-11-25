@@ -8,15 +8,9 @@ namespace Occlusa.Api.Repositories;
 /// </summary>
 public static class ClinicDomainHelpers
 {
-    public static readonly int[] AllFdiTeeth =
-    {
-        18, 17, 16, 15, 14, 13, 12, 11,
-        21, 22, 23, 24, 25, 26, 27, 28,
-        48, 47, 46, 45, 44, 43, 42, 41,
-        31, 32, 33, 34, 35, 36, 37, 38
-    };
+    public static readonly int[] AllFdiTeeth = OdontogramHelper.AllFdiTeeth;
 
-    private static readonly HashSet<int> ValidFdiToothSet = new(AllFdiTeeth);
+    public static bool IsValidFdiTooth(int toothNumber) => OdontogramHelper.IsValidFdiTooth(toothNumber);
 
     private static readonly Dictionary<QueueStatus, HashSet<QueueStatus>> AllowedTransitions = new()
     {
@@ -54,8 +48,6 @@ public static class ClinicDomainHelpers
         [QueueStatus.Completed] = new(),
         [QueueStatus.Cancelled] = new()
     };
-
-    public static bool IsValidFdiTooth(int toothNumber) => ValidFdiToothSet.Contains(toothNumber);
 
     public static bool IsTransitionAllowed(QueueStatus current, QueueStatus target)
     {
@@ -216,10 +208,16 @@ public static class ClinicDomainHelpers
             ? request.Condition.ToString()
             : request.ProcedureName.Trim();
 
-        return baseName.Contains($"#{request.ToothNumber}", StringComparison.OrdinalIgnoreCase)
-            || baseName.Contains($"Tooth {request.ToothNumber}", StringComparison.OrdinalIgnoreCase)
-            ? baseName
-            : $"Tooth #{request.ToothNumber} - {baseName}";
+        if (baseName.Contains($"#{request.ToothNumber}", StringComparison.OrdinalIgnoreCase)
+            || baseName.Contains($"Tooth {request.ToothNumber}", StringComparison.OrdinalIgnoreCase))
+        {
+            return baseName;
+        }
+
+        var surfaces = OdontogramHelper.NormalizeSurfaces(request.Surfaces);
+        return string.IsNullOrEmpty(surfaces)
+            ? $"Tooth #{request.ToothNumber} - {baseName}"
+            : $"Tooth #{request.ToothNumber} ({surfaces}) - {baseName}";
     }
 
     public static PatientDto Clone(PatientDto p) => new()
@@ -241,7 +239,9 @@ public static class ClinicDomainHelpers
             Notes = p.MedicalAlerts.Notes
         },
         IsMyKadVerified = p.IsMyKadVerified,
-        ConsentSignedAt = p.ConsentSignedAt
+        ConsentSignedAt = p.ConsentSignedAt,
+        VisitCount = p.VisitCount,
+        LastVisitAt = p.LastVisitAt
     };
 
     public static DentistDto Clone(DentistDto d) => new()
@@ -301,20 +301,50 @@ public static class ClinicDomainHelpers
             Details = e.Details
         }).ToList(),
         HasCriticalMedicalAlert = a.HasCriticalMedicalAlert,
-        AlertSummary = a.AlertSummary
+        AlertSummary = a.AlertSummary,
+        VisitId = a.VisitId
     };
 
     public static OdontogramToothDto Clone(OdontogramToothDto t) => new()
     {
         Id = t.Id,
+        VisitId = t.VisitId,
         PatientId = t.PatientId,
         ToothNumber = t.ToothNumber,
         Condition = t.Condition,
+        Surfaces = t.Surfaces,
         ProcedureName = t.ProcedureName,
         Fee = t.Fee,
         Stage = t.Stage,
         DoctorName = t.DoctorName,
         UpdatedAt = t.UpdatedAt
+    };
+
+    public static PatientVisitDto Clone(PatientVisitDto v) => new()
+    {
+        Id = v.Id,
+        PatientId = v.PatientId,
+        PatientName = v.PatientName,
+        PatientIc = v.PatientIc,
+        AppointmentId = v.AppointmentId,
+        InvoiceId = v.InvoiceId,
+        BranchId = v.BranchId,
+        DentistId = v.DentistId,
+        DoctorName = v.DoctorName,
+        VisitNumber = v.VisitNumber,
+        VisitDate = v.VisitDate,
+        Subjective = v.Subjective,
+        Objective = v.Objective,
+        Assessment = v.Assessment,
+        Plan = v.Plan,
+        AnesthesiaUsed = v.AnesthesiaUsed,
+        ToothShade = v.ToothShade,
+        PostOpInstructions = v.PostOpInstructions,
+        CreatedBy = v.CreatedBy,
+        LastUpdatedBy = v.LastUpdatedBy,
+        CreatedAt = v.CreatedAt,
+        UpdatedAt = v.UpdatedAt,
+        Odontogram = v.Odontogram.Select(Clone).ToList()
     };
 
     public static SoapNoteDto Clone(SoapNoteDto s) => new()
@@ -342,6 +372,7 @@ public static class ClinicDomainHelpers
         PatientName = inv.PatientName,
         DoctorName = inv.DoctorName,
         AppointmentId = inv.AppointmentId,
+        VisitId = inv.VisitId,
         Lines = inv.Lines.Select(l => new InvoiceLineDto
         {
             Id = l.Id,

@@ -20,6 +20,7 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
     private readonly List<DentistDto> _dentists = new();
     private readonly List<TreatmentDto> _treatments = new();
     private readonly Dictionary<Guid, AppointmentQueueItemDto> _appointments = new();
+    private readonly Dictionary<Guid, PatientVisitDto> _visits = new();
     private readonly Dictionary<(Guid PatientId, int ToothNumber), OdontogramToothDto> _odontogram = new();
     private readonly Dictionary<Guid, List<SoapNoteDto>> _soapNotes = new();
     private readonly List<SoapMacroDto> _soapMacros = new();
@@ -239,7 +240,7 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
 
         _patients[target.Id] = target;
 
-        // Keep queue cards synchronized with patient demographics & medical alert banners.
+        // Keep queue cards and clinical visit headers synchronized with patient demographics & medical alert banners.
         foreach (var appt in _appointments.Values.Where(a => a.PatientId == target.Id))
         {
             appt.PatientName = target.FullName;
@@ -247,6 +248,14 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
             appt.HasCriticalMedicalAlert = target.MedicalAlerts.HasAnyCriticalAlert;
             appt.AlertSummary = target.MedicalAlerts.BuildAlertSummary();
         }
+
+        foreach (var visit in _visits.Values.Where(v => v.PatientId == target.Id))
+        {
+            visit.PatientName = target.FullName;
+            visit.PatientIc = target.IcNumber;
+        }
+
+        RefreshPatientVisitStatsLocked(target.Id);
 
         AppendAudit(
             target.PrimaryBranchId,
@@ -559,6 +568,11 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
 
         _appointments[item.Id] = item;
 
+        if (normalizedStatus == QueueStatus.InChair && _patients.ContainsKey(item.PatientId))
+        {
+            EnsureVisitForAppointmentLocked(item, actor, now);
+        }
+
         AppendAudit(
             branch,
             actor,
@@ -666,6 +680,11 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
                 });
             }
 
+            if (normalizedTargetStatus == QueueStatus.InChair && _patients.ContainsKey(item.PatientId))
+            {
+                EnsureVisitForAppointmentLocked(item, actor, now);
+            }
+
             var newSummary = $"{item.PatientName} | {item.DoctorName} | {item.ProcedureSummary} | {item.ScheduledAt:O} | {item.DurationMinutes}m | {item.Status}";
             AppendAudit(
                 item.BranchId,
@@ -707,7 +726,13 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
             }
 
             var actor = string.IsNullOrWhiteSpace(request.UpdatedBy) ? claims.UserId : request.UpdatedBy.Trim();
-            ClinicDomainHelpers.ApplyStatusMilestone(item, oldStatus, normalizedNew, actor, DateTimeOffset.UtcNow, request.RoomName);
+            var now = DateTimeOffset.UtcNow;
+            ClinicDomainHelpers.ApplyStatusMilestone(item, oldStatus, normalizedNew, actor, now, request.RoomName);
+
+            if (normalizedNew == QueueStatus.InChair && _patients.ContainsKey(item.PatientId))
+            {
+                EnsureVisitForAppointmentLocked(item, actor, now);
+            }
 
             AppendAudit(
                 item.BranchId,
@@ -722,6 +747,554 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
         }
     }
 
+    public Task<IReadOnlyList<PatientVisitDto>> GetPatientVisitsAsync(Guid patientId, CancellationToken ct = default)
+    {
+        lock (_sync)
+        {
+            var visits = _visits.Values
+                .Where(v => v.PatientId == patientId)
+                .OrderByDescending(v => v.VisitDate)
+                .ThenByDescending(v => v.VisitNumber)
+                .Select(ClinicDomainHelpers.Clone)
+                .ToList();
+
+            return Task.FromResult<IReadOnlyList<PatientVisitDto>>(visits);
+        }
+    }
+
+    public Task<PatientVisitDto?> GetVisitByIdAsync(Guid visitId, CancellationToken ct = default)
+    {
+        lock (_sync)
+        {
+            return Task.FromResult(_visits.TryGetValue(visitId, out var visit)
+                ? ClinicDomainHelpers.Clone(visit)
+                : null);
+        }
+    }
+
+    public Task<(PatientVisitDto? Visit, AppointmentQueueItemDto? UpdatedAppointment, string? Error)> CreatePatientVisitAsync(
+        Guid patientId,
+        CreatePatientVisitRequest request,
+        CancellationToken ct = default)
+    {
+        var claims = CurrentClaims;
+        lock (_sync)
+        {
+            if (!_patients.TryGetValue(patientId, out var patient))
+            {
+                return Task.FromResult<(PatientVisitDto?, AppointmentQueueItemDto?, string?)>(
+                    (null, null, "Patient not found."));
+            }
+
+            if (request.AppointmentId.HasValue)
+            {
+                var existingForAppt = _visits.Values.FirstOrDefault(v => v.AppointmentId == request.AppointmentId.Value);
+                if (existingForAppt is not null)
+                {
+                    _appointments.TryGetValue(request.AppointmentId.Value, out var linkedExistingAppt);
+                    if (linkedExistingAppt is not null && linkedExistingAppt.VisitId != existingForAppt.Id)
+                    {
+                        linkedExistingAppt.VisitId = existingForAppt.Id;
+                    }
+
+                    return Task.FromResult<(PatientVisitDto?, AppointmentQueueItemDto?, string?)>(
+                        (ClinicDomainHelpers.Clone(existingForAppt),
+                         linkedExistingAppt is null ? null : ClinicDomainHelpers.Clone(linkedExistingAppt),
+                         null));
+                }
+            }
+
+            var (created, updatedAppt) = CreatePatientVisitLocked(patient, request, claims);
+            return Task.FromResult<(PatientVisitDto?, AppointmentQueueItemDto?, string?)>(
+                (ClinicDomainHelpers.Clone(created),
+                 updatedAppt is null ? null : ClinicDomainHelpers.Clone(updatedAppt),
+                 null));
+        }
+    }
+
+    public Task<(PatientVisitDto? Visit, AppointmentQueueItemDto? UpdatedAppointment, string? Error)> EnsureVisitForAppointmentAsync(
+        Guid appointmentId,
+        string? actor = null,
+        CancellationToken ct = default)
+    {
+        var claims = CurrentClaims;
+        lock (_sync)
+        {
+            if (!_appointments.TryGetValue(appointmentId, out var appt) || !claims.CanAccessBranch(appt.BranchId))
+            {
+                return Task.FromResult<(PatientVisitDto?, AppointmentQueueItemDto?, string?)>(
+                    (null, null, "Appointment not found."));
+            }
+
+            if (!_patients.ContainsKey(appt.PatientId))
+            {
+                return Task.FromResult<(PatientVisitDto?, AppointmentQueueItemDto?, string?)>(
+                    (null, null, "Patient not found."));
+            }
+
+            var effectiveActor = string.IsNullOrWhiteSpace(actor) ? claims.UserId : actor.Trim();
+            var (visit, apptModified) = EnsureVisitForAppointmentLocked(appt, effectiveActor, DateTimeOffset.UtcNow);
+            return Task.FromResult<(PatientVisitDto?, AppointmentQueueItemDto?, string?)>(
+                (ClinicDomainHelpers.Clone(visit),
+                 apptModified ? ClinicDomainHelpers.Clone(appt) : null,
+                 null));
+        }
+    }
+
+    public Task<(PatientVisitDto? Visit, string? Error)> UpdatePatientVisitAsync(
+        Guid visitId,
+        UpdatePatientVisitRequest request,
+        CancellationToken ct = default)
+    {
+        var claims = CurrentClaims;
+        lock (_sync)
+        {
+            if (!_visits.TryGetValue(visitId, out var visit))
+            {
+                return Task.FromResult<(PatientVisitDto?, string?)>((null, "Visit record not found."));
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            var actor = string.IsNullOrWhiteSpace(request.UpdatedBy) ? claims.UserId : request.UpdatedBy.Trim();
+            var oldSummary = $"Visit #{visit.VisitNumber} ({visit.VisitDate:yyyy-MM-dd}) | {visit.DoctorName} | A:{visit.Assessment}";
+
+            if (!string.IsNullOrWhiteSpace(request.BranchId))
+            {
+                visit.BranchId = ClinicDomainHelpers.NormalizeBranch(request.BranchId, visit.BranchId);
+            }
+
+            var dentist = ResolveDentist(request.DentistId, request.DoctorName);
+            if (request.DentistId.HasValue)
+            {
+                visit.DentistId = request.DentistId;
+            }
+            else if (dentist is not null && !string.IsNullOrWhiteSpace(request.DoctorName))
+            {
+                visit.DentistId = dentist.Id;
+            }
+
+            if (!string.IsNullOrWhiteSpace(request.DoctorName))
+            {
+                visit.DoctorName = request.DoctorName.Trim();
+            }
+            else if (dentist is not null)
+            {
+                visit.DoctorName = dentist.FullName;
+            }
+
+            if (request.VisitDate.HasValue && request.VisitDate.Value != default)
+            {
+                visit.VisitDate = request.VisitDate.Value;
+            }
+
+            visit.Subjective = request.Subjective?.Trim() ?? string.Empty;
+            visit.Objective = request.Objective?.Trim() ?? string.Empty;
+            visit.Assessment = request.Assessment?.Trim() ?? string.Empty;
+            visit.Plan = request.Plan?.Trim() ?? string.Empty;
+            visit.AnesthesiaUsed = request.AnesthesiaUsed?.Trim() ?? string.Empty;
+            visit.ToothShade = request.ToothShade?.Trim() ?? string.Empty;
+            visit.PostOpInstructions = request.PostOpInstructions?.Trim() ?? string.Empty;
+            visit.LastUpdatedBy = actor;
+            visit.UpdatedAt = now;
+
+            RefreshPatientVisitStatsLocked(visit.PatientId);
+
+            var newSummary = $"Visit #{visit.VisitNumber} ({visit.VisitDate:yyyy-MM-dd}) | {visit.DoctorName} | A:{visit.Assessment}";
+            AppendAudit(
+                visit.BranchId,
+                actor,
+                "PATIENT_VISIT_UPDATED",
+                "PatientVisit",
+                visit.Id.ToString(),
+                oldSummary,
+                newSummary);
+
+            return Task.FromResult<(PatientVisitDto?, string?)>((ClinicDomainHelpers.Clone(visit), null));
+        }
+    }
+
+    public Task<IReadOnlyList<OdontogramToothDto>> GetVisitOdontogramAsync(Guid visitId, CancellationToken ct = default)
+    {
+        lock (_sync)
+        {
+            if (!_visits.TryGetValue(visitId, out var visit))
+            {
+                return Task.FromResult<IReadOnlyList<OdontogramToothDto>>(Array.Empty<OdontogramToothDto>());
+            }
+
+            return Task.FromResult<IReadOnlyList<OdontogramToothDto>>(
+                visit.Odontogram.Select(ClinicDomainHelpers.Clone).ToList());
+        }
+    }
+
+    public Task<(OdontogramToothDto? Tooth, InvoiceDto? UpdatedInvoice, string? Error)> UpdateVisitOdontogramAsync(
+        Guid visitId,
+        UpdateOdontogramRequest request,
+        CancellationToken ct = default)
+    {
+        var claims = CurrentClaims;
+        lock (_sync)
+        {
+            if (!_visits.TryGetValue(visitId, out var visit))
+            {
+                return Task.FromResult<(OdontogramToothDto?, InvoiceDto?, string?)>(
+                    (null, null, "Visit record not found."));
+            }
+
+            return Task.FromResult(UpdateVisitOdontogramLocked(visit, request, claims));
+        }
+    }
+
+    public Task<(PatientVisitDto? Visit, string? Error)> ResetVisitOdontogramAsync(
+        Guid visitId,
+        ResetVisitOdontogramRequest request,
+        CancellationToken ct = default)
+    {
+        var claims = CurrentClaims;
+        lock (_sync)
+        {
+            if (!_visits.TryGetValue(visitId, out var visit))
+            {
+                return Task.FromResult<(PatientVisitDto?, string?)>((null, "Visit record not found."));
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            var actor = string.IsNullOrWhiteSpace(request.UpdatedBy) ? claims.UserId : request.UpdatedBy.Trim();
+            int prevCharted = visit.ChartedTeethCount;
+
+            if (request.Mode == OdontogramInitMode.CarryForward)
+            {
+                var priorVisit = _visits.Values
+                    .Where(v => v.PatientId == visit.PatientId && v.Id != visit.Id && v.VisitDate <= visit.VisitDate)
+                    .OrderByDescending(v => v.VisitDate)
+                    .ThenByDescending(v => v.VisitNumber)
+                    .FirstOrDefault();
+
+                visit.Odontogram = OdontogramHelper.BuildCarryForwardOdontogram(
+                    visit.PatientId,
+                    visit.Id,
+                    priorVisit?.Odontogram,
+                    now);
+            }
+            else
+            {
+                visit.Odontogram = OdontogramHelper.BuildBlankOdontogram(visit.PatientId, visit.Id, now);
+            }
+
+            visit.LastUpdatedBy = actor;
+            visit.UpdatedAt = now;
+
+            AppendAudit(
+                visit.BranchId,
+                actor,
+                "VISIT_ODONTOGRAM_RESET",
+                "PatientVisit",
+                visit.Id.ToString(),
+                $"ChartedTeeth={prevCharted}",
+                $"Mode={request.Mode}; ChartedTeeth={visit.ChartedTeethCount}");
+
+            return Task.FromResult<(PatientVisitDto?, string?)>((ClinicDomainHelpers.Clone(visit), null));
+        }
+    }
+
+    private (PatientVisitDto Visit, AppointmentQueueItemDto? UpdatedAppointment) CreatePatientVisitLocked(
+        PatientDto patient,
+        CreatePatientVisitRequest request,
+        RequestClaimsContext claims)
+    {
+        var now = DateTimeOffset.UtcNow;
+        var visitId = Guid.NewGuid();
+        var branch = ClinicDomainHelpers.NormalizeBranch(request.BranchId, patient.PrimaryBranchId);
+        var dentist = ResolveDentist(request.DentistId, request.DoctorName);
+        var doctorName = !string.IsNullOrWhiteSpace(request.DoctorName)
+            ? request.DoctorName.Trim()
+            : (dentist?.FullName ?? "Dr. Aina Rahman");
+        var actor = !string.IsNullOrWhiteSpace(request.CreatedBy)
+            ? request.CreatedBy.Trim()
+            : claims.UserId;
+        var visitDate = request.VisitDate ?? now;
+
+        var existingPatientVisits = _visits.Values
+            .Where(v => v.PatientId == patient.Id)
+            .OrderByDescending(v => v.VisitDate)
+            .ThenByDescending(v => v.VisitNumber)
+            .ToList();
+
+        int nextNumber = existingPatientVisits.Count == 0
+            ? 1
+            : existingPatientVisits.Max(v => v.VisitNumber) + 1;
+
+        var priorVisit = existingPatientVisits
+            .FirstOrDefault(v => v.VisitDate <= visitDate)
+            ?? existingPatientVisits.FirstOrDefault();
+
+        var chart = request.InitMode == OdontogramInitMode.Blank
+            ? OdontogramHelper.BuildBlankOdontogram(patient.Id, visitId, now)
+            : OdontogramHelper.BuildCarryForwardOdontogram(patient.Id, visitId, priorVisit?.Odontogram, now);
+
+        AppointmentQueueItemDto? updatedAppt = null;
+        if (request.AppointmentId.HasValue && _appointments.TryGetValue(request.AppointmentId.Value, out var appt))
+        {
+            appt.VisitId = visitId;
+            updatedAppt = appt;
+        }
+
+        var existingInvoice = request.AppointmentId.HasValue
+            ? _invoices.Values.FirstOrDefault(i => i.AppointmentId == request.AppointmentId.Value && !i.IsVoided)
+            : null;
+        if (existingInvoice is not null)
+        {
+            existingInvoice.VisitId = visitId;
+        }
+
+        var visit = new PatientVisitDto
+        {
+            Id = visitId,
+            PatientId = patient.Id,
+            PatientName = patient.FullName,
+            PatientIc = patient.IcNumber,
+            AppointmentId = request.AppointmentId,
+            InvoiceId = existingInvoice?.Id,
+            BranchId = branch,
+            DentistId = request.DentistId ?? dentist?.Id,
+            DoctorName = doctorName,
+            VisitNumber = nextNumber,
+            VisitDate = visitDate,
+            Subjective = request.Subjective?.Trim() ?? string.Empty,
+            Objective = request.Objective?.Trim() ?? string.Empty,
+            Assessment = request.Assessment?.Trim() ?? string.Empty,
+            Plan = request.Plan?.Trim() ?? string.Empty,
+            AnesthesiaUsed = request.AnesthesiaUsed?.Trim() ?? string.Empty,
+            ToothShade = request.ToothShade?.Trim() ?? string.Empty,
+            PostOpInstructions = request.PostOpInstructions?.Trim() ?? string.Empty,
+            CreatedBy = actor,
+            LastUpdatedBy = actor,
+            CreatedAt = now,
+            UpdatedAt = now,
+            Odontogram = chart
+        };
+
+        _visits[visit.Id] = visit;
+        RefreshPatientVisitStatsLocked(patient.Id);
+
+        AppendAudit(
+            branch,
+            actor,
+            "PATIENT_VISIT_CREATED",
+            "PatientVisit",
+            visit.Id.ToString(),
+            null,
+            $"{patient.FullName} | Visit #{visit.VisitNumber} | {visit.DoctorName} | Init={request.InitMode}");
+
+        return (visit, updatedAppt);
+    }
+
+    private (PatientVisitDto Visit, bool AppointmentModified) EnsureVisitForAppointmentLocked(
+        AppointmentQueueItemDto appt,
+        string actor,
+        DateTimeOffset now)
+    {
+        if (appt.VisitId.HasValue && _visits.TryGetValue(appt.VisitId.Value, out var byVisitId))
+        {
+            return (byVisitId, false);
+        }
+
+        var byAppt = _visits.Values.FirstOrDefault(v => v.AppointmentId == appt.Id);
+        if (byAppt is not null)
+        {
+            appt.VisitId = byAppt.Id;
+            return (byAppt, true);
+        }
+
+        var patient = _patients[appt.PatientId];
+        var (created, _) = CreatePatientVisitLocked(
+            patient,
+            new CreatePatientVisitRequest
+            {
+                BranchId = appt.BranchId,
+                AppointmentId = appt.Id,
+                DentistId = appt.DentistId,
+                DoctorName = appt.DoctorName,
+                VisitDate = appt.SeatedAt ?? now,
+                InitMode = OdontogramInitMode.CarryForward,
+                Subjective = appt.Notes ?? string.Empty,
+                Plan = appt.ProcedureSummary ?? string.Empty,
+                CreatedBy = actor
+            },
+            new RequestClaimsContext { UserId = actor });
+
+        appt.VisitId = created.Id;
+        return (created, true);
+    }
+
+    private (OdontogramToothDto? Tooth, InvoiceDto? UpdatedInvoice, string? Error) UpdateVisitOdontogramLocked(
+        PatientVisitDto visit,
+        UpdateOdontogramRequest request,
+        RequestClaimsContext claims)
+    {
+        if (!_patients.TryGetValue(visit.PatientId, out var patient))
+        {
+            return (null, null, "Patient not found.");
+        }
+
+        if (!ClinicDomainHelpers.IsValidFdiTooth(request.ToothNumber))
+        {
+            return (null, null, $"Invalid FDI tooth number '{request.ToothNumber}'. Expected 11-48 or 51-85.");
+        }
+
+        if (request.Fee < 0m)
+        {
+            return (null, null, "Procedure fee cannot be negative.");
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var actor = string.IsNullOrWhiteSpace(request.UpdatedBy) ? claims.UserId : request.UpdatedBy.Trim();
+        var surfaces = OdontogramHelper.NormalizeSurfaces(request.Surfaces);
+
+        var tooth = visit.Odontogram.FirstOrDefault(t => t.ToothNumber == request.ToothNumber);
+        string oldSummary = tooth is null
+            ? "Healthy"
+            : $"{tooth.Condition}({tooth.Surfaces}) | {tooth.ProcedureName} | {tooth.Stage} | RM{tooth.Fee:F2}";
+
+        if (tooth is null)
+        {
+            tooth = new OdontogramToothDto
+            {
+                Id = Guid.NewGuid(),
+                VisitId = visit.Id,
+                PatientId = visit.PatientId,
+                ToothNumber = request.ToothNumber
+            };
+            visit.Odontogram.Add(tooth);
+        }
+        else if (tooth.Id == Guid.Empty)
+        {
+            tooth.Id = Guid.NewGuid();
+        }
+
+        tooth.VisitId = visit.Id;
+        tooth.Condition = request.Condition;
+        tooth.Surfaces = surfaces;
+        tooth.ProcedureName = request.ProcedureName?.Trim() ?? string.Empty;
+        tooth.Fee = BillingCalculator.Round2(request.Fee);
+        tooth.Stage = request.Stage;
+        tooth.DoctorName = string.IsNullOrWhiteSpace(request.DoctorName)
+            ? (string.IsNullOrWhiteSpace(visit.DoctorName) ? "Dr. Aina Rahman" : visit.DoctorName)
+            : request.DoctorName.Trim();
+        tooth.UpdatedAt = now;
+
+        visit.LastUpdatedBy = actor;
+        visit.UpdatedAt = now;
+
+        var branchId = ClinicDomainHelpers.NormalizeBranch(request.BranchId, visit.BranchId);
+        InvoiceDto? updatedInvoice = null;
+
+        // Visit-scoped billing sync: protect settled historical invoices while syncing draft visit invoices.
+        var linkedVisitInvoice = _invoices.Values
+            .Where(i => !i.IsVoided && (
+                i.VisitId == visit.Id
+                || (visit.InvoiceId.HasValue && i.Id == visit.InvoiceId.Value)
+                || (visit.AppointmentId.HasValue && i.AppointmentId == visit.AppointmentId.Value)))
+            .OrderByDescending(i => i.CreatedAt)
+            .FirstOrDefault();
+
+        bool isSettledHistoricalInvoice = linkedVisitInvoice is not null && linkedVisitInvoice.Payments.Count > 0;
+
+        if (!isSettledHistoricalInvoice
+            && request.Stage == TreatmentStage.Completed
+            && !string.IsNullOrWhiteSpace(tooth.ProcedureName)
+            && (tooth.Fee > 0m || linkedVisitInvoice is not null))
+        {
+            var draftInvoice = linkedVisitInvoice;
+            if (draftInvoice is null)
+            {
+                draftInvoice = new InvoiceDto
+                {
+                    Id = Guid.NewGuid(),
+                    InvoiceNumber = NextInvoiceNumber(branchId),
+                    BranchId = branchId,
+                    PatientId = visit.PatientId,
+                    PatientName = patient.FullName,
+                    DoctorName = tooth.DoctorName,
+                    AppointmentId = visit.AppointmentId,
+                    VisitId = visit.Id,
+                    CreatedAt = now
+                };
+                _invoices[draftInvoice.Id] = draftInvoice;
+            }
+            else
+            {
+                draftInvoice.VisitId ??= visit.Id;
+            }
+
+            visit.InvoiceId = draftInvoice.Id;
+
+            var normalizedReq = new UpdateOdontogramRequest
+            {
+                ToothNumber = request.ToothNumber,
+                Condition = request.Condition,
+                Surfaces = surfaces,
+                ProcedureName = tooth.ProcedureName,
+                Fee = tooth.Fee,
+                Stage = request.Stage,
+                DoctorName = tooth.DoctorName,
+                BranchId = branchId
+            };
+            var label = ClinicDomainHelpers.BuildCompletedToothProcedureLabel(normalizedReq);
+            var existingLine = draftInvoice.Lines.FirstOrDefault(l =>
+                l.ToothNumber == request.ToothNumber && l.SourceStage == TreatmentStage.Completed);
+
+            if (existingLine is not null)
+            {
+                existingLine.ProcedureName = label;
+                existingLine.UnitPrice = tooth.Fee;
+                existingLine.Quantity = 1;
+                existingLine.LineTotal = BillingCalculator.ComputeLineTotal(tooth.Fee, 1);
+            }
+            else
+            {
+                draftInvoice.Lines.Add(new InvoiceLineDto
+                {
+                    Id = Guid.NewGuid(),
+                    ToothNumber = request.ToothNumber,
+                    ProcedureName = label,
+                    UnitPrice = tooth.Fee,
+                    Quantity = 1,
+                    LineTotal = BillingCalculator.ComputeLineTotal(tooth.Fee, 1),
+                    SourceStage = TreatmentStage.Completed
+                });
+            }
+
+            BillingCalculator.RecalculateInvoice(draftInvoice, _clinicOptions.CommissionRate);
+            updatedInvoice = ClinicDomainHelpers.Clone(draftInvoice);
+        }
+
+        AppendAudit(
+            branchId,
+            actor,
+            "VISIT_ODONTOGRAM_UPDATED",
+            "VisitOdontogramTooth",
+            $"{visit.Id}:{request.ToothNumber}",
+            oldSummary,
+            $"{tooth.Condition}({tooth.Surfaces}) | {tooth.ProcedureName} | {tooth.Stage} | RM{tooth.Fee:F2}");
+
+        return (ClinicDomainHelpers.Clone(tooth), updatedInvoice, null);
+    }
+
+    private void RefreshPatientVisitStatsLocked(Guid patientId)
+    {
+        if (!_patients.TryGetValue(patientId, out var patient))
+        {
+            return;
+        }
+
+        var patientVisits = _visits.Values.Where(v => v.PatientId == patientId).ToList();
+        patient.VisitCount = patientVisits.Count;
+        patient.LastVisitAt = patientVisits.Count == 0
+            ? null
+            : patientVisits.Max(v => v.VisitDate);
+    }
+
     public Task<IReadOnlyList<OdontogramToothDto>> GetOdontogramAsync(Guid patientId, CancellationToken ct = default)
     {
         lock (_sync)
@@ -731,31 +1304,20 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
                 return Task.FromResult<IReadOnlyList<OdontogramToothDto>>(Array.Empty<OdontogramToothDto>());
             }
 
-            var result = new List<OdontogramToothDto>(ClinicDomainHelpers.AllFdiTeeth.Length);
-            foreach (var toothNum in ClinicDomainHelpers.AllFdiTeeth)
+            var latestVisit = _visits.Values
+                .Where(v => v.PatientId == patientId)
+                .OrderByDescending(v => v.VisitDate)
+                .ThenByDescending(v => v.VisitNumber)
+                .FirstOrDefault();
+
+            if (latestVisit is not null)
             {
-                if (_odontogram.TryGetValue((patientId, toothNum), out var existing))
-                {
-                    result.Add(ClinicDomainHelpers.Clone(existing));
-                }
-                else
-                {
-                    result.Add(new OdontogramToothDto
-                    {
-                        Id = Guid.Empty,
-                        PatientId = patientId,
-                        ToothNumber = toothNum,
-                        Condition = ToothCondition.Healthy,
-                        ProcedureName = string.Empty,
-                        Fee = 0m,
-                        Stage = TreatmentStage.Proposed,
-                        DoctorName = string.Empty,
-                        UpdatedAt = DateTimeOffset.UtcNow
-                    });
-                }
+                return Task.FromResult<IReadOnlyList<OdontogramToothDto>>(
+                    latestVisit.Odontogram.Select(ClinicDomainHelpers.Clone).ToList());
             }
 
-            return Task.FromResult<IReadOnlyList<OdontogramToothDto>>(result);
+            return Task.FromResult<IReadOnlyList<OdontogramToothDto>>(
+                OdontogramHelper.BuildBlankOdontogram(patientId, Guid.Empty, DateTimeOffset.UtcNow));
         }
     }
 
@@ -772,119 +1334,26 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
                 return Task.FromResult<(OdontogramToothDto?, InvoiceDto?, string?)>((null, null, "Patient not found."));
             }
 
-            if (!ClinicDomainHelpers.IsValidFdiTooth(request.ToothNumber))
+            var targetVisit = _visits.Values
+                .Where(v => v.PatientId == patientId)
+                .OrderByDescending(v => v.VisitDate)
+                .ThenByDescending(v => v.VisitNumber)
+                .FirstOrDefault();
+
+            if (targetVisit is null)
             {
-                return Task.FromResult<(OdontogramToothDto?, InvoiceDto?, string?)>(
-                    (null, null, $"Invalid FDI tooth number '{request.ToothNumber}'. Expected 11-18, 21-28, 31-38, or 41-48."));
-            }
-
-            if (request.Fee < 0m)
-            {
-                return Task.FromResult<(OdontogramToothDto?, InvoiceDto?, string?)>(
-                    (null, null, "Procedure fee cannot be negative."));
-            }
-
-            var key = (patientId, request.ToothNumber);
-            var hasExisting = _odontogram.TryGetValue(key, out var tooth);
-            var previousStage = hasExisting ? tooth!.Stage : TreatmentStage.Proposed;
-
-            if (!hasExisting || tooth is null)
-            {
-                tooth = new OdontogramToothDto
-                {
-                    Id = Guid.NewGuid(),
-                    PatientId = patientId,
-                    ToothNumber = request.ToothNumber
-                };
-                _odontogram[key] = tooth;
-            }
-
-            tooth.Condition = request.Condition;
-            tooth.ProcedureName = request.ProcedureName?.Trim() ?? string.Empty;
-            tooth.Fee = BillingCalculator.Round2(request.Fee);
-            tooth.Stage = request.Stage;
-            tooth.DoctorName = string.IsNullOrWhiteSpace(request.DoctorName) ? "Dr. Aina Rahman" : request.DoctorName.Trim();
-            tooth.UpdatedAt = DateTimeOffset.UtcNow;
-
-            var branchId = ClinicDomainHelpers.NormalizeBranch(request.BranchId, patient.PrimaryBranchId);
-            InvoiceDto? updatedInvoice = null;
-
-            // CRITICAL INVARIANT: Transitioning a tooth treatment stage to Completed
-            // automatically adds/updates the procedure line item on an active draft invoice.
-            if (request.Stage == TreatmentStage.Completed)
-            {
-                var draftInvoice = _invoices.Values
-                    .Where(i => i.PatientId == patientId
-                             && string.Equals(i.BranchId, branchId, StringComparison.OrdinalIgnoreCase)
-                             && !i.IsVoided
-                             && i.Payments.Count == 0)
-                    .OrderByDescending(i => i.CreatedAt)
-                    .FirstOrDefault();
-
-                if (draftInvoice is null)
-                {
-                    var linkedAppointment = _appointments.Values
-                        .Where(a => a.PatientId == patientId
-                                 && string.Equals(a.BranchId, branchId, StringComparison.OrdinalIgnoreCase)
-                                 && a.Status != QueueStatus.Completed
-                                 && a.Status != QueueStatus.Cancelled)
-                        .OrderByDescending(a => a.ScheduledAt)
-                        .FirstOrDefault();
-
-                    draftInvoice = new InvoiceDto
+                (targetVisit, _) = CreatePatientVisitLocked(
+                    patient,
+                    new CreatePatientVisitRequest
                     {
-                        Id = Guid.NewGuid(),
-                        InvoiceNumber = NextInvoiceNumber(branchId),
-                        BranchId = branchId,
-                        PatientId = patientId,
-                        PatientName = patient.FullName,
-                        DoctorName = tooth.DoctorName,
-                        AppointmentId = linkedAppointment?.Id,
-                        CreatedAt = DateTimeOffset.UtcNow
-                    };
-                    _invoices[draftInvoice.Id] = draftInvoice;
-                }
-
-                var label = ClinicDomainHelpers.BuildCompletedToothProcedureLabel(request);
-                var existingLine = draftInvoice.Lines.FirstOrDefault(l =>
-                    l.ToothNumber == request.ToothNumber && l.SourceStage == TreatmentStage.Completed);
-
-                if (existingLine is not null)
-                {
-                    existingLine.ProcedureName = label;
-                    existingLine.UnitPrice = tooth.Fee;
-                    existingLine.Quantity = 1;
-                    existingLine.LineTotal = BillingCalculator.ComputeLineTotal(tooth.Fee, 1);
-                }
-                else
-                {
-                    draftInvoice.Lines.Add(new InvoiceLineDto
-                    {
-                        Id = Guid.NewGuid(),
-                        ToothNumber = request.ToothNumber,
-                        ProcedureName = label,
-                        UnitPrice = tooth.Fee,
-                        Quantity = 1,
-                        LineTotal = BillingCalculator.ComputeLineTotal(tooth.Fee, 1),
-                        SourceStage = TreatmentStage.Completed
-                    });
-                }
-
-                BillingCalculator.RecalculateInvoice(draftInvoice, _clinicOptions.CommissionRate);
-                updatedInvoice = ClinicDomainHelpers.Clone(draftInvoice);
+                        BranchId = ClinicDomainHelpers.NormalizeBranch(request.BranchId, patient.PrimaryBranchId),
+                        DoctorName = request.DoctorName,
+                        CreatedBy = request.UpdatedBy ?? claims.UserId
+                    },
+                    claims);
             }
 
-            AppendAudit(
-                branchId,
-                claims.UserId,
-                "ODONTOGRAM_UPDATED",
-                "OdontogramTooth",
-                $"{patientId}:{request.ToothNumber}",
-                previousStage.ToString(),
-                $"{tooth.Condition} | {tooth.ProcedureName} | {tooth.Stage} | RM{tooth.Fee:F2}");
-
-            return Task.FromResult<(OdontogramToothDto?, InvoiceDto?, string?)>(
-                (ClinicDomainHelpers.Clone(tooth), updatedInvoice, null));
+            return Task.FromResult(UpdateVisitOdontogramLocked(targetVisit, request, claims));
         }
     }
 
@@ -892,15 +1361,27 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
     {
         lock (_sync)
         {
-            if (!_soapNotes.TryGetValue(patientId, out var list))
-            {
-                return Task.FromResult<IReadOnlyList<SoapNoteDto>>(Array.Empty<SoapNoteDto>());
-            }
+            var notes = _visits.Values
+                .Where(v => v.PatientId == patientId)
+                .OrderByDescending(v => v.VisitDate)
+                .Select(v => new SoapNoteDto
+                {
+                    Id = v.Id,
+                    PatientId = v.PatientId,
+                    BranchId = v.BranchId,
+                    DoctorName = v.DoctorName,
+                    VisitDate = v.VisitDate,
+                    Subjective = v.Subjective,
+                    Objective = v.Objective,
+                    Assessment = v.Assessment,
+                    Plan = v.Plan,
+                    AnesthesiaUsed = v.AnesthesiaUsed,
+                    ToothShade = v.ToothShade,
+                    PostOpInstructions = v.PostOpInstructions
+                })
+                .ToList();
 
-            return Task.FromResult<IReadOnlyList<SoapNoteDto>>(
-                list.OrderByDescending(n => n.VisitDate)
-                    .Select(ClinicDomainHelpers.Clone)
-                    .ToList());
+            return Task.FromResult<IReadOnlyList<SoapNoteDto>>(notes);
         }
     }
 
@@ -914,41 +1395,39 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
                 return Task.FromResult<SoapNoteDto?>(null);
             }
 
-            var branch = ClinicDomainHelpers.NormalizeBranch(request.BranchId, patient.PrimaryBranchId);
-            var note = new SoapNoteDto
+            var (visit, _) = CreatePatientVisitLocked(
+                patient,
+                new CreatePatientVisitRequest
+                {
+                    BranchId = request.BranchId,
+                    DoctorName = request.DoctorName,
+                    VisitDate = request.VisitDate,
+                    Subjective = request.Subjective,
+                    Objective = request.Objective,
+                    Assessment = request.Assessment,
+                    Plan = request.Plan,
+                    AnesthesiaUsed = request.AnesthesiaUsed,
+                    ToothShade = request.ToothShade,
+                    PostOpInstructions = request.PostOpInstructions,
+                    CreatedBy = claims.UserId
+                },
+                claims);
+
+            return Task.FromResult<SoapNoteDto?>(new SoapNoteDto
             {
-                Id = Guid.NewGuid(),
-                PatientId = patientId,
-                BranchId = branch,
-                DoctorName = string.IsNullOrWhiteSpace(request.DoctorName) ? "Dr. Aina Rahman" : request.DoctorName.Trim(),
-                VisitDate = request.VisitDate ?? DateTimeOffset.UtcNow,
-                Subjective = request.Subjective?.Trim() ?? string.Empty,
-                Objective = request.Objective?.Trim() ?? string.Empty,
-                Assessment = request.Assessment?.Trim() ?? string.Empty,
-                Plan = request.Plan?.Trim() ?? string.Empty,
-                AnesthesiaUsed = request.AnesthesiaUsed?.Trim() ?? string.Empty,
-                ToothShade = request.ToothShade?.Trim() ?? string.Empty,
-                PostOpInstructions = request.PostOpInstructions?.Trim() ?? string.Empty
-            };
-
-            if (!_soapNotes.TryGetValue(patientId, out var list))
-            {
-                list = new List<SoapNoteDto>();
-                _soapNotes[patientId] = list;
-            }
-
-            list.Add(note);
-
-            AppendAudit(
-                branch,
-                claims.UserId,
-                "SOAP_NOTE_CREATED",
-                "SoapNote",
-                note.Id.ToString(),
-                null,
-                $"{patient.FullName} | {note.Assessment}");
-
-            return Task.FromResult<SoapNoteDto?>(ClinicDomainHelpers.Clone(note));
+                Id = visit.Id,
+                PatientId = visit.PatientId,
+                BranchId = visit.BranchId,
+                DoctorName = visit.DoctorName,
+                VisitDate = visit.VisitDate,
+                Subjective = visit.Subjective,
+                Objective = visit.Objective,
+                Assessment = visit.Assessment,
+                Plan = visit.Plan,
+                AnesthesiaUsed = visit.AnesthesiaUsed,
+                ToothShade = visit.ToothShade,
+                PostOpInstructions = visit.PostOpInstructions
+            });
         }
     }
 
@@ -1837,6 +2316,109 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
         BillingCalculator.RecalculateInvoice(inv5, _clinicOptions.CommissionRate);
         _invoices[inv5.Id] = inv5;
 
+        // 6b. Seed First-Class Patient Visit Records (0..N per patient) with Independent Per-Visit Odontograms
+        // Patient p1 (Nurul Aisyah): 3 chronological visits demonstrating multi-visit odontogram carry-forward
+        var v1P1 = SeedVisit(
+            "70000000-0000-0000-0000-000000000001", p1, "HQ-KL", d1, visitNumber: 1, visitDate: now.AddDays(-14),
+            appointment: null, invoice: null, priorVisit: null,
+            subjective: "Routine 6-monthly scaling & checkup; mild cold sensitivity upper right & left.",
+            objective: "Supragingival calculus lower anteriors. Caries noted on #16 (DO) and #26 (MOD). #38 previously extracted.",
+            assessment: "Mild gingivitis; #16 & #26 dentinal caries.",
+            plan: "Full mouth scaling & polishing today; #16 & #26 composite restorations planned.",
+            anesthesia: "None", shade: "A2", postOp: "Avoid staining beverages for 24 hours.");
+        SeedVisitTooth(v1P1, 38, ToothCondition.Missing, "", "", 0m, TreatmentStage.Proposed, d1.FullName, now.AddDays(-14));
+        SeedVisitTooth(v1P1, 16, ToothCondition.Caries, "DO", "Posterior Composite Filling", 220m, TreatmentStage.Accepted, d1.FullName, now.AddDays(-14));
+        SeedVisitTooth(v1P1, 26, ToothCondition.Caries, "MOD", "Posterior Composite Filling", 200m, TreatmentStage.Proposed, d1.FullName, now.AddDays(-14));
+        SeedVisitTooth(v1P1, 46, ToothCondition.Crown, "MODBL", "Zirconia Crown Prep", 1200m, TreatmentStage.Proposed, d1.FullName, now.AddDays(-14));
+
+        var v2P1 = SeedVisit(
+            "70000000-0000-0000-0000-000000000002", p1, "HQ-KL", d1, visitNumber: 2, visitDate: now.AddHours(-2),
+            appointment: a12, invoice: inv2, priorVisit: v1P1,
+            subjective: "Returns for #16 DO composite restoration. Allergies checked (Penicillin).",
+            objective: "Deep distal-occlusal caries #16; vitality positive.",
+            assessment: "Dentinal caries #16 without pulpal exposure.",
+            plan: "LA 2% Lidocaine infiltration, excavation, composite Shade A2, occlusion adjusted. #26 accepted for next visit.",
+            anesthesia: "2% Lidocaine w/ 1:80k Adrenaline (1.8ml)", shade: "A2", postOp: "Avoid chewing on right side until numbness wears off.");
+        SeedVisitTooth(v2P1, 16, ToothCondition.Filling, "DO", "Posterior Composite Filling (DO)", 220m, TreatmentStage.Completed, d1.FullName, now.AddHours(-2));
+        SeedVisitTooth(v2P1, 26, ToothCondition.Caries, "MOD", "Posterior Composite Filling", 200m, TreatmentStage.Accepted, d1.FullName, now.AddHours(-2));
+
+        // Visit #3 (Today InChair linked to a1): #16 automatically carried forward as baseline Filling (DO, RM 0), #26 ready as Accepted!
+        _ = SeedVisit(
+            "70000000-0000-0000-0000-000000000003", p1, "HQ-KL", d1, visitNumber: 3, visitDate: now.AddMinutes(-18),
+            appointment: a1, invoice: null, priorVisit: v2P1,
+            subjective: "Seated in Suite 1 for #26 MOD composite restoration.",
+            objective: "Occlusal-mesial-distal caries #26 isolated under rubber dam.",
+            assessment: "Dentinal caries #26.",
+            plan: "Proceed with #26 MOD composite restoration.",
+            anesthesia: "4% Articaine 1:100k", shade: "A2", postOp: "");
+
+        // Single-visit patients (1 visit each)
+        var v1P2 = SeedVisit(
+            "70000000-0000-0000-0000-000000000004", p2, "HQ-KL", d2, visitNumber: 1, visitDate: now.AddDays(-20),
+            appointment: null, invoice: null, priorVisit: null,
+            subjective: "Routine review; Type 2 DM controlled on Metformin.",
+            objective: "#11 mesial incisal chip; deep caries #36 approximating pulp.",
+            assessment: "Enamel-dentin fracture #11; symptomatic pulpitis #36.",
+            plan: "Direct composite build-up #11 Shade A1 completed; #36 Root Canal Stage 1 accepted.",
+            anesthesia: "None", shade: "A1", postOp: "Avoid biting hard nuts/ice with front teeth.");
+        SeedVisitTooth(v1P2, 11, ToothCondition.Filling, "MO", "Mesial Composite Restoration", 180m, TreatmentStage.Completed, d2.FullName, now.AddDays(-20));
+        SeedVisitTooth(v1P2, 36, ToothCondition.RootCanal, "O", "Root Canal Therapy (Stage 1)", 450m, TreatmentStage.Accepted, d2.FullName, now.AddDays(-20));
+
+        var v1P4 = SeedVisit(
+            "70000000-0000-0000-0000-000000000005", p4, "HQ-KL", d2, visitNumber: 1, visitDate: now.AddDays(-3),
+            appointment: null, invoice: null, priorVisit: null,
+            subjective: "Loose molar #47, currently taking Warfarin.",
+            objective: "Grade II mobility #47; INR report requested prior to extraction.",
+            assessment: "Periodontally hopeless #47 on anticoagulant therapy.",
+            plan: "Defer extraction until INR <= 2.5 verified; advise physician letter.",
+            anesthesia: "N/A", shade: "N/A", postOp: "Continue prescribed Warfarin; do not stop without physician advice.");
+        SeedVisitTooth(v1P4, 47, ToothCondition.ExtractionNeeded, "", "Simple Extraction (Post-INR Check)", 180m, TreatmentStage.Proposed, d2.FullName, now.AddDays(-3));
+
+        var v1P5 = SeedVisit(
+            "70000000-0000-0000-0000-000000000006", p5, "HQ-KL", d3, visitNumber: 1, visitDate: now.AddMinutes(-55),
+            appointment: a5, invoice: inv3, priorVisit: null,
+            subjective: "Upper right premolar sensitivity; Latex allergy noted.",
+            objective: "Distal-occlusal caries #14; nitrile gloves used strictly.",
+            assessment: "Dentinal caries #14.",
+            plan: "Composite restoration #14 completed; sent to front desk checkout.",
+            anesthesia: "2% Mepivacaine 1:100k", shade: "A2", postOp: "Avoid hard biting for 2 hours.");
+        SeedVisitTooth(v1P5, 14, ToothCondition.Filling, "DO", "Composite Filling", 200m, TreatmentStage.Completed, d3.FullName, now.AddMinutes(-30));
+
+        var v1P7 = SeedVisit(
+            "70000000-0000-0000-0000-000000000007", p7, "HQ-KL", d2, visitNumber: 1, visitDate: now.AddHours(-3),
+            appointment: a7, invoice: inv1, priorVisit: null,
+            subjective: "Presents for definitive crown cementation on lower left molar #37.",
+            objective: "Margins intact, proximal contacts & occlusion verified.",
+            assessment: "Endodontically treated #37 ready for definitive crown.",
+            plan: "PFM crown cemented on #37 with resin-modified GIC.",
+            anesthesia: "None", shade: "A3", postOp: "Avoid sticky foods on left side for 24 hours.");
+        SeedVisitTooth(v1P7, 37, ToothCondition.Crown, "MODBL", "PFM Crown Cementation", 950m, TreatmentStage.Completed, d2.FullName, now.AddHours(-2));
+
+        var v1P12 = SeedVisit(
+            "70000000-0000-0000-0000-000000000008", p12, "PJ-SS2", d2, visitNumber: 1, visitDate: now.AddMinutes(-12),
+            appointment: a13, invoice: null, priorVisit: null,
+            subjective: "Implant crown review on upper left central incisor #21.",
+            objective: "Peri-implant mucosa healthy, no bleeding on probing, screw torque stable.",
+            assessment: "Well-integrated #21 single dental implant.",
+            plan: "Implant crown occlusion & hygiene review.",
+            anesthesia: "None", shade: "A1", postOp: "Use superfloss daily around implant abutment.");
+        SeedVisitTooth(v1P12, 21, ToothCondition.Implant, "", "Single Implant Crown Review", 350m, TreatmentStage.Accepted, d2.FullName, now.AddMinutes(-10));
+
+        _ = SeedVisit(
+            "70000000-0000-0000-0000-000000000009", p16, "PJ-SS2", d2, visitNumber: 1, visitDate: now.AddHours(-2),
+            appointment: a17, invoice: inv5, priorVisit: null,
+            subjective: "Routine 6-monthly scaling at PJ SS2.",
+            objective: "Mild calculus lower linguals; dentition intact.",
+            assessment: "Healthy periodontium with mild localized plaque.",
+            plan: "Ultrasonic scaling & polishing completed.",
+            anesthesia: "None", shade: "A2", postOp: "Routine oral hygiene reinforced.");
+
+        // Refresh visit counts across all 16 patients (remaining 9 patients cleanly have VisitCount == 0)
+        foreach (var patId in _patients.Keys.ToList())
+        {
+            RefreshPatientVisitStatsLocked(patId);
+        }
+
         // 7. Seed WhatsApp threads (Routine AI-Booked Pending + Escalated Emergency + PJ-SS2 Inquiry)
         _whatsAppThreads["wa-601123409876"] = ("HQ-KL", new WhatsAppThreadDto
         {
@@ -1967,6 +2549,97 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
             IsMyKadVerified = isMyKadVerified,
             ConsentSignedAt = consentSignedAt
         };
+    }
+
+    private PatientVisitDto SeedVisit(
+        string id,
+        PatientDto patient,
+        string branchId,
+        DentistDto dentist,
+        int visitNumber,
+        DateTimeOffset visitDate,
+        AppointmentQueueItemDto? appointment,
+        InvoiceDto? invoice,
+        PatientVisitDto? priorVisit,
+        string subjective,
+        string objective,
+        string assessment,
+        string plan,
+        string anesthesia,
+        string shade,
+        string postOp)
+    {
+        var visitId = Guid.Parse(id);
+        var chart = OdontogramHelper.BuildCarryForwardOdontogram(
+            patient.Id,
+            visitId,
+            priorVisit?.Odontogram,
+            visitDate);
+
+        if (appointment is not null)
+        {
+            appointment.VisitId = visitId;
+        }
+
+        if (invoice is not null)
+        {
+            invoice.VisitId = visitId;
+        }
+
+        var visit = new PatientVisitDto
+        {
+            Id = visitId,
+            PatientId = patient.Id,
+            PatientName = patient.FullName,
+            PatientIc = patient.IcNumber,
+            AppointmentId = appointment?.Id,
+            InvoiceId = invoice?.Id,
+            BranchId = branchId,
+            DentistId = dentist.Id,
+            DoctorName = dentist.FullName,
+            VisitNumber = visitNumber,
+            VisitDate = visitDate,
+            Subjective = subjective,
+            Objective = objective,
+            Assessment = assessment,
+            Plan = plan,
+            AnesthesiaUsed = anesthesia,
+            ToothShade = shade,
+            PostOpInstructions = postOp,
+            CreatedBy = dentist.FullName,
+            LastUpdatedBy = dentist.FullName,
+            CreatedAt = visitDate,
+            UpdatedAt = visitDate,
+            Odontogram = chart
+        };
+
+        _visits[visitId] = visit;
+        return visit;
+    }
+
+    private static void SeedVisitTooth(
+        PatientVisitDto visit,
+        int toothNumber,
+        ToothCondition condition,
+        string surfaces,
+        string procedureName,
+        decimal fee,
+        TreatmentStage stage,
+        string doctorName,
+        DateTimeOffset updatedAt)
+    {
+        var existing = visit.Odontogram.FirstOrDefault(t => t.ToothNumber == toothNumber);
+        if (existing is not null)
+        {
+            existing.Id = existing.Id == Guid.Empty ? Guid.NewGuid() : existing.Id;
+            existing.Condition = condition;
+            existing.Surfaces = OdontogramHelper.NormalizeSurfaces(surfaces);
+            existing.ProcedureName = procedureName;
+            existing.Fee = fee;
+            existing.Stage = stage;
+            existing.DoctorName = doctorName;
+            existing.UpdatedAt = updatedAt;
+        }
     }
 
     private void SeedTooth(

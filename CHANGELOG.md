@@ -6,6 +6,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.4.0] - 2026-11-25
+### Added
+- First-class **Patient Visit Records (`0..N` visits per patient)** with **independent per-visit odontograms** aligned with Malaysia Dental Association (MDA / MDC) and KKM dental record-keeping requirements (`PatientVisitDto`, `CreatePatientVisitRequest`, `UpdatePatientVisitRequest`, `ResetVisitOdontogramRequest`, `VisitsController`, and `OcclusaApiClient` visit endpoints).
+- **Kreloses-Style Anatomical Tooth Outline + 5-Surface (`M`, `O/I`, `D`, `B`, `L`) Odontogram:** Native WPF vector `AnatomicalToothControl` and frozen GPU `ToothAnatomyCatalog` covering all **52 FDI teeth** — **Permanent (`11–48`)** and **Primary / Pediatric (`51–85`)** — with midline-aware occlusal cross charting (crown and root silhouettes adapted from `ZoliQua/React-Advanced-Odontogram`, MIT License).
+- Dedicated **`VisitRecordModal`** (`VisitRecordViewModel`) combining each visit's pinned `MedicalAlertsBanner`, anatomical 52-tooth odontogram, clickable 5-surface inspector, `0. Record Baseline (RM 0)` / Proposed / Accepted / Completed staging, `Reset to Blank` / `Re-Sync Prior Visit` actions, and 2x2 Clinical SOAP Notes workspace.
+- **Carry-Forward Odontogram Initialization (`OdontogramHelper`):** New visits carry forward baseline conditions and surfaces from the patient's most recent prior visit without double-billing completed procedures (`Fee = 0`, empty `ProcedureName`; completed `ExtractionNeeded` transitions to `Missing`; unfinished `Proposed`/`Accepted` items carry forward intact).
+- **Standalone Patient Registration (`+ Register Patient`):** Reception can register new patients with `0` visits directly in `PatientDetailModal` (`Create Mode`), while seating an appointment `InChair` in Live Queue automatically creates/links a `PatientVisit` record (`Scheduled`, `Waiting`, `AiBookedPending`, and `Cancelled` create `0` visits).
+- **Visit-Scoped Billing & Settled Historical Invoice Protection:** Completed tooth procedures sync into that visit's draft invoice with surface codes (e.g., `Tooth #16 (OD) - Composite Filling`); editing historical visit records or odontograms is audited (`PATIENT_VISIT_UPDATED`, `VISIT_ODONTOGRAM_UPDATED`) while leaving already-settled invoices (`Payments.Count > 0`) untouched.
+- Supabase PostgreSQL migration `supabase/migrations/005_patient_visits_and_visit_odontograms.sql` (`patient_visits`, `visit_odontogram_entries`, `visit_id` links on `appointments` & `invoices`, `prevent_hard_delete()` triggers, clinic-group RLS policies, and idempotent legacy backfill) mirrored across `NpgsqlSupabaseRepository` and `InMemoryOcclusaRepository` (including seeded 3-visit, 1-visit, and 0-visit patients).
+- 8 new xUnit tests (`89` total tests in `Occlusa.Tests`) in `PatientVisitsAndOdontogramTests.cs` covering 52-tooth FDI validation, 5-surface normalization, standalone 0-visit registration, `InChair` visit auto-creation, multi-visit carry-forward & reset isolation, settled historical invoice protection, end-to-end Kestrel HTTP visit endpoints, and automated zero-scrollbar / zero-ellipsis XAML & migration audits.
+
+### Changed
+- Redesigned `PatientDetailModal` (`PatientDetailViewModel`) with editable patient demographics and medical alerts on the left and a 4-column `UniformPagedGrid` of `0..N` visit records on the right, plus `+ New Visit Record` and double-click opening into `VisitRecordModal`.
+- Updated `MainWindow` Patient Registry with `+ Register Patient`, `Phone & Visits` summary column, and `Visit Chart` action, and wired Live Queue `InChair` double-click / `AppointmentDetailModal` charting callbacks to `VisitRecordModal`.
+- Updated `docs/UI_UNIFORMITY_RULES.md` and `README.md` to document `AnatomicalToothControl`, `VisitRecordModal`, and migration `005`.
+
+### Removed
+- Removed obsolete patient-wide `OdontogramModal.xaml`, `OdontogramModal.xaml.cs`, and `OdontogramViewModel.cs` (replaced by per-visit `VisitRecordModal`).
+
 ## [0.3.1] - 2026-11-24
 ### Added
 - Compact single-line **Reception Note** display beneath the patient name in Today's Live Queue (`AppointmentCalendarHelper.FormatCompactReceptionNote`, `QueueRowItem.ReceptionNoteDisplay` / `HasReceptionNote`) rendered in smaller muted typography (`10.5px` vs. `12px` patient name) and collapsing cleanly when empty so zero vertical space remains under the name.

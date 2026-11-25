@@ -236,6 +236,8 @@ public sealed class PatientRowItem
             : source.IcNumber;
         FullName = source.FullName;
         Phone = string.IsNullOrWhiteSpace(source.Phone) ? "No Phone" : source.Phone;
+        string visitWord = source.VisitCount == 1 ? "1 Visit" : $"{source.VisitCount} Visits";
+        ContactVisitsDisplay = $"{Phone} · {visitWord}";
         AlertsDisplay = source.MedicalAlerts.HasAnyCriticalAlert
             ? source.MedicalAlerts.BuildAlertSummary()
             : "Clear";
@@ -245,7 +247,35 @@ public sealed class PatientRowItem
     public string IcDisplay { get; }
     public string FullName { get; }
     public string Phone { get; }
+    public string ContactVisitsDisplay { get; }
     public string AlertsDisplay { get; }
+}
+
+/// <summary>
+/// Concise 4-column presentation row for a patient's chronological Visit Records inside PatientDetailModal.
+/// </summary>
+public sealed class PatientVisitRowItem
+{
+    public PatientVisitRowItem(PatientVisitDto source)
+    {
+        Source = source;
+        VisitDisplay = $"#{source.VisitNumber} · {source.VisitDate.ToLocalTime():dd MMM yyyy}";
+        ClinicianDisplay = $"{source.BranchId} · {source.DoctorName}";
+        SummaryDisplay = OdontogramHelper.FormatCompactVisitSummary(source, 34);
+        int charted = source.ChartedTeethCount;
+        int done = source.CompletedProceduresCount;
+        OdontogramDisplay = charted == 0
+            ? "Uncharted"
+            : done > 0
+                ? $"{charted} Teeth · {done} Done"
+                : $"{charted} Teeth Charted";
+    }
+
+    public PatientVisitDto Source { get; }
+    public string VisitDisplay { get; }
+    public string ClinicianDisplay { get; }
+    public string SummaryDisplay { get; }
+    public string OdontogramDisplay { get; }
 }
 
 /// <summary>

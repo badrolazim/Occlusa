@@ -38,6 +38,30 @@ public interface IOcclusaRepository
         CancellationToken ct = default);
     Task<(AppointmentQueueItemDto? Item, string? Error)> UpdateQueueStatusAsync(Guid appointmentId, UpdateQueueStatusRequest request, CancellationToken ct = default);
 
+    Task<IReadOnlyList<PatientVisitDto>> GetPatientVisitsAsync(Guid patientId, CancellationToken ct = default);
+    Task<PatientVisitDto?> GetVisitByIdAsync(Guid visitId, CancellationToken ct = default);
+    Task<(PatientVisitDto? Visit, AppointmentQueueItemDto? UpdatedAppointment, string? Error)> CreatePatientVisitAsync(
+        Guid patientId,
+        CreatePatientVisitRequest request,
+        CancellationToken ct = default);
+    Task<(PatientVisitDto? Visit, AppointmentQueueItemDto? UpdatedAppointment, string? Error)> EnsureVisitForAppointmentAsync(
+        Guid appointmentId,
+        string? actor = null,
+        CancellationToken ct = default);
+    Task<(PatientVisitDto? Visit, string? Error)> UpdatePatientVisitAsync(
+        Guid visitId,
+        UpdatePatientVisitRequest request,
+        CancellationToken ct = default);
+    Task<IReadOnlyList<OdontogramToothDto>> GetVisitOdontogramAsync(Guid visitId, CancellationToken ct = default);
+    Task<(OdontogramToothDto? Tooth, InvoiceDto? UpdatedInvoice, string? Error)> UpdateVisitOdontogramAsync(
+        Guid visitId,
+        UpdateOdontogramRequest request,
+        CancellationToken ct = default);
+    Task<(PatientVisitDto? Visit, string? Error)> ResetVisitOdontogramAsync(
+        Guid visitId,
+        ResetVisitOdontogramRequest request,
+        CancellationToken ct = default);
+
     Task<IReadOnlyList<OdontogramToothDto>> GetOdontogramAsync(Guid patientId, CancellationToken ct = default);
     Task<(OdontogramToothDto? Tooth, InvoiceDto? UpdatedInvoice, string? Error)> UpdateOdontogramAsync(Guid patientId, UpdateOdontogramRequest request, CancellationToken ct = default);
 

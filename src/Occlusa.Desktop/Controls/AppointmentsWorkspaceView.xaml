@@ -216,7 +216,7 @@
 
     <Grid>
         <!-- ================================================================
-             MODE A: TABLE VIEW (Uniform 4-Column Paged Grid)
+             MODE A: TABLE VIEW (Panel-Fitted Single-Line Priority-Adaptive Grid)
              ================================================================ -->
         <controls:UniformPagedGrid x:Name="AppointmentsPagedGrid"
                                    Visibility="{Binding IsTableMode, Converter={StaticResource BoolToVisibilityConverter}}"
@@ -226,10 +226,15 @@
                                    ItemsSource="{Binding TableRows}"
                                    SelectedItem="{Binding SelectedAppointmentRow, Mode=TwoWay}"
                                    RowDoubleClicked="AppointmentsPagedGrid_RowDoubleClicked">
-            <controls:UniformColumnDef Header="Date &amp; Time" BindingPath="DateTimeDisplay" WidthRatio="1.25" IsMonospace="True" />
-            <controls:UniformColumnDef Header="Patient" BindingPath="PatientDisplay" WidthRatio="1.85" IsBold="True" />
-            <controls:UniformColumnDef Header="Dentist" BindingPath="DentistDisplay" WidthRatio="1.25" />
-            <controls:UniformColumnDef Header="Treatment &amp; Status" BindingPath="TreatmentStatusDisplay" WidthRatio="2.0" />
+            <controls:UniformColumnDef Header="Date &amp; Time" BindingPath="DateTimeDisplay" Priority="1" MinWidth="118" WidthRatio="0.55" IsMonospace="True" />
+            <controls:UniformColumnDef Header="Duration" BindingPath="DurationDisplay" Priority="3" MinWidth="74" WidthRatio="0.3" IsMonospace="True" HorizontalAlignment="Right" />
+            <controls:UniformColumnDef Header="Type" BindingPath="VisitTypeDisplay" Priority="3" MinWidth="88" WidthRatio="0.45" />
+            <controls:UniformColumnDef Header="Patient" BindingPath="PatientDisplay" Priority="1" MinWidth="175" WidthRatio="2.0" IsBold="True" />
+            <controls:UniformColumnDef Header="Treatment" BindingPath="TreatmentDisplay" Priority="1" MinWidth="150" WidthRatio="2.0" />
+            <controls:UniformColumnDef Header="Dentist" BindingPath="DentistDisplay" Priority="2" MinWidth="125" WidthRatio="1.1" />
+            <controls:UniformColumnDef Header="Room" BindingPath="RoomDisplay" Priority="3" MinWidth="80" WidthRatio="0.5" />
+            <controls:UniformColumnDef Header="Reminder" BindingPath="ReminderDisplay" Priority="2" MinWidth="112" WidthRatio="0.65" />
+            <controls:UniformColumnDef Header="Status" BindingPath="StatusDisplay" Priority="1" MinWidth="92" WidthRatio="0.6" IsBold="True" />
         </controls:UniformPagedGrid>
 
         <!-- ================================================================

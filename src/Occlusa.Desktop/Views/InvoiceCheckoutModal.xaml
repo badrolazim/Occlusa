@@ -264,7 +264,7 @@
                             </StackPanel>
                         </Border>
 
-                        <!-- 3. Paged 4-Column Invoice Lines Grid (Zero Scrollbars) -->
+                        <!-- 3. Panel-Fitted Single-Line Invoice Lines Grid (Zero Scrollbars, Zero Ellipsis) -->
                         <controls:UniformPagedGrid Grid.Row="2"
                                                    Title="Itemized Invoice Lines"
                                                    Subtitle="Select any row to adjust Qty or RM Price (Doctor's Visit Report is never altered)"
@@ -273,10 +273,12 @@
                                                    SelectedItem="{Binding SelectedLineRow, Mode=TwoWay}"
                                                    AutoPageSize="False"
                                                    PageSize="4">
-                            <controls:UniformColumnDef Header="Type / Tooth" BindingPath="ToothDisplay" WidthRatio="1.05" IsMonospace="True" />
-                            <controls:UniformColumnDef Header="Invoice Item" BindingPath="ProcedureName" WidthRatio="2.25" IsBold="True" />
-                            <controls:UniformColumnDef Header="Qty × Unit" BindingPath="QtyUnitDisplay" WidthRatio="1.15" IsMonospace="True" HorizontalAlignment="Right" />
-                            <controls:UniformColumnDef Header="Total (RM)" BindingPath="LineTotalDisplay" WidthRatio="1.0" IsMonospace="True" HorizontalAlignment="Right" />
+                            <controls:UniformColumnDef Header="Tooth / Type" BindingPath="ToothDisplay" Priority="1" MinWidth="92" WidthRatio="0.55" IsMonospace="True" />
+                            <controls:UniformColumnDef Header="Invoice Item" BindingPath="ProcedureName" Priority="1" MinWidth="175" WidthRatio="2.4" IsBold="True" />
+                            <controls:UniformColumnDef Header="Comm." BindingPath="CommissionDisplay" Priority="3" MinWidth="62" WidthRatio="0.3" IsMonospace="True" HorizontalAlignment="Right" />
+                            <controls:UniformColumnDef Header="Qty" BindingPath="QuantityDisplay" Priority="2" MinWidth="52" WidthRatio="0.25" IsMonospace="True" HorizontalAlignment="Right" />
+                            <controls:UniformColumnDef Header="Unit (RM)" BindingPath="UnitPriceDisplay" Priority="2" MinWidth="92" WidthRatio="0.55" IsMonospace="True" HorizontalAlignment="Right" />
+                            <controls:UniformColumnDef Header="Total (RM)" BindingPath="LineTotalDisplay" Priority="1" MinWidth="96" WidthRatio="0.6" IsMonospace="True" IsBold="True" HorizontalAlignment="Right" />
                         </controls:UniformPagedGrid>
 
                         <!-- 4. Symmetric KPI Financial Summary Card -->

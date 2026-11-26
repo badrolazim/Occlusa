@@ -58,17 +58,20 @@
 
                 <controls:UniformPagedGrid Grid.Row="1"
                                            Title="Companion Catalog Items (Medications, X-Rays, Procedures &amp; OTC)"
-                                           Subtitle="4 Columns · Paged (Double-click row to toggle ✓ Suggested)"
+                                           Subtitle="Double-click row to toggle ✓ Suggested · Hover for full details"
                                            EmptyMessage="No active catalog items available."
                                            ItemsSource="{Binding CandidateRows}"
                                            SelectedItem="{Binding SelectedRow, Mode=TwoWay}"
                                            RowDoubleClicked="CandidateGrid_RowDoubleClicked"
                                            AutoPageSize="False"
                                            PageSize="8">
-                    <controls:UniformColumnDef Header="Status" BindingPath="SelectedDisplay" WidthRatio="0.95" IsBold="True" />
-                    <controls:UniformColumnDef Header="Catalog Item" BindingPath="Name" WidthRatio="2.25" IsBold="True" />
-                    <controls:UniformColumnDef Header="Category" BindingPath="CategoryDisplay" WidthRatio="1.15" />
-                    <controls:UniformColumnDef Header="Price (RM)" BindingPath="PriceDisplay" WidthRatio="0.95" IsMonospace="True" HorizontalAlignment="Right" />
+                    <controls:UniformColumnDef Header="Status" BindingPath="SelectedDisplay" Priority="1" MinWidth="98" WidthRatio="0.55" IsBold="True" />
+                    <controls:UniformColumnDef Header="Catalog Item" BindingPath="Name" Priority="1" MinWidth="180" WidthRatio="2.2" IsBold="True" />
+                    <controls:UniformColumnDef Header="Category" BindingPath="CategoryDisplay" Priority="1" MinWidth="94" WidthRatio="0.65" />
+                    <controls:UniformColumnDef Header="Subcategory" BindingPath="SubcategoryDisplay" Priority="2" MinWidth="100" WidthRatio="0.8" />
+                    <controls:UniformColumnDef Header="Comm." BindingPath="CommissionDisplay" Priority="3" MinWidth="66" WidthRatio="0.35" IsMonospace="True" HorizontalAlignment="Right" />
+                    <controls:UniformColumnDef Header="Safety Tags" BindingPath="SafetyTagsDisplay" Priority="3" MinWidth="110" WidthRatio="1.0" />
+                    <controls:UniformColumnDef Header="Price (RM)" BindingPath="PriceDisplay" Priority="1" MinWidth="96" WidthRatio="0.55" IsMonospace="True" IsBold="True" HorizontalAlignment="Right" />
                 </controls:UniformPagedGrid>
             </Grid>
         </controls:ModalDialogShell.DialogContent>

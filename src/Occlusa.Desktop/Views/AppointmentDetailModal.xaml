@@ -557,7 +557,7 @@
                                                Style="{StaticResource UniformLabelTextStyle}"
                                                VerticalAlignment="Center" />
                                     <TextBlock DockPanel.Dock="Right"
-                                               Text="Shown under patient name in Live Queue"
+                                               Text="Shown in Live Queue Reception Note column &amp; hover tooltip"
                                                Style="{StaticResource UniformMutedTextStyle}"
                                                FontSize="10.5"
                                                VerticalAlignment="Center" />

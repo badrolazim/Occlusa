@@ -8,7 +8,7 @@ using Occlusa.Shared.Services;
 namespace Occlusa.Desktop.ViewModels;
 
 /// <summary>
-///Selectable row for TreatmentSuggestionRuleModal's 4-column UniformPagedGrid.
+/// Selectable atomic single-line row for TreatmentSuggestionRuleModal's responsive UniformPagedGrid.
 /// </summary>
 public sealed partial class SelectableCompanionItemRowVm : ObservableObject
 {
@@ -23,18 +23,32 @@ public sealed partial class SelectableCompanionItemRowVm : ObservableObject
         Name = item.Name;
         CategoryDisplay = item.Category switch
         {
-            BillingCatalogCategory.OtcProduct => "OTC (0% Comm)",
+            BillingCatalogCategory.OtcProduct => "OTC Retail",
             BillingCatalogCategory.Medication => "Medication",
             BillingCatalogCategory.Radiograph => "Radiograph",
             _ => "Procedure"
         };
+        SubcategoryDisplay = string.IsNullOrWhiteSpace(item.ClinicalSubcategory)
+            ? "General"
+            : item.ClinicalSubcategory.Trim();
+        CommissionDisplay = item.Category != BillingCatalogCategory.OtcProduct && item.IsCommissionable
+            ? "40%"
+            : "0%";
+        SafetyTagsDisplay = string.IsNullOrWhiteSpace(item.SafetyAlertTags)
+            ? "—"
+            : RowTextHelper.NormalizeSingleLine(item.SafetyAlertTags);
         PriceDisplay = $"RM {item.UnitPrice:N2}";
+        ToolTipText = $"{Name} ({CategoryDisplay} · {SubcategoryDisplay})\nPrice: {PriceDisplay} · Commission: {CommissionDisplay}\nSafety Tags: {SafetyTagsDisplay}\nDouble-click row to toggle suggestion";
     }
 
     public BillingCatalogItemDto Item { get; }
     public string Name { get; }
     public string CategoryDisplay { get; }
+    public string SubcategoryDisplay { get; }
+    public string CommissionDisplay { get; }
+    public string SafetyTagsDisplay { get; }
     public string PriceDisplay { get; }
+    public string ToolTipText { get; }
     public string SelectedDisplay => IsIncluded ? "✓ Suggested" : "—";
 }
 

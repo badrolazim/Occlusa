@@ -1,9 +1,12 @@
 using System;
 using System.Collections;
+using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Collections.ObjectModel;
 using System.Collections.Specialized;
+using System.Globalization;
 using System.Linq;
+using System.Reflection;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Controls.Primitives;
@@ -11,12 +14,15 @@ using System.Windows.Data;
 using System.Windows.Input;
 using System.Windows.Markup;
 using System.Windows.Media;
+using System.Windows.Threading;
+using Occlusa.Shared.Services;
 
 namespace Occlusa.Desktop.Controls;
 
 /// <summary>
 /// Declarative column definition for <see cref="UniformPagedGrid"/>.
-/// Designed to enforce 3-4 concise columns with zero text truncation.
+/// Supports unlimited priority-ordered atomic columns that automatically fit the host panel width
+/// on strict single-line 36px rows with zero ellipsis truncation and zero right-edge clipping.
 /// </summary>
 public sealed class UniformColumnDef
 {
@@ -24,16 +30,33 @@ public sealed class UniformColumnDef
     {
     }
 
-    public UniformColumnDef(string header, string bindingPath, double starWidth = 1.0, string? stringFormat = null)
+    public UniformColumnDef(
+        string header,
+        string bindingPath,
+        double starWidth = 1.0,
+        string? stringFormat = null,
+        int priority = 1)
     {
         Header = header;
         BindingPath = bindingPath;
         StarWidth = starWidth;
         StringFormat = stringFormat;
+        Priority = Math.Max(1, priority);
     }
 
     public string Header { get; set; } = string.Empty;
     public string BindingPath { get; set; } = string.Empty;
+
+    /// <summary>
+    /// Display priority when panel width is constrained:
+    /// 1 = Essential (always shown), 2 = Important, 3 = Secondary, 4 = Wide-monitor extended.
+    /// Lower-priority columns auto-hide earlier so visible cells never clip or truncate to '...'.
+    /// </summary>
+    public int Priority { get; set; } = 1;
+
+    /// <summary>
+    /// Relative share of surplus panel width after each visible column's measured single-line width is satisfied.
+    /// </summary>
     public double StarWidth { get; set; } = 1.0;
 
     /// <summary>
@@ -51,26 +74,57 @@ public sealed class UniformColumnDef
     public bool IsBold { get; set; }
     public double MinWidth { get; set; } = 70;
     public DataTemplate? CellTemplate { get; set; }
+
+    /// <summary>
+    /// Optional property path measured for custom <see cref="CellTemplate"/> columns so single-line
+    /// width budgeting accounts for actual data length. Falls back to <see cref="BindingPath"/> when null.
+    /// </summary>
+    public string? MeasureBindingPath { get; set; }
+
+    /// <summary>
+    /// Extra DIP width reserved for badges, status dots, pill padding, and horizontal cell margins
+    /// inside custom <see cref="CellTemplate"/> columns.
+    /// </summary>
+    public double MeasureExtraWidth { get; set; }
 }
 
 /// <summary>
-/// Uniform 3-4 column paginated grid with zero scrollbars, zero text truncation,
-/// responsive 1080p/1440p page sizing, and double-click row activation.
+/// Panel-fitted, priority-adaptive paginated grid with strict single-line 36px rows,
+/// zero scrollbars, zero text truncation ('...'), zero right-edge clipping,
+/// responsive 1280p/1080p/1440p layout, row hover tooltips, and double-click row activation.
 /// </summary>
 [ContentProperty(nameof(Columns))]
 public partial class UniformPagedGrid : UserControl
 {
-    private const int MaxUniformColumns = 4;
+    private const int LegacyMaxUniformColumns = 4;
     private const double ResolutionHeightThreshold = 1120.0;
     private const int PageSize1080p = 11;
     private const int PageSize1440p = 17;
     private const double AutoRowEstimatedHeight = 42.0;
+    private const int FullDatasetMeasureLimit = 250;
+    private const double StandardCellHorizontalChrome = 26.0;
+    private const double HeaderHorizontalChrome = 24.0;
+    private const double ViewportSafetyGutter = 6.0;
+
+    private static readonly FontFamily PrimaryFontFamily = new("Segoe UI");
+    private static readonly FontFamily MonoFontFamily = new("Consolas");
+    private static readonly Typeface HeaderTypeface = new(PrimaryFontFamily, FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
+    private static readonly Typeface PrimaryRegularTypeface = new(PrimaryFontFamily, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
+    private static readonly Typeface PrimaryBoldTypeface = new(PrimaryFontFamily, FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
+    private static readonly Typeface MonoRegularTypeface = new(MonoFontFamily, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
+    private static readonly Typeface MonoBoldTypeface = new(MonoFontFamily, FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
+    private static readonly SolidColorBrush PrimaryTextBrush = CreateFrozenBrush(15, 23, 42);
+    private static readonly ConcurrentDictionary<(Type Type, string Path), PropertyInfo?[]> PropertyPathCache = new();
+    private static readonly ConcurrentDictionary<Type, PropertyInfo?> ToolTipPropertyCache = new();
 
     private readonly List<object> _allItems = new();
+    private readonly List<(UniformColumnDef Def, DataGridColumn Column)> _builtColumns = new();
     private INotifyCollectionChanged? _subscribedCollection;
     private Window? _hostWindow;
     private bool _hasExplicitPageSize;
     private bool _isApplyingAutoPageSize;
+    private bool _responsiveLayoutQueued;
+    private string _lastResponsiveSignature = string.Empty;
 
     public static readonly DependencyProperty ItemsSourceProperty = DependencyProperty.Register(
         nameof(ItemsSource),
@@ -126,6 +180,12 @@ public partial class UniformPagedGrid : UserControl
         typeof(UniformPagedGrid),
         new PropertyMetadata(false, OnFitColumnsToContentChanged));
 
+    public static readonly DependencyProperty ResponsiveColumnsProperty = DependencyProperty.Register(
+        nameof(ResponsiveColumns),
+        typeof(bool),
+        typeof(UniformPagedGrid),
+        new PropertyMetadata(true, OnColumnsMetadataChanged));
+
     public static readonly DependencyProperty IsHeaderHorizontalProperty = DependencyProperty.Register(
         nameof(IsHeaderHorizontal),
         typeof(bool),
@@ -142,7 +202,7 @@ public partial class UniformPagedGrid : UserControl
         nameof(EnforceColumnLimit),
         typeof(bool),
         typeof(UniformPagedGrid),
-        new PropertyMetadata(true, OnColumnsMetadataChanged));
+        new PropertyMetadata(false, OnColumnsMetadataChanged));
 
     public static readonly DependencyProperty CurrentPageProperty = DependencyProperty.Register(
         nameof(CurrentPage),
@@ -158,6 +218,12 @@ public partial class UniformPagedGrid : UserControl
 
     public static readonly DependencyProperty TotalItemsProperty = DependencyProperty.Register(
         nameof(TotalItems),
+        typeof(int),
+        typeof(UniformPagedGrid),
+        new PropertyMetadata(0));
+
+    public static readonly DependencyProperty VisibleColumnCountProperty = DependencyProperty.Register(
+        nameof(VisibleColumnCount),
         typeof(int),
         typeof(UniformPagedGrid),
         new PropertyMetadata(0));
@@ -235,6 +301,7 @@ public partial class UniformPagedGrid : UserControl
             if (IsVisible)
             {
                 RecalculateAutoPageSize();
+                ScheduleResponsiveColumnLayout(force: true);
                 RefreshAutoColumnWidths();
             }
         };
@@ -294,6 +361,12 @@ public partial class UniformPagedGrid : UserControl
         set => SetValue(FitColumnsToContentProperty, value);
     }
 
+    public bool ResponsiveColumns
+    {
+        get => (bool)GetValue(ResponsiveColumnsProperty);
+        set => SetValue(ResponsiveColumnsProperty, value);
+    }
+
     public bool IsHeaderHorizontal
     {
         get => (bool)GetValue(IsHeaderHorizontalProperty);
@@ -328,6 +401,12 @@ public partial class UniformPagedGrid : UserControl
     {
         get => (int)GetValue(TotalItemsProperty);
         private set => SetValue(TotalItemsProperty, value);
+    }
+
+    public int VisibleColumnCount
+    {
+        get => (int)GetValue(VisibleColumnCountProperty);
+        private set => SetValue(VisibleColumnCountProperty, value);
     }
 
     public object? SelectedItem
@@ -437,6 +516,14 @@ public partial class UniformPagedGrid : UserControl
         }
     }
 
+    /// <summary>
+    /// Recomputes priority-based column visibility and non-clipping single-line widths for the current panel width.
+    /// </summary>
+    public void RefreshResponsiveColumnLayout()
+    {
+        ApplyResponsiveColumnLayout(force: true);
+    }
+
     private void UniformPagedGrid_Loaded(object sender, RoutedEventArgs e)
     {
         AttachHostWindow();
@@ -444,6 +531,7 @@ public partial class UniformPagedGrid : UserControl
         RecalculateAutoPageSize();
         RebuildColumns();
         RefreshPagination();
+        ScheduleResponsiveColumnLayout(force: true);
     }
 
     private void UniformPagedGrid_Unloaded(object sender, RoutedEventArgs e)
@@ -454,11 +542,27 @@ public partial class UniformPagedGrid : UserControl
     private void UniformPagedGrid_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         RecalculateAutoPageSize();
+        if (e.WidthChanged)
+        {
+            ApplyResponsiveColumnLayout(force: false);
+        }
+    }
+
+    private void InternalDataGrid_SizeChanged(object sender, SizeChangedEventArgs e)
+    {
+        if (e.WidthChanged)
+        {
+            ApplyResponsiveColumnLayout(force: false);
+        }
     }
 
     private void HostWindow_SizeChanged(object sender, SizeChangedEventArgs e)
     {
         RecalculateAutoPageSize();
+        if (e.WidthChanged)
+        {
+            ScheduleResponsiveColumnLayout(force: false);
+        }
     }
 
     private void AttachHostWindow()
@@ -667,6 +771,7 @@ public partial class UniformPagedGrid : UserControl
         }
 
         RefreshPagination();
+        ScheduleResponsiveColumnLayout(force: false);
     }
 
     private void RefreshPagination()
@@ -703,6 +808,11 @@ public partial class UniformPagedGrid : UserControl
         CanGoNext = currentPage < TotalPages;
         PaginationSummary = $"Page {currentPage} of {TotalPages} ({TotalItems} total)";
         RefreshAutoColumnWidths();
+
+        if (_allItems.Count > FullDatasetMeasureLimit)
+        {
+            ScheduleResponsiveColumnLayout(force: false);
+        }
     }
 
     private void RefreshAutoColumnWidths()
@@ -712,7 +822,7 @@ public partial class UniformPagedGrid : UserControl
             return;
         }
 
-        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, new Action(() =>
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
         {
             if (!FitColumnsToContent || InternalDataGrid == null)
             {
@@ -740,13 +850,17 @@ public partial class UniformPagedGrid : UserControl
             ? HorizontalAlignment.Left
             : HorizontalAlignment.Stretch;
         InternalDataGrid.Columns.Clear();
+        _builtColumns.Clear();
+        _lastResponsiveSignature = string.Empty;
+
         if (Columns == null || Columns.Count == 0)
         {
+            VisibleColumnCount = 0;
             return;
         }
 
         IEnumerable<UniformColumnDef> activeColumns = EnforceColumnLimit
-            ? Columns.Take(MaxUniformColumns)
+            ? Columns.Take(LegacyMaxUniformColumns)
             : Columns;
 
         foreach (var col in activeColumns)
@@ -786,6 +900,7 @@ public partial class UniformPagedGrid : UserControl
                     tplCol.HeaderStyle = headerStyle;
                 }
                 InternalDataGrid.Columns.Add(tplCol);
+                _builtColumns.Add((col, tplCol));
                 continue;
             }
 
@@ -802,16 +917,8 @@ public partial class UniformPagedGrid : UserControl
             elementStyle.Setters.Add(new Setter(HorizontalAlignmentProperty, col.HorizontalAlignment));
             elementStyle.Setters.Add(new Setter(MarginProperty, FitColumnsToContent ? new Thickness(14, 0, 22, 0) : new Thickness(10, 0, 10, 0)));
             elementStyle.Setters.Add(new Setter(TextBlock.FontSizeProperty, 12.0));
-            elementStyle.Setters.Add(new Setter(TextBlock.ForegroundProperty, new SolidColorBrush(Color.FromRgb(15, 23, 42))));
-
-            if (col.IsMonospace)
-            {
-                elementStyle.Setters.Add(new Setter(TextBlock.FontFamilyProperty, new FontFamily("Consolas")));
-            }
-            else
-            {
-                elementStyle.Setters.Add(new Setter(TextBlock.FontFamilyProperty, new FontFamily("Segoe UI")));
-            }
+            elementStyle.Setters.Add(new Setter(TextBlock.ForegroundProperty, PrimaryTextBrush));
+            elementStyle.Setters.Add(new Setter(TextBlock.FontFamilyProperty, col.IsMonospace ? MonoFontFamily : PrimaryFontFamily));
 
             if (col.IsBold)
             {
@@ -832,9 +939,321 @@ public partial class UniformPagedGrid : UserControl
             }
 
             InternalDataGrid.Columns.Add(dgCol);
+            _builtColumns.Add((col, dgCol));
         }
 
+        ApplyResponsiveColumnLayout(force: true);
         RefreshAutoColumnWidths();
+    }
+
+    private void ScheduleResponsiveColumnLayout(bool force)
+    {
+        if (!ResponsiveColumns || FitColumnsToContent || _builtColumns.Count == 0)
+        {
+            return;
+        }
+
+        if (_responsiveLayoutQueued && !force)
+        {
+            return;
+        }
+
+        _responsiveLayoutQueued = true;
+        Dispatcher.BeginInvoke(DispatcherPriority.Loaded, new Action(() =>
+        {
+            _responsiveLayoutQueued = false;
+            ApplyResponsiveColumnLayout(force);
+        }));
+    }
+
+    private void ApplyResponsiveColumnLayout(bool force)
+    {
+        if (InternalDataGrid == null || _builtColumns.Count == 0)
+        {
+            VisibleColumnCount = 0;
+            return;
+        }
+
+        if (!ResponsiveColumns || FitColumnsToContent)
+        {
+            foreach (var (def, col) in _builtColumns)
+            {
+                col.Visibility = Visibility.Visible;
+                col.MinWidth = Math.Max(40, def.MinWidth);
+                col.Width = FitColumnsToContent
+                    ? DataGridLength.Auto
+                    : new DataGridLength(Math.Max(0.2, def.StarWidth), DataGridLengthUnitType.Star);
+            }
+
+            VisibleColumnCount = _builtColumns.Count;
+            return;
+        }
+
+        double rawWidth = InternalDataGrid.ActualWidth > 0
+            ? InternalDataGrid.ActualWidth
+            : (ActualWidth > 0 ? ActualWidth - 2.0 : 0.0);
+        double availableWidth = rawWidth > 20.0
+            ? Math.Max(100.0, rawWidth - ViewportSafetyGutter)
+            : 0.0;
+
+        double pixelsPerDip = ResolvePixelsPerDip();
+        var sampleItems = _allItems.Count <= FullDatasetMeasureLimit
+            ? (IReadOnlyList<object>)_allItems
+            : PagedItems;
+
+        var specs = new ResponsiveColumnSpec[_builtColumns.Count];
+        for (int i = 0; i < _builtColumns.Count; i++)
+        {
+            var def = _builtColumns[i].Def;
+            double requiredWidth = MeasureColumnRequiredWidth(def, sampleItems, pixelsPerDip);
+            double floorWidth = Math.Max(40.0, def.MinWidth);
+            specs[i] = new ResponsiveColumnSpec(
+                Index: i,
+                Priority: Math.Max(1, def.Priority),
+                RequiredWidth: requiredWidth,
+                FloorWidth: floorWidth,
+                Weight: Math.Max(0.15, def.StarWidth),
+                IsOptional: def.Priority > 1);
+        }
+
+        var plan = ResponsiveTableColumnPlanner.ComputeLayout(specs, availableWidth);
+        string signature = BuildLayoutSignature(availableWidth, plan);
+        if (!force && string.Equals(signature, _lastResponsiveSignature, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _lastResponsiveSignature = signature;
+
+        int visibleCount = 0;
+        for (int i = 0; i < plan.Count; i++)
+        {
+            var alloc = plan[i];
+            var dgCol = _builtColumns[i].Column;
+
+            if (!alloc.IsVisible)
+            {
+                dgCol.MinWidth = 0;
+                dgCol.Visibility = Visibility.Collapsed;
+                continue;
+            }
+
+            visibleCount++;
+            double safeMin = Math.Floor(Math.Max(24.0, Math.Min(alloc.EffectiveMinWidth, alloc.AllocatedWidth)));
+            dgCol.Visibility = Visibility.Visible;
+            dgCol.MinWidth = safeMin;
+            dgCol.Width = new DataGridLength(Math.Max(1.0, alloc.AllocatedWidth), DataGridLengthUnitType.Star);
+        }
+
+        VisibleColumnCount = visibleCount;
+    }
+
+    private double MeasureColumnRequiredWidth(
+        UniformColumnDef def,
+        IReadOnlyList<object> sampleItems,
+        double pixelsPerDip)
+    {
+        double required = Math.Max(40.0, def.MinWidth);
+
+        if (!string.IsNullOrWhiteSpace(def.Header))
+        {
+            double headerWidth = MeasureTextWidth(def.Header, HeaderTypeface, 11.5, pixelsPerDip) + HeaderHorizontalChrome;
+            if (headerWidth > required)
+            {
+                required = headerWidth;
+            }
+        }
+
+        string measurePath = !string.IsNullOrWhiteSpace(def.MeasureBindingPath)
+            ? def.MeasureBindingPath!
+            : def.BindingPath;
+
+        if (string.IsNullOrWhiteSpace(measurePath) || sampleItems.Count == 0)
+        {
+            return Math.Ceiling(required);
+        }
+
+        Typeface cellTypeface = ResolveCellTypeface(def);
+        double chrome = def.CellTemplate != null
+            ? Math.Max(StandardCellHorizontalChrome, def.MeasureExtraWidth)
+            : StandardCellHorizontalChrome;
+
+        double maxTextWidth = 0.0;
+        for (int i = 0; i < sampleItems.Count; i++)
+        {
+            string? text = ExtractFormattedValue(sampleItems[i], measurePath, def.StringFormat);
+            if (string.IsNullOrWhiteSpace(text))
+            {
+                continue;
+            }
+
+            double w = MeasureTextWidth(text, cellTypeface, 12.0, pixelsPerDip);
+            if (w > maxTextWidth)
+            {
+                maxTextWidth = w;
+            }
+        }
+
+        if (maxTextWidth > 0.0)
+        {
+            double cellRequired = maxTextWidth + chrome;
+            if (cellRequired > required)
+            {
+                required = cellRequired;
+            }
+        }
+
+        return Math.Ceiling(required);
+    }
+
+    private double ResolvePixelsPerDip()
+    {
+        try
+        {
+            var dpi = VisualTreeHelper.GetDpi(this);
+            return dpi.PixelsPerDip > 0 ? dpi.PixelsPerDip : 1.0;
+        }
+        catch
+        {
+            return 1.0;
+        }
+    }
+
+    private static Typeface ResolveCellTypeface(UniformColumnDef def) => (def.IsMonospace, def.IsBold) switch
+    {
+        (true, true) => MonoBoldTypeface,
+        (true, false) => MonoRegularTypeface,
+        (false, true) => PrimaryBoldTypeface,
+        (false, false) => PrimaryRegularTypeface
+    };
+
+    private static double MeasureTextWidth(string text, Typeface typeface, double fontSize, double pixelsPerDip)
+    {
+        var formatted = new FormattedText(
+            text,
+            CultureInfo.CurrentCulture,
+            FlowDirection.LeftToRight,
+            typeface,
+            fontSize,
+            Brushes.Black,
+            pixelsPerDip);
+        return formatted.WidthIncludingTrailingWhitespace;
+    }
+
+    private static string? ExtractFormattedValue(object item, string propertyPath, string? stringFormat)
+    {
+        var props = PropertyPathCache.GetOrAdd((item.GetType(), propertyPath), static key =>
+        {
+            var segments = key.Path.Split('.');
+            var chain = new PropertyInfo?[segments.Length];
+            var currentType = key.Type;
+            for (int i = 0; i < segments.Length; i++)
+            {
+                var prop = currentType.GetProperty(segments[i], BindingFlags.Public | BindingFlags.Instance);
+                chain[i] = prop;
+                if (prop == null)
+                {
+                    break;
+                }
+
+                currentType = prop.PropertyType;
+            }
+
+            return chain;
+        });
+
+        object? current = item;
+        for (int i = 0; i < props.Length; i++)
+        {
+            var prop = props[i];
+            if (prop == null || current == null)
+            {
+                return null;
+            }
+
+            current = prop.GetValue(current);
+        }
+
+        if (current == null)
+        {
+            return null;
+        }
+
+        if (!string.IsNullOrWhiteSpace(stringFormat))
+        {
+            try
+            {
+                string fmt = stringFormat.Contains("{0", StringComparison.Ordinal)
+                    ? stringFormat
+                    : $"{{0:{stringFormat}}}";
+                return string.Format(CultureInfo.CurrentCulture, fmt, current);
+            }
+            catch
+            {
+                return current.ToString();
+            }
+        }
+
+        return current.ToString();
+    }
+
+    private static string BuildLayoutSignature(double availableWidth, IReadOnlyList<ResponsiveColumnAllocation> plan)
+    {
+        var parts = new string[plan.Count + 1];
+        parts[0] = ((int)Math.Round(availableWidth)).ToString(CultureInfo.InvariantCulture);
+        for (int i = 0; i < plan.Count; i++)
+        {
+            var p = plan[i];
+            parts[i + 1] = p.IsVisible
+                ? $"{i}:{(int)Math.Round(p.AllocatedWidth)}"
+                : $"{i}:H";
+        }
+
+        return string.Join('|', parts);
+    }
+
+    private void InternalDataGrid_LoadingRow(object? sender, DataGridRowEventArgs e)
+    {
+        var item = e.Row.Item;
+        if (item == null)
+        {
+            e.Row.ToolTip = null;
+            return;
+        }
+
+        var tipProp = ToolTipPropertyCache.GetOrAdd(
+            item.GetType(),
+            static t => t.GetProperty("ToolTipText", BindingFlags.Public | BindingFlags.Instance));
+
+        if (tipProp?.GetValue(item) is string explicitTip && !string.IsNullOrWhiteSpace(explicitTip))
+        {
+            e.Row.ToolTip = explicitTip;
+            return;
+        }
+
+        // Synthesize a clean multi-line hover tooltip from all configured columns so hidden or long details stay accessible.
+        if (_builtColumns.Count > 0)
+        {
+            var lines = new List<string>(_builtColumns.Count);
+            foreach (var (def, _) in _builtColumns)
+            {
+                string path = !string.IsNullOrWhiteSpace(def.MeasureBindingPath)
+                    ? def.MeasureBindingPath!
+                    : def.BindingPath;
+                if (string.IsNullOrWhiteSpace(path))
+                {
+                    continue;
+                }
+
+                var val = ExtractFormattedValue(item, path, def.StringFormat);
+                if (!string.IsNullOrWhiteSpace(val))
+                {
+                    lines.Add($"{def.Header}: {val}");
+                }
+            }
+
+            e.Row.ToolTip = lines.Count > 0 ? string.Join(Environment.NewLine, lines) : null;
+        }
     }
 
     private void PrevPageButton_Click(object sender, RoutedEventArgs e)
@@ -884,5 +1303,12 @@ public partial class UniformPagedGrid : UserControl
         }
 
         return null;
+    }
+
+    private static SolidColorBrush CreateFrozenBrush(byte r, byte g, byte b)
+    {
+        var brush = new SolidColorBrush(Color.FromRgb(r, g, b));
+        brush.Freeze();
+        return brush;
     }
 }

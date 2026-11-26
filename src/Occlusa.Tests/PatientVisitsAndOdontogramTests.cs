@@ -658,6 +658,17 @@ public class PatientVisitsAndOdontogramTests
             Assert.DoesNotContain("CharacterEllipsis", content, StringComparison.OrdinalIgnoreCase);
             Assert.DoesNotContain("WordEllipsis", content, StringComparison.OrdinalIgnoreCase);
 
+            // Panel-fitted single-line uniformity contract: no multi-line table rows, no narrow content-shrunk tables, no legacy 4-col hard cap
+            Assert.DoesNotContain("AllowAutoRowHeight=\"True\"", content, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("FitColumnsToContent=\"True\"", content, StringComparison.OrdinalIgnoreCase);
+            Assert.DoesNotContain("EnforceColumnLimit=\"True\"", content, StringComparison.OrdinalIgnoreCase);
+
+            // Every UniformPagedGrid column definition must declare an explicit responsive Priority
+            foreach (Match colMatch in Regex.Matches(content, @"<controls:UniformColumnDef\s[^>]*>", RegexOptions.Singleline))
+            {
+                Assert.Contains("Priority=", colMatch.Value, StringComparison.Ordinal);
+            }
+
             if (Path.GetFileName(file).EndsWith("Modal.xaml", StringComparison.OrdinalIgnoreCase))
             {
                 Assert.Contains("ModalDialogShell", content, StringComparison.Ordinal);

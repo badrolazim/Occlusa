@@ -81,7 +81,7 @@
                                                                    Foreground="{StaticResource TextInverseBrush}" />
                                                     </Border>
                                                 </DockPanel>
-                                                <TextBlock Text="4 clean columns (Time · Patient · Reminder · Status), 1 smart next-step button, and finished visits hidden."
+                                                <TextBlock Text="Full-width single-line queue (Time · Patient · Treatment · Doctor · Room · Reminder · Status), 1 smart next-step button, finished visits hidden."
                                                            Style="{StaticResource UniformMutedTextStyle}"
                                                            TextWrapping="Wrap" />
                                             </StackPanel>
@@ -116,7 +116,7 @@
                                                            FontWeight="Bold"
                                                            Foreground="{StaticResource TextPrimaryBrush}"
                                                            Margin="0,0,0,4" />
-                                                <TextBlock Text="5 columns with arrival timestamps, live wait timers, inline reception notes, status chips &amp; full stage bar."
+                                                <TextBlock Text="Full-width telemetry columns (Appt, Arrived, Type, IC, Treatment, Duration, Doctor, Room, Note), live wait timers, status chips &amp; full stage bar."
                                                            Style="{StaticResource UniformMutedTextStyle}"
                                                            TextWrapping="Wrap" />
                                             </StackPanel>
@@ -175,7 +175,7 @@
                                   Style="{StaticResource UniformCheckBoxStyle}"
                                   Margin="0,0,0,10" />
 
-                        <CheckBox Content="Show reception notes inline underneath patient names in Live Queue"
+                        <CheckBox Content="Show reception notes in Detailed Live Queue table column"
                                   IsChecked="{Binding ShowInlineReceptionNotes, Mode=TwoWay}"
                                   Style="{StaticResource UniformCheckBoxStyle}"
                                   Margin="0,0,0,10" />

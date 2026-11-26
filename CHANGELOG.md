@@ -6,6 +6,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.7.0] - 2026-11-26
+### Added
+- **Panel-Fitted, Priority-Adaptive Single-Line Table Engine (`ResponsiveTableColumnPlanner`, `UniformPagedGrid`):** Replaced the legacy 3–4 column cap with a deterministic priority-based responsive column planner (`Priority="1"`..`"4"`, `MeasureBindingPath`, `MeasureExtraWidth`, `ResponsiveColumns`, `VisibleColumnCount`) backed by DPI-aware WPF `FormattedText` width measurement. Tables automatically fill 100% of their host panel width (`1280px`, `1920x1080`, `2560x1440`, and narrow modal sub-panels) with maximum high-value atomic columns on strict single-line `36px` rows—auto-hiding lower-priority columns earlier whenever adding another column would clip or truncate to `...`.
+- **Automatic Row Hover Tooltips (`UniformPagedGrid.LoadingRow`):** Bound full multi-line `ToolTipText` (and synthesized column summaries) across all 11 row ViewModels so any hidden optional columns or long clinical/audit strings remain accessible on hover and in double-click modals.
+- **6 New xUnit Tests (`105` total tests in `Occlusa.Tests`):** Added `ResponsiveTableColumnPlannerTests.cs` covering `1080p` full-panel fit, `1280p` priority auto-hiding, long single-line essential values pushing optional columns off earlier, narrow modal panels (`~620px`), extreme overflow floor preservation, and `0px` pre-layout safety; extended XAML contract audits in `PatientVisitsAndOdontogramTests.cs` to enforce zero `AllowAutoRowHeight="True"`, zero `FitColumnsToContent="True"`, zero `EnforceColumnLimit="True"`, and explicit `Priority=` on every `UniformColumnDef`.
+
+### Changed
+- **Expanded All 12 Workspace & Modal Tables to Atomic Detail-Rich Columns (`MainWindow.xaml`, `AppointmentsWorkspaceView.xaml`, `PatientDetailModal.xaml`, `InvoiceCheckoutModal.xaml`, `DailyReconciliationModal.xaml`, `TreatmentSuggestionRuleModal.xaml`, `MainDisplayRows.cs`, `TreatmentSuggestionRuleViewModel.cs`):**
+  - **Live Queue (Simple & Detailed):** Expanded both views full-width across the workspace canvas with strict single-line `36px` rows (`Simple`: 9 cols `Time` · `Patient` · `Treatment` · `Doctor` · `Room` · `Duration` · `Type` · `Reminder` · `Status`; `Detailed`: 12 cols adding `Arrived`, `IC / MyKad`, and `Reception Note`).
+  - **Patients Registry (10 cols):** `IC / MyKad` · `Full Name` · `Sex / Age` · `Phone` · `Branch` · `Visits` · `Last Visit` · `Credit (RM)` · `Consent` · `Medical Alerts`.
+  - **Billing & Invoices (11 cols):** `Invoice #` · `Date` · `Patient` · `Doctor` · `Items` · `Subtotal` · `Panel / Disc.` · `Payable (RM)` · `Balance Due` · `Methods` · `Status`.
+  - **Appointments Directory Table (9 cols):** `Date & Time` · `Duration` · `Type` · `Patient` · `Treatment` · `Dentist` · `Room` · `Reminder` · `Status`.
+  - **WhatsApp AI Console (7 cols):** `Patient` · `Phone` · `Latest Message / Reason` · `Msgs` · `Last Update` · `Triage` · `State`.
+  - **Master Catalogue (9 cols) & Doctor Suggestion Rules (6 cols):** Split compound `Usage & Commission` into atomic `Category`, `Subcategory`, `Appt Slot`, `Chart Preset`, `Comm.`, `SOAP Keywords`, `Safety Tags`, `Unit Price` and added `Subcategory` + `Base Price` to Doctor Rules.
+  - **Modal Tables:** Expanded `PatientDetailModal` Visit History (6 cols), `InvoiceCheckoutModal` Invoice Lines (6 cols), `DailyReconciliationModal` Immutable Audit Trail (5 cols), and `TreatmentSuggestionRuleModal` Companion Picker (7 cols).
+- Updated `docs/UI_UNIFORMITY_RULES.md`, `README.md`, `UserPreferencesModal.xaml`, `UserPreferencesViewModel.cs`, and `AppointmentDetailModal.xaml` to document the new panel-fitted single-line uniformity standard.
+
+### Removed
+- Removed the reserved empty right-hand split panel on Live Queue and retired the silent 28–48 character string cutoffs on table row cells (`KeywordsDisplay`, `SuggestedSummary`, `SummaryDisplay`, `TreatmentDisplay`, `NoteColumnDisplay`).
+
 ## [0.6.0] - 2026-11-26
 ### Added
 - **Simple-by-Default Live Queue & Opt-In Detailed View (`LiveQueueViewMode`, `LiveQueueScopeMode`):** Redesigned Live Queue to default to a calm 4-column **Simple View** (`Time` · `Patient` · `Reminder` · `Status`) with role-smart scoping (`My Queue` for practicing dentists, `All Clinic` for reception/assistants), finished visits hidden behind a 1-click `Show Done (N)` toggle, and a single contextual **Next Step** action button (`Approve Booking` → `Check In` → `Call to Chair` → `Send to Checkout` → `Collect Payment`).

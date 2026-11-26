@@ -197,9 +197,8 @@
                             </DockPanel>
                         </Border>
 
-                        <!-- 4-Column Paged Visit History Grid (Zero Scrollbars) -->
-                        <controls:UniformPagedGrid 
-                                                   Grid.Row="1"
+                        <!-- Panel-Fitted Single-Line Visit History Grid (Zero Scrollbars, Zero Ellipsis) -->
+                        <controls:UniformPagedGrid Grid.Row="1"
                                                    Title="Patient Visit History"
                                                    Subtitle="{Binding VisitsSubtitle}"
                                                    EmptyMessage="No clinical visits yet — newly registered patients start with 0 visit records."
@@ -208,10 +207,12 @@
                                                    ItemsSource="{Binding VisitRows}"
                                                    SelectedItem="{Binding SelectedVisitRow, Mode=TwoWay}"
                                                    RowDoubleClicked="VisitsPagedGrid_RowDoubleClicked">
-                            <controls:UniformColumnDef Header="Visit &amp; Date" BindingPath="VisitDisplay" WidthRatio="1.25" IsMonospace="True" IsBold="True" />
-                            <controls:UniformColumnDef Header="Branch &amp; Clinician" BindingPath="ClinicianDisplay" WidthRatio="1.45" />
-                            <controls:UniformColumnDef Header="Diagnosis / Complaint" BindingPath="SummaryDisplay" WidthRatio="1.85" />
-                            <controls:UniformColumnDef Header="Visit Odontogram" BindingPath="OdontogramDisplay" WidthRatio="1.2" IsMonospace="True" />
+                            <controls:UniformColumnDef Header="Visit #" BindingPath="VisitNumberDisplay" Priority="1" MinWidth="60" WidthRatio="0.3" IsMonospace="True" IsBold="True" />
+                            <controls:UniformColumnDef Header="Date" BindingPath="VisitDateDisplay" Priority="1" MinWidth="102" WidthRatio="0.55" IsMonospace="True" />
+                            <controls:UniformColumnDef Header="Branch" BindingPath="BranchDisplay" Priority="3" MinWidth="68" WidthRatio="0.35" IsMonospace="True" />
+                            <controls:UniformColumnDef Header="Clinician" BindingPath="DoctorDisplay" Priority="1" MinWidth="120" WidthRatio="1.1" />
+                            <controls:UniformColumnDef Header="Diagnosis / Complaint" BindingPath="SummaryDisplay" Priority="2" MinWidth="140" WidthRatio="2.2" />
+                            <controls:UniformColumnDef Header="Odontogram" BindingPath="OdontogramDisplay" Priority="1" MinWidth="112" WidthRatio="0.85" IsMonospace="True" />
                         </controls:UniformPagedGrid>
                     </Grid>
                 </Grid>

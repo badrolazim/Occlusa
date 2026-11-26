@@ -117,7 +117,7 @@
                                    TextTrimming="None" />
                     </DockPanel>
 
-                    <!-- Stacked header for content-fitted left-docked tables (never widens columns) -->
+                    <!-- Stacked header fallback when FitColumnsToContent is explicitly enabled -->
                     <StackPanel Visibility="{Binding FitColumnsToContent, ElementName=RootGridControl, Converter={StaticResource BoolToVis}}">
                         <TextBlock Text="{Binding Title, ElementName=RootGridControl}"
                                    FontFamily="Segoe UI"
@@ -136,7 +136,7 @@
                 </Grid>
             </Border>
 
-            <!-- Main 3-4 Column Paged DataGrid (Zero Scrollbars, Zero TextTrimming) -->
+            <!-- Panel-Fitted Single-Line Priority-Adaptive Paged DataGrid (Zero Scrollbars, Zero TextTrimming) -->
             <Grid Grid.Row="1">
                 <DataGrid x:Name="InternalDataGrid"
                           ItemsSource="{Binding PagedItems, ElementName=RootGridControl}"
@@ -163,6 +163,8 @@
                           ScrollViewer.VerticalScrollBarVisibility="Disabled"
                           ScrollViewer.HorizontalScrollBarVisibility="Disabled"
                           ScrollViewer.CanContentScroll="False"
+                          LoadingRow="InternalDataGrid_LoadingRow"
+                          SizeChanged="InternalDataGrid_SizeChanged"
                           MouseDoubleClick="InternalDataGrid_MouseDoubleClick" />
 
                 <!-- Empty State Overlay -->

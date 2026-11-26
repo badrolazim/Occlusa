@@ -152,4 +152,6 @@ Every `.xaml` file under `src\Occlusa.Desktop\` MUST pass all checks:
 - [ ] Zero occurrences of `CharacterEllipsis` or `WordEllipsis`.
 - [ ] Every list/table view uses `UniformPagedGrid` with **3 or 4 columns** and double-click modal opening.
 - [ ] `MedicalAlertsBanner` pinned on top of `MainWindow`, `PatientDetailModal`, and `VisitRecordModal`.
-- [ ] Every modal (`Views\*Modal.xaml`) uses `ModalDialogShell` (`ShowDialog()`), has NO back-navigation buttons, and sets `HasUnsavedChanges` on editable clinical/billing modals.
+- [ ] Every modal (`Views\*Modal.xaml`) uses `ModalDialogShell` (`ShowDialog()`), has NO back-navigation buttons, and sets `HasUnsavedChanges` on editable clinical/billing modals (`PatientDetailModal`, `VisitRecordModal`, `AppointmentDetailModal`, `InvoiceCheckoutModal`, `BillingCatalogItemModal`, `TreatmentSuggestionRuleModal`).
+- [ ] `VisitRecordModal.xaml` contains zero monetary fee inputs (`FeeInput`, `Fee (RM)`)—clinical charting stays strictly decoupled from invoicing.
+- [ ] Workspace tab containers never combine `Visibility="{Binding Is*Workspace, ...}"` and `DataContext="{Binding ...}"` on the same XAML tag (wrap child `DataContext` containers inside an outer `<Grid Visibility="...">` bound to `MainViewModel`).

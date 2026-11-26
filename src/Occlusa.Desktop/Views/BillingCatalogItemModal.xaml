@@ -1,0 +1,180 @@
+<Window x:Class="Occlusa.Desktop.Views.BillingCatalogItemModal"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:Occlusa.Desktop.Controls"
+        Title="Master Catalogue Item"
+        Width="820"
+        Height="630"
+        MinWidth="740"
+        MinHeight="590"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="{StaticResource SurfaceCanvasBrush}"
+        ScrollViewer.VerticalScrollBarVisibility="Disabled"
+        ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+
+    <controls:ModalDialogShell x:Name="DialogShell"
+                               Title="{Binding ModalTitle}"
+                               Subtitle="{Binding ModalSubtitle}"
+                               BadgeText="{Binding BadgeText}"
+                               HasUnsavedChanges="{Binding HasUnsavedChanges, Mode=TwoWay}"
+                               SaveCommand="{Binding SaveCommand}"
+                               UnsavedPromptTitle="Unsaved Master Catalogue Changes"
+                               UnsavedPromptMessage="You have unsaved Master Catalogue changes. Save before closing?">
+
+        <controls:ModalDialogShell.DialogContent>
+            <Border Style="{StaticResource UniformCardBorderStyle}" Padding="16,14">
+                <StackPanel>
+                    <!-- Row 1: Name, Category, Subcategory, Default Price -->
+                    <Grid Margin="0,0,0,12">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="1.7*" />
+                            <ColumnDefinition Width="10" />
+                            <ColumnDefinition Width="0.95*" />
+                            <ColumnDefinition Width="10" />
+                            <ColumnDefinition Width="1.05*" />
+                            <ColumnDefinition Width="10" />
+                            <ColumnDefinition Width="0.8*" />
+                        </Grid.ColumnDefinitions>
+
+                        <StackPanel Grid.Column="0">
+                            <TextBlock Text="Item / Procedure Name" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,4" />
+                            <TextBox Text="{Binding Name, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource UniformInputTextBoxStyle}" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="2">
+                            <TextBlock Text="Category" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,4" />
+                            <ComboBox ItemsSource="{Binding Categories}"
+                                      SelectedItem="{Binding Category, Mode=TwoWay}"
+                                      Style="{StaticResource UniformComboBoxStyle}" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="4">
+                            <TextBlock Text="Subcategory" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,4" />
+                            <ComboBox ItemsSource="{Binding SubcategoryOptions}"
+                                      SelectedItem="{Binding ClinicalSubcategory, Mode=TwoWay}"
+                                      Style="{StaticResource UniformComboBoxStyle}" />
+                        </StackPanel>
+
+                        <StackPanel Grid.Column="6">
+                            <TextBlock Text="Price (RM)" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,4" />
+                            <TextBox Text="{Binding UnitPriceInput, UpdateSourceTrigger=PropertyChanged}"
+                                     Style="{StaticResource UniformInputTextBoxStyle}" />
+                        </StackPanel>
+                    </Grid>
+
+                    <!-- Row 2: Where This Item Appears (Appointments & Odontogram Presets) -->
+                    <Border Style="{StaticResource UniformSubtleCardBorderStyle}" Padding="12,10" Margin="0,0,0,12">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="8" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="1.45*" />
+                                <ColumnDefinition Width="14" />
+                                <ColumnDefinition Width="*" />
+                            </Grid.ColumnDefinitions>
+
+                            <!-- Appointment Booking Toggle + Duration -->
+                            <CheckBox Grid.Row="0" Grid.Column="0"
+                                      Content="Bookable in Appointments &amp; Walk-In Schedule"
+                                      IsChecked="{Binding IsBookableAppointment, Mode=TwoWay}"
+                                      IsEnabled="{Binding CanBeBookable}"
+                                      VerticalAlignment="Center"
+                                      Style="{StaticResource UniformCheckBoxStyle}" />
+
+                            <DockPanel Grid.Row="0" Grid.Column="2" VerticalAlignment="Center" LastChildFill="True">
+                                <TextBlock DockPanel.Dock="Left"
+                                           Text="Slot Duration (min):"
+                                           Style="{StaticResource UniformLabelTextStyle}"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,8,0" />
+                                <ComboBox ItemsSource="{Binding DurationOptions}"
+                                          SelectedItem="{Binding DefaultDurationMinutes, Mode=TwoWay}"
+                                          IsEnabled="{Binding IsBookableAppointment}"
+                                          Style="{StaticResource UniformComboBoxStyle}" />
+                            </DockPanel>
+
+                            <!-- Odontogram Quick Preset Toggle + Default Tooth Condition -->
+                            <CheckBox Grid.Row="2" Grid.Column="0"
+                                      Content="Show as Odontogram Quick Preset Chip (Clinical Only)"
+                                      IsChecked="{Binding ShowInOdontogramPresets, Mode=TwoWay}"
+                                      IsEnabled="{Binding CanShowInOdontogram}"
+                                      VerticalAlignment="Center"
+                                      Style="{StaticResource UniformCheckBoxStyle}" />
+
+                            <DockPanel Grid.Row="2" Grid.Column="2" VerticalAlignment="Center" LastChildFill="True">
+                                <TextBlock DockPanel.Dock="Left"
+                                           Text="Tooth Condition:"
+                                           Style="{StaticResource UniformLabelTextStyle}"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,8,0" />
+                                <ComboBox ItemsSource="{Binding ToothConditions}"
+                                          SelectedItem="{Binding DefaultToothCondition, Mode=TwoWay}"
+                                          IsEnabled="{Binding ShowInOdontogramPresets}"
+                                          Style="{StaticResource UniformComboBoxStyle}" />
+                            </DockPanel>
+                        </Grid>
+                    </Border>
+
+                    <!-- Row 3: SOAP Note Keywords -->
+                    <StackPanel Margin="0,0,0,12">
+                        <TextBlock Text="Doctor's SOAP Note Keywords (Comma-separated words scanned by Suggestion Engine)"
+                                   Style="{StaticResource UniformLabelTextStyle}"
+                                   Margin="0,0,0,4" />
+                        <TextBox Text="{Binding NoteKeywords, UpdateSourceTrigger=PropertyChanged}"
+                                 ToolTip="Example: extraction, exo, cabut  OR  pcm, paracetamol, panadol"
+                                 Style="{StaticResource UniformInputTextBoxStyle}" />
+                    </StackPanel>
+
+                    <!-- Row 4: Medical Alert Safety Tags -->
+                    <StackPanel Margin="0,0,0,12">
+                        <TextBlock Text="Medical Alert Safety Tags (Optional — e.g. Penicillin, Ibuprofen, NSAID, Pregnancy)"
+                                   Style="{StaticResource UniformLabelTextStyle}"
+                                   Margin="0,0,0,4" />
+                        <TextBox Text="{Binding SafetyAlertTags, UpdateSourceTrigger=PropertyChanged}"
+                                 Style="{StaticResource UniformInputTextBoxStyle}" />
+                    </StackPanel>
+
+                    <!-- Row 5: Commission & Active Status -->
+                    <Border Style="{StaticResource UniformSubtleCardBorderStyle}" Padding="12,10">
+                        <DockPanel LastChildFill="False">
+                            <StackPanel DockPanel.Dock="Left">
+                                <CheckBox Content="Doctor Commission Eligible (40% Net)"
+                                          IsChecked="{Binding IsCommissionable, Mode=TwoWay}"
+                                          IsEnabled="{Binding CanToggleCommission}"
+                                          Style="{StaticResource UniformCheckBoxStyle}"
+                                          Margin="0,0,0,3" />
+                                <TextBlock Text="{Binding CommissionHintText}"
+                                           Style="{StaticResource UniformMutedTextStyle}" />
+                            </StackPanel>
+
+                            <CheckBox DockPanel.Dock="Right"
+                                      Content="Active in Master Catalogue"
+                                      IsChecked="{Binding IsActive, Mode=TwoWay}"
+                                      VerticalAlignment="Center"
+                                      Style="{StaticResource UniformCheckBoxStyle}" />
+                        </DockPanel>
+                    </Border>
+                </StackPanel>
+            </Border>
+        </controls:ModalDialogShell.DialogContent>
+
+        <controls:ModalDialogShell.FooterLeftContent>
+            <TextBlock Text="{Binding StatusMessage}"
+                       Style="{StaticResource UniformBodyTextStyle}"
+                       Foreground="{StaticResource BrandPrimaryBrush}"
+                       FontWeight="SemiBold"
+                       VerticalAlignment="Center" />
+        </controls:ModalDialogShell.FooterLeftContent>
+
+        <controls:ModalDialogShell.FooterContent>
+            <Button Content="Save Catalogue Item"
+                    Command="{Binding SaveCommand}"
+                    Style="{StaticResource UniformPrimaryButtonStyle}" />
+        </controls:ModalDialogShell.FooterContent>
+    </controls:ModalDialogShell>
+</Window>

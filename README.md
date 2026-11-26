@@ -33,9 +33,9 @@ graph TD
 | **Shared Domain & Math** | `src/Occlusa.Shared` | Cross-platform `net8.0` DTOs, enums, `AppointmentCalendarHelper` (calendar grids, slot availability, treatment capability & flexible patient matching), deterministic `BillingCalculator`, Malaysian `MyKadParser`, and `EmergencyTriageClassifier`. |
 | **Web API & SignalR Hub** | `src/Occlusa.Api` | ASP.NET Core 8 REST API, SignalR `/hubs/queue`, `InMemoryOcclusaRepository` (0-config fallback) / `NpgsqlSupabaseRepository`, and WhatsApp AI Receptionist. |
 | **Native WPF Desktop** | `src/Occlusa.Desktop` | `net8.0-windows` desktop client with uniform 3–5 column paged tables (zero scrollbars, zero ellipsis truncation), 1080p/1440p responsiveness, `LocalApiHostService` embedded in-process Kestrel host with auto-recovery, true modal dialogs with unsaved-changes guard, pinned medical alerts, unified Live Queue with shared Walk-In intake & Active Staff attribution, per-visit anatomical 52-tooth FDI odontogram (5-surface charting), 15-minute proportional Appointments timeline with drag-and-drop rescheduling, and PC/SC MyKad reader. |
-| **xUnit Test Suite** | `src/Occlusa.Tests` | 81 deterministic unit and Kestrel HTTP pipeline tests covering Live Queue sorting, reception note formatting & walk-in note lifecycle persistence, Walk-In slot blocking, staff attribution, appointments, 15-minute timeline layout & overlap splitting, dentist-locked drag rescheduling, treatment capability filtering, patient lookup, billing, NRIC parsing, and WhatsApp emergency triage. |
-| **Supabase Schema & RLS** | `supabase/migrations/` | PostgreSQL schema migrations (`001` core schema & RLS, `002` dentists/treatments/appointments relations, `003` dentist treatment capabilities, `004` live queue walk-ins & staff attribution, `005` patient visits & per-visit odontograms) with clinic-group clinical sharing, branch-isolated financials, and immutable append-only audit logs. |
-| **Architecture Docs** | `docs/` | UI uniformity rules (`docs/UI_UNIFORMITY_RULES.md`) and Appointments scheduling specification (`docs/architecture/APPOINTMENTS_SCHEDULING.md`). |
+| **xUnit Test Suite** | `src/Occlusa.Tests` | 94 deterministic unit and Kestrel HTTP pipeline tests covering Live Queue sorting, reception note formatting & walk-in note lifecycle persistence, Walk-In slot blocking, staff attribution, appointments, 15-minute timeline layout & overlap splitting, dentist-locked drag rescheduling, treatment capability filtering, patient lookup, unified Master Catalogue syncing, decoupled billing & OTC 0% commission, shared patient credit wallet, smart invoice suggestions, NRIC parsing, and WhatsApp emergency triage. |
+| **Supabase Schema & RLS** | `supabase/migrations/` | PostgreSQL schema migrations (`001` core schema & RLS, `002` dentists/treatments/appointments relations, `003` dentist treatment capabilities, `004` live queue walk-ins & staff attribution, `005` patient visits & per-visit odontograms, `006` unified Master Catalogue, decoupled billing, shared patient credit wallet & doctor invoice settings) with clinic-group clinical sharing, branch-isolated financials, and immutable append-only audit logs. |
+| **Architecture Docs** | `docs/` | UI uniformity rules (`docs/UI_UNIFORMITY_RULES.md`), Appointments scheduling specification (`docs/architecture/APPOINTMENTS_SCHEDULING.md`), and step-by-step Clinical Notes & Invoicing walkthrough (`docs/NOTES_AND_INVOICING_WALKTHROUGH.md`). |
 | **Backup Verification** | `scripts/verify-daily-backup.ps1` | Daily AES-256 encrypted `pg_dump` / dry-run archive verification with SHA-256 checksums and API logging. |
 
 ---
@@ -45,8 +45,9 @@ graph TD
 ```text
 ├── docs/
 │   ├── architecture/
-│   │   └── APPOINTMENTS_SCHEDULING.md # Relational calendar & 4-step booking architecture
-│   └── UI_UNIFORMITY_RULES.md         # Zero-scrollbar / zero-ellipsis desktop UI contract
+│   │   └── APPOINTMENTS_SCHEDULING.md     # Relational calendar & 4-step booking architecture
+│   ├── NOTES_AND_INVOICING_WALKTHROUGH.md # Step-by-step clinical notes & invoicing guide
+│   └── UI_UNIFORMITY_RULES.md             # Zero-scrollbar / zero-ellipsis desktop UI contract
 ├── scripts/
 │   └── verify-daily-backup.ps1        # Encrypted backup verification runner
 ├── src/
@@ -68,14 +69,15 @@ graph TD
 │   ├── Occlusa.Shared/                # Pure domain models & scheduling/billing helpers
 │   │   ├── Models/
 │   │   └── Services/
-│   └── Occlusa.Tests/                 # xUnit verification suite (81 tests)
+│   └── Occlusa.Tests/                 # xUnit verification suite (94 tests)
 ├── supabase/
 │   └── migrations/
 │       ├── 001_occlusa_tier1_tier2_schema_rls.sql
 │       ├── 002_appointments_dentists_treatments.sql
 │       ├── 003_dentist_treatment_capabilities.sql
 │       ├── 004_live_queue_walkins_and_attribution.sql
-       └── 005_patient_visits_and_visit_odontograms.sql
+│       ├── 005_patient_visits_and_visit_odontograms.sql
+│       └── 006_decoupled_billing_credits_and_settings.sql
 ├── CHANGELOG.md                       # SemVer release history
 ├── Directory.Build.props              # Synchronized SemVer version metadata
 ├── Occlusa.sln                        # Visual Studio / .NET solution
@@ -89,7 +91,7 @@ graph TD
 1. **Zero Scrollbars & Zero Ellipsis Truncation:** Desktop views and modals paginate cleanly (`UniformPagedGrid`, auto-sized for 1920x1080 and 2560x1440) with 3–4 focused columns and double-click modal popups (`ModalDialogShell` with `HasUnsavedChanges` guard).
 2. **Clinical Sharing vs. Financial Isolation (RLS):** Clinical data (`patients`, `medical_alerts`, `odontogram_entries`, `soap_notes`) is shared across branches within the same `clinic_group_id` (`OCCLUSA-MY`), while financial records (`invoices`, `invoice_lines`, `payments`, `daily_sales_reconciliations`, `audit_logs`) are strictly isolated by `branch_id = ANY(auth_allowed_branches())`.
 3. **Immutable History (Soft-Delete / Void Only):** Hard `DELETE` is prohibited on `invoices`, `invoice_lines`, `payments`, `soap_notes`, `daily_sales_reconciliations`, `patients`, and `audit_logs`. Voiding an invoice preserves the record and appends an immutable `AuditLogDto`.
-4. **Odontogram-to-Invoice Synchronization:** Marking an FDI tooth treatment stage as `Completed` automatically creates or updates the corresponding line item on the patient's active draft invoice and broadcasts `InvoiceUpdated` over SignalR.
+4. **Unified Master Catalogue & Strictly Decoupled Clinical Notes / Smart Invoicing:** One unified **Master Catalogue** (`billing_catalog_items`) powers Appointment Booking, Odontogram Quick Presets, Doctor Suggestion Rules, Invoice Checkout, Walk-In OTC Retail Sales, and WhatsApp AI quotes. Clinical Visit Records (`patient_visits`, `visit_odontogram_entries`) store **zero monetary amounts** so reception edits on unpaid Draft Invoices never mutate or contradict a doctor's clinical report. At checkout, `InvoiceSuggestionEngine` combines per-doctor Settings (`Auto-Populate`, `Blank + Suggestions`, or `Manual Blank`), Treatment → Companion rules, and SOAP note keyword scanning, while Over-The-Counter (`OtcProduct`) items enforce `0%` doctor commission and overpayments can be returned as cash change or stored in a clinic-group shared **Patient Credit Wallet**.
 5. **WhatsApp AI Receptionist Guardrails:**
    - Every AI-created booking enters the queue as `QueueStatus.AiBookedPending` for front-desk approval.
    - Routine scope only (hours, clinic locations, standard Consultation/Scaling/Filling rates & slots). Complex/surgical requests (implants, wisdom tooth surgery, full-mouth rehab, braces, sedation) are blocked from self-booking and routed to front-desk callback.
@@ -105,7 +107,7 @@ graph TD
 - [x] **4-Step Booking & Inline Registration:** Treatment-to-dentist capability filtering, hourly slot availability lookup, dash-tolerant IC / name / phone search, and atomic `POST /api/appointments/register-and-book`.
 - [x] **Patient Registry & Per-Visit Records (MDA / MDC / KKM):** Patients hold `0..N` visit records. Reception can register standalone patients (`+ Register Patient`, 0 visits); seating an appointment `InChair` auto-creates a linked visit, and clinicians can add `+ New Visit Record` manually. `PatientDetailModal` shows editable demographics plus a 4-column paged visit grid; each visit opens `VisitRecordModal` with its own SOAP notes and **its own independent odontogram**. Historical edits are allowed and audited (`PATIENT_VISIT_UPDATED`, `VISIT_ODONTOGRAM_UPDATED`), while settled invoices are never mutated.
 - [x] **Kreloses-Style Anatomical Odontogram (52 FDI teeth):** `AnatomicalToothControl` renders crown + root vector silhouettes with a midline-aware 5-surface (`M`, `O/I`, `D`, `B`, `L`) occlusal chart for Permanent (`11–48`) and Primary (`51–85`) dentition. New visits carry forward the prior visit's chart (completed work becomes an RM 0 baseline, completed extractions become `Missing`, unfinished Proposed/Accepted items carry intact), with `Reset to Blank` / `Re-Sync Prior Visit`. Tooth outlines adapted from [ZoliQua/React-Advanced-Odontogram](https://github.com/ZoliQua/React-Advanced-Odontogram) (MIT).
-- [x] **Visit-Scoped Billing:** Completed procedures sync into that visit's draft invoice with surface labels (e.g. `Tooth #16 (OD) - Composite Filling`), plus split-payment invoices, panel/TPA deductions, and practitioner commission calculations.
+- [x] **Unified Master Catalogue & Decoupled Smart Invoicing:** Single **Master Catalogue** workspace powering Appointments, Odontogram Quick Presets, Doctor Suggestion Rules, Invoice Checkout, Walk-In OTC Sales (`0%` commission), and live WhatsApp AI fee quotes. Dentists record zero-price clinical visit reports and initiate Draft Invoices (`Save & Create Invoice →` / `Checkout / Invoice`) with deterministic SOAP keyword & companion suggestions and medical alert warnings; receptionists edit drafts freely, redeem or store overpayments in a cross-branch **Patient Credit Wallet**, and settle split/panel payments with automatic queue completion.
 - [x] **Malaysian MyKad PC/SC Reader:** Hardware USB smartcard parsing via `winscard.dll` plus built-in **Simulate MyKad Insert** for testing.
 - [x] **WhatsApp AI Receptionist & Emergency Triage:** Guardrailed booking flow with front-desk approval and SignalR emergency escalation.
 - [x] **Zero-Config Local Mode & Embedded API Host:** `Occlusa.Desktop` probes `http://localhost:5188/api/health` for an external API or hosts `Occlusa.Api` in-process on Kestrel with ephemeral loopback port fallback (`http://127.0.0.1:0`) and transparent `HttpRequestException` recovery.
@@ -152,7 +154,7 @@ When `Supabase:ConnectionString`, `Gemini:ApiKey`, and `WhatsApp:AccessToken` ar
 
 ## Running Tests
 
-Run the full automated verification suite (`81` xUnit tests):
+Run the full automated verification suite (`94` xUnit tests):
 
 ```powershell
 dotnet test src\Occlusa.Tests\Occlusa.Tests.csproj --logger "console;verbosity=normal"
@@ -171,6 +173,7 @@ Never commit real credentials. Configure secrets using `src/Occlusa.Api/appsetti
    3. `supabase/migrations/003_dentist_treatment_capabilities.sql`
    4. `supabase/migrations/004_live_queue_walkins_and_attribution.sql`
    5. `supabase/migrations/005_patient_visits_and_visit_odontograms.sql` (creates `patient_visits` & `visit_odontogram_entries`, links `appointments`/`invoices` via `visit_id`, and idempotently backfills legacy `soap_notes` / `odontogram_entries`)
+   6. `supabase/migrations/006_decoupled_billing_credits_and_settings.sql` (adds unified Master Catalogue `billing_catalog_items`, `doctor_invoice_preferences`, `patient_credit_ledger`, walk-in retail invoice support, and OTC commission columns)
 2. Set `Supabase:ConnectionString` (Transaction/Session Pooler connection string) in `appsettings.Development.json` or environment variable `Supabase__ConnectionString`.
 3. Ensure your authentication JWTs include `clinic_group_id` (e.g. `"OCCLUSA-MY"`) and `allowed_branches` (e.g. `["HQ-KL"]`). `Occlusa.Api` automatically calls `set_config('request.jwt.claims', ...)` per transaction.
 

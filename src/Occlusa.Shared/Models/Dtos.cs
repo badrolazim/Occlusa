@@ -100,8 +100,27 @@ public class PatientDto
     public MedicalAlertDto MedicalAlerts { get; set; } = new();
     public bool IsMyKadVerified { get; set; }
     public DateTimeOffset? ConsentSignedAt { get; set; }
+    public decimal CreditBalance { get; set; }
     public int VisitCount { get; set; }
     public DateTimeOffset? LastVisitAt { get; set; }
+}
+
+/// <summary>
+/// Append-only ledger entry tracking patient credit deposits, redemptions, and void reversals across branches.
+/// </summary>
+public class PatientCreditEntryDto
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid PatientId { get; set; }
+    public string BranchId { get; set; } = "HQ-KL";
+    public Guid? InvoiceId { get; set; }
+    public string InvoiceNumber { get; set; } = string.Empty;
+    public decimal AmountDelta { get; set; }
+    public decimal BalanceAfter { get; set; }
+    public string EntryType { get; set; } = string.Empty;
+    public string Notes { get; set; } = string.Empty;
+    public string RecordedBy { get; set; } = string.Empty;
+    public DateTimeOffset CreatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
 /// <summary>
@@ -240,7 +259,7 @@ public class SoapNoteDto
 }
 
 /// <summary>
-/// Reusable clinical SOAP template macro with default procedure fee.
+/// Reusable pure-clinical SOAP template macro (strictly free of monetary fields).
 /// </summary>
 public class SoapMacroDto
 {
@@ -251,17 +270,19 @@ public class SoapMacroDto
     public string ObjectiveTemplate { get; set; } = string.Empty;
     public string AssessmentTemplate { get; set; } = string.Empty;
     public string PlanTemplate { get; set; } = string.Empty;
-    public decimal DefaultFee { get; set; }
 }
 
 /// <summary>
-/// Individual billed line item on a patient invoice.
+/// Individual billed line item on a patient or walk-in retail invoice.
 /// </summary>
 public class InvoiceLineDto
 {
     public Guid Id { get; set; } = Guid.NewGuid();
+    public Guid? CatalogItemId { get; set; }
     public int? ToothNumber { get; set; }
     public string ProcedureName { get; set; } = string.Empty;
+    public BillingCatalogCategory Category { get; set; } = BillingCatalogCategory.Procedure;
+    public bool IsCommissionable { get; set; } = true;
     public decimal UnitPrice { get; set; }
     public int Quantity { get; set; } = 1;
     public decimal LineTotal { get; set; }
@@ -280,7 +301,7 @@ public class PaymentSplitDto
 }
 
 /// <summary>
-/// Branch-isolated billing invoice supporting panel claims, split payments, and voiding.
+/// Branch-isolated billing invoice supporting panel claims, split payments, patient credit, OTC retail, and voiding.
 /// </summary>
 public class InvoiceDto
 {
@@ -288,6 +309,7 @@ public class InvoiceDto
     public string InvoiceNumber { get; set; } = string.Empty;
     public string BranchId { get; set; } = "HQ-KL";
     public Guid PatientId { get; set; }
+    public bool IsWalkInRetail { get; set; }
     public string PatientName { get; set; } = string.Empty;
     public string DoctorName { get; set; } = string.Empty;
     public Guid? AppointmentId { get; set; }
@@ -299,6 +321,7 @@ public class InvoiceDto
     public string? PanelName { get; set; }
     public decimal PatientPayableAmount { get; set; }
     public decimal PaidAmount { get; set; }
+    public decimal CreditedOverpaymentAmount { get; set; }
     public decimal DoctorCommissionAmount { get; set; }
     public List<PaymentSplitDto> Payments { get; set; } = new();
     public bool IsVoided { get; set; }
@@ -323,6 +346,8 @@ public class DailySalesReconciliationDto
     public decimal TotalCashCollected { get; set; }
     public decimal TotalCardCollected { get; set; }
     public decimal TotalQrCollected { get; set; }
+    public decimal TotalCreditRedeemed { get; set; }
+    public decimal TotalCreditDeposited { get; set; }
     public decimal TotalDoctorCommissions { get; set; }
     public decimal NetCollected { get; set; }
     public bool IsBalanced { get; set; }
@@ -421,6 +446,107 @@ public class ClinicDashboardSnapshotDto
     public List<SoapMacroDto> SoapMacros { get; set; } = new();
     public List<WhatsAppThreadDto> WhatsAppThreads { get; set; } = new();
     public DailySalesReconciliationDto DailySummary { get; set; } = new();
+    public BillingSettingsSnapshotDto BillingSettings { get; set; } = new();
+}
+
+/// <summary>
+/// Single unified Master Catalogue item powering Appointment Booking (when IsBookableAppointment == true),
+/// Visit Odontogram Quick Presets (when ShowInOdontogramPresets == true), Doctor Suggestion Rules,
+/// Invoice Checkout, Walk-In OTC Retail Sales, and WhatsApp AI routine fee quotes.
+/// </summary>
+public class BillingCatalogItemDto
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Name { get; set; } = string.Empty;
+    public BillingCatalogCategory Category { get; set; } = BillingCatalogCategory.Procedure;
+    public string ClinicalSubcategory { get; set; } = "General";
+    public decimal UnitPrice { get; set; }
+    public bool IsCommissionable { get; set; } = true;
+    public bool IsBookableAppointment { get; set; }
+    public int DefaultDurationMinutes { get; set; } = 30;
+    public bool ShowInOdontogramPresets { get; set; }
+    public ToothCondition DefaultToothCondition { get; set; } = ToothCondition.Healthy;
+    public string NoteKeywords { get; set; } = string.Empty;
+    public string SafetyAlertTags { get; set; } = string.Empty;
+    public bool IsActive { get; set; } = true;
+
+    public TreatmentDto ToBookableTreatmentDto() => new()
+    {
+        Id = Id,
+        Name = Name,
+        Category = string.IsNullOrWhiteSpace(ClinicalSubcategory) ? Category.ToString() : ClinicalSubcategory,
+        DefaultDurationMinutes = Math.Clamp(DefaultDurationMinutes > 0 ? DefaultDurationMinutes : 30, 15, 480),
+        DefaultFee = UnitPrice,
+        IsActive = IsActive
+    };
+}
+
+/// <summary>
+/// Maps a primary Master Catalogue procedure (TreatmentId == BillingCatalogItemDto.Id)
+/// to companion Master Catalogue items to suggest on draft invoices.
+/// </summary>
+public class TreatmentSuggestionRuleDto
+{
+    public Guid TreatmentId { get; set; }
+    public string TreatmentName { get; set; } = string.Empty;
+    public List<Guid> SuggestedCatalogItemIds { get; set; } = new();
+}
+
+/// <summary>
+/// Clinic-default (DentistId == null) or dentist-specific checkout invoice behavior and treatment suggestion overrides.
+/// </summary>
+public class DoctorInvoicePreferenceDto
+{
+    public Guid? DentistId { get; set; }
+    public string DoctorName { get; set; } = "Clinic Default (All Doctors)";
+    public DoctorInvoiceInitMode InitMode { get; set; } = DoctorInvoiceInitMode.AutoPopulateWithSuggestions;
+    public bool EnableNoteKeywordEngine { get; set; } = true;
+    public List<TreatmentSuggestionRuleDto> TreatmentRules { get; set; } = new();
+}
+
+/// <summary>
+/// Unified Master Catalogue, Corporate Panels, and Doctor Invoice Preferences synchronized to workstations.
+/// </summary>
+public class BillingSettingsSnapshotDto
+{
+    public List<BillingCatalogItemDto> CatalogItems { get; set; } = new();
+    public List<DoctorInvoicePreferenceDto> DoctorPreferences { get; set; } = new();
+    public List<string> CorporatePanels { get; set; } =
+    [
+        "AIA Dental Panel",
+        "PMCare",
+        "MiCare",
+        "Mednefits",
+        "CompuMed",
+        "Allianz Corporate"
+    ];
+}
+
+/// <summary>
+/// Single suggested invoice item produced by <see cref="Services.InvoiceSuggestionEngine"/>.
+/// </summary>
+public class InvoiceSuggestionItemDto
+{
+    public Guid CatalogItemId { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public BillingCatalogCategory Category { get; set; } = BillingCatalogCategory.Procedure;
+    public decimal UnitPrice { get; set; }
+    public bool IsCommissionable { get; set; }
+    public int? ToothNumber { get; set; }
+    public string SourceReason { get; set; } = string.Empty;
+    public string SafetyWarning { get; set; } = string.Empty;
+    public bool HasSafetyWarning => !string.IsNullOrWhiteSpace(SafetyWarning);
+}
+
+/// <summary>
+/// Output of evaluating a patient visit, appointment, SOAP notes, and doctor settings for draft invoice initiation.
+/// </summary>
+public class VisitInvoiceSuggestionResultDto
+{
+    public DoctorInvoiceInitMode AppliedMode { get; set; } = DoctorInvoiceInitMode.AutoPopulateWithSuggestions;
+    public string PreferenceSourceLabel { get; set; } = "Clinic Default";
+    public List<InvoiceLineDto> AutoPopulatedLines { get; set; } = new();
+    public List<InvoiceSuggestionItemDto> SuggestedAddOns { get; set; } = new();
 }
 
 /// <summary>
@@ -581,8 +707,56 @@ public class ApplyPaymentRequest
     public string? PanelName { get; set; }
     public decimal PanelCoveredAmount { get; set; }
     public List<PaymentSplitDto> Payments { get; set; } = new();
+    public OverpaymentHandling OverpaymentHandling { get; set; } = OverpaymentHandling.None;
+    public decimal? AvailablePatientCredit { get; set; }
     public decimal DoctorCommissionRate { get; set; } = 0.40m;
     public string? CollectedBy { get; set; }
+}
+
+public class SaveInvoiceDraftRequest
+{
+    public Guid? InvoiceId { get; set; }
+    public string BranchId { get; set; } = "HQ-KL";
+    public Guid? PatientId { get; set; }
+    public bool IsWalkInRetail { get; set; }
+    public string PatientName { get; set; } = string.Empty;
+    public string DoctorName { get; set; } = string.Empty;
+    public Guid? AppointmentId { get; set; }
+    public Guid? VisitId { get; set; }
+    public List<InvoiceLineDto> Lines { get; set; } = new();
+    public decimal DiscountAmount { get; set; }
+    public string? PanelName { get; set; }
+    public decimal PanelCoveredAmount { get; set; }
+    public bool SendToCounterCheckout { get; set; }
+    public string? UpdatedBy { get; set; }
+}
+
+public class UpsertBillingCatalogItemRequest
+{
+    public Guid? Id { get; set; }
+    public string Name { get; set; } = string.Empty;
+    public BillingCatalogCategory Category { get; set; } = BillingCatalogCategory.Procedure;
+    public string ClinicalSubcategory { get; set; } = "General";
+    public decimal UnitPrice { get; set; }
+    public bool IsCommissionable { get; set; } = true;
+    public bool IsBookableAppointment { get; set; }
+    public int DefaultDurationMinutes { get; set; } = 30;
+    public bool ShowInOdontogramPresets { get; set; }
+    public ToothCondition DefaultToothCondition { get; set; } = ToothCondition.Healthy;
+    public string NoteKeywords { get; set; } = string.Empty;
+    public string SafetyAlertTags { get; set; } = string.Empty;
+    public bool IsActive { get; set; } = true;
+    public string? UpdatedBy { get; set; }
+}
+
+public class SaveDoctorInvoicePreferenceRequest
+{
+    public Guid? DentistId { get; set; }
+    public string DoctorName { get; set; } = "Clinic Default (All Doctors)";
+    public DoctorInvoiceInitMode InitMode { get; set; } = DoctorInvoiceInitMode.AutoPopulateWithSuggestions;
+    public bool EnableNoteKeywordEngine { get; set; } = true;
+    public List<TreatmentSuggestionRuleDto> TreatmentRules { get; set; } = new();
+    public string? UpdatedBy { get; set; }
 }
 
 public class VoidInvoiceRequest

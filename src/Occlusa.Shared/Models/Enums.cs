@@ -52,7 +52,42 @@ public enum PaymentMethod
     Cash,
     Card,
     QrTransfer,
-    CorporatePanel
+    CorporatePanel,
+    PatientCredit
+}
+
+/// <summary>
+/// Categorization of billable clinic items controlling doctor commission eligibility.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum BillingCatalogCategory
+{
+    Procedure,
+    Radiograph,
+    Medication,
+    OtcProduct
+}
+
+/// <summary>
+/// Per-doctor preference controlling how a new draft invoice initializes at patient checkout.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum DoctorInvoiceInitMode
+{
+    AutoPopulateWithSuggestions,
+    BlankWithSuggestions,
+    BlankManualOnly
+}
+
+/// <summary>
+/// Explicit cashier choice when tendered amount exceeds invoice balance due.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum OverpaymentHandling
+{
+    None,
+    ReturnCashChange,
+    StoreAsPatientCredit
 }
 
 /// <summary>

@@ -6,7 +6,7 @@ using Occlusa.Shared.Models;
 namespace Occlusa.Api.Controllers;
 
 [ApiController]
-[Route("api/invoices")]
+[Route("api")]
 public sealed class InvoicesController : ControllerBase
 {
     private readonly IOcclusaRepository _repository;
@@ -18,7 +18,7 @@ public sealed class InvoicesController : ControllerBase
         _notifier = notifier;
     }
 
-    [HttpGet]
+    [HttpGet("invoices")]
     public async Task<ActionResult<IReadOnlyList<InvoiceDto>>> GetInvoices(
         [FromQuery] string? branchId = null,
         CancellationToken ct = default)
@@ -27,14 +27,36 @@ public sealed class InvoicesController : ControllerBase
         return Ok(invoices);
     }
 
-    [HttpGet("{id:guid}")]
+    [HttpGet("invoices/{id:guid}")]
     public async Task<ActionResult<InvoiceDto>> GetInvoice(Guid id, CancellationToken ct = default)
     {
         var invoice = await _repository.GetInvoiceByIdAsync(id, ct);
         return invoice is null ? NotFound() : Ok(invoice);
     }
 
-    [HttpPost("{id:guid}/pay")]
+    [HttpPost("invoices/draft")]
+    public async Task<ActionResult<InvoiceDto>> SaveInvoiceDraft(
+        [FromBody] SaveInvoiceDraftRequest request,
+        CancellationToken ct = default)
+    {
+        var (invoice, updatedQueueItem, error) = await _repository.SaveInvoiceDraftAsync(request, ct);
+        if (error is not null || invoice is null)
+        {
+            return (error ?? string.Empty).Contains("not found", StringComparison.OrdinalIgnoreCase)
+                ? NotFound(error)
+                : BadRequest(error ?? "Could not save invoice draft.");
+        }
+
+        await _notifier.NotifyInvoiceUpdatedAsync(invoice, ct);
+        if (updatedQueueItem is not null)
+        {
+            await _notifier.NotifyQueueUpdatedAsync(updatedQueueItem, ct);
+        }
+
+        return Ok(invoice);
+    }
+
+    [HttpPost("invoices/{id:guid}/pay")]
     public async Task<ActionResult<InvoiceDto>> ApplyPayment(
         Guid id,
         [FromBody] ApplyPaymentRequest request,
@@ -57,7 +79,7 @@ public sealed class InvoicesController : ControllerBase
         return Ok(invoice);
     }
 
-    [HttpPost("{id:guid}/void")]
+    [HttpPost("invoices/{id:guid}/void")]
     public async Task<ActionResult<InvoiceDto>> VoidInvoice(
         Guid id,
         [FromBody] VoidInvoiceRequest request,
@@ -73,5 +95,14 @@ public sealed class InvoicesController : ControllerBase
 
         await _notifier.NotifyInvoiceUpdatedAsync(invoice!, ct);
         return Ok(invoice);
+    }
+
+    [HttpGet("patients/{patientId:guid}/credits")]
+    public async Task<ActionResult<IReadOnlyList<PatientCreditEntryDto>>> GetPatientCredits(
+        Guid patientId,
+        CancellationToken ct = default)
+    {
+        var entries = await _repository.GetPatientCreditLedgerAsync(patientId, ct);
+        return Ok(entries);
     }
 }

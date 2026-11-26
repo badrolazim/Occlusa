@@ -71,8 +71,20 @@ public interface IOcclusaRepository
 
     Task<IReadOnlyList<InvoiceDto>> GetInvoicesAsync(string? branchId = null, CancellationToken ct = default);
     Task<InvoiceDto?> GetInvoiceByIdAsync(Guid invoiceId, CancellationToken ct = default);
+    Task<(InvoiceDto? Invoice, AppointmentQueueItemDto? UpdatedQueueItem, string? Error)> SaveInvoiceDraftAsync(
+        SaveInvoiceDraftRequest request,
+        CancellationToken ct = default);
     Task<(InvoiceDto? Invoice, AppointmentQueueItemDto? UpdatedQueueItem, string? Error)> ApplyInvoicePaymentAsync(Guid invoiceId, ApplyPaymentRequest request, CancellationToken ct = default);
     Task<(InvoiceDto? Invoice, string? Error)> VoidInvoiceAsync(Guid invoiceId, VoidInvoiceRequest request, CancellationToken ct = default);
+    Task<IReadOnlyList<PatientCreditEntryDto>> GetPatientCreditLedgerAsync(Guid patientId, CancellationToken ct = default);
+
+    Task<BillingSettingsSnapshotDto> GetBillingSettingsAsync(CancellationToken ct = default);
+    Task<(BillingCatalogItemDto? Item, string? Error)> UpsertBillingCatalogItemAsync(
+        UpsertBillingCatalogItemRequest request,
+        CancellationToken ct = default);
+    Task<(DoctorInvoicePreferenceDto? Preference, string? Error)> SaveDoctorInvoicePreferenceAsync(
+        SaveDoctorInvoicePreferenceRequest request,
+        CancellationToken ct = default);
 
     Task<DailySalesReconciliationDto> GetDailySalesSummaryAsync(string branchId, DateOnly date, CancellationToken ct = default);
     Task<DailySalesReconciliationDto> ReconcileDailySalesAsync(ReconcileDailySalesRequest request, CancellationToken ct = default);

@@ -2,257 +2,561 @@
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:controls="clr-namespace:Occlusa.Desktop.Controls"
-        Title="Invoice Checkout &amp; Split Payment"
-        Width="1160"
-        Height="780"
-        MinWidth="1000"
-        MinHeight="700"
+        Title="Invoice Builder, OTC Counter &amp; Split-Payment Checkout"
+        Width="1300"
+        Height="850"
+        MinWidth="1120"
+        MinHeight="760"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
         Background="{StaticResource SurfaceCanvasBrush}"
         ScrollViewer.VerticalScrollBarVisibility="Disabled"
         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
 
-    <controls:ModalDialogShell Title="{Binding ModalTitle}"
+    <controls:ModalDialogShell x:Name="DialogShell"
+                               Title="{Binding ModalTitle}"
                                Subtitle="{Binding ModalSubtitle}"
                                BadgeText="{Binding StatusBadgeText}"
                                HasUnsavedChanges="{Binding HasUnsavedChanges, Mode=TwoWay}"
-                               SaveCommand="{Binding SettlePaymentCommand}"
-                               UnsavedPromptTitle="Unsaved Billing Edits"
-                               UnsavedPromptMessage="You have unsubmitted payment or void changes. Apply payment before closing?">
+                               SaveCommand="{Binding SaveDraftInvoiceCommand}"
+                               UnsavedPromptTitle="Unsaved Invoice Changes"
+                               UnsavedPromptMessage="You have unsaved invoice items or payment edits. Save invoice draft before closing?">
 
         <controls:ModalDialogShell.DialogContent>
             <Grid>
-                <Grid.ColumnDefinitions>
-                    <ColumnDefinition Width="1.15*" />
-                    <ColumnDefinition Width="14" />
-                    <ColumnDefinition Width="*" />
-                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
 
-                <!-- Left Column: Paged Line Items & Live Commission / Balance Summary -->
-                <Grid Grid.Column="0">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="12" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
+                <!-- Row 0: Customer / Walk-In OTC Picker (Shown when creating a standalone Counter Invoice) -->
+                <Border Grid.Row="0"
+                        Visibility="{Binding IsStandaloneCreateMode, Converter={StaticResource BoolToVisibilityConverter}}"
+                        Style="{StaticResource UniformCardBorderStyle}"
+                        Padding="12,8"
+                        Margin="0,0,0,10">
+                    <DockPanel LastChildFill="True">
+                        <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,12,0">
+                            <RadioButton GroupName="CustomerTypeMode"
+                                         Content="Walk-In Retail (OTC)"
+                                         IsChecked="{Binding IsWalkInRetailMode, Mode=OneWay}"
+                                         Command="{Binding SetCustomerModeCommand}"
+                                         CommandParameter="Retail"
+                                         Style="{StaticResource UniformSegmentedToggleRadioStyle}"
+                                         Margin="0,0,6,0" />
+                            <RadioButton GroupName="CustomerTypeMode"
+                                         Content="Registered Patient"
+                                         IsChecked="{Binding IsRegisteredPatientMode, Mode=OneWay}"
+                                         Command="{Binding SetCustomerModeCommand}"
+                                         CommandParameter="Patient"
+                                         Style="{StaticResource UniformSegmentedToggleRadioStyle}" />
+                        </StackPanel>
 
-                    <controls:UniformPagedGrid Grid.Row="0"
-                                               Title="Itemized Procedures"
-                                               Subtitle="4 Columns · Paged (No Scrollbars)"
-                                               EmptyMessage="No billed procedures on this invoice yet."
-                                               ItemsSource="{Binding LineRows}"
-                                               AutoPageSize="False"
-                                               PageSize="5">
-                        <controls:UniformColumnDef Header="Tooth" BindingPath="ToothDisplay" WidthRatio="0.8" IsMonospace="True" />
-                        <controls:UniformColumnDef Header="Procedure" BindingPath="ProcedureName" WidthRatio="2.2" IsBold="True" />
-                        <controls:UniformColumnDef Header="Qty" BindingPath="Quantity" WidthRatio="0.6" HorizontalAlignment="Center" />
-                        <controls:UniformColumnDef Header="Total (RM)" BindingPath="LineTotalDisplay" WidthRatio="1.1" IsMonospace="True" HorizontalAlignment="Right" />
-                    </controls:UniformPagedGrid>
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="12,0,0,0">
+                            <TextBlock Text="Clinician / Counter:" Style="{StaticResource UniformLabelTextStyle}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                            <ComboBox ItemsSource="{Binding DoctorOptions}"
+                                      SelectedItem="{Binding SelectedDoctorName, Mode=TwoWay}"
+                                      IsEnabled="{Binding IsRegisteredPatientMode}"
+                                      Width="175"
+                                      Height="30"
+                                      Style="{StaticResource UniformComboBoxStyle}" />
+                        </StackPanel>
 
-                    <!-- Symmetric KPI Financial Summary Card -->
-                    <Border Grid.Row="2" Style="{StaticResource UniformCardBorderStyle}">
-                        <StackPanel>
-                            <Grid Margin="0,0,0,10">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="10" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <Grid.RowDefinitions>
-                                    <RowDefinition Height="Auto" />
-                                    <RowDefinition Height="10" />
-                                    <RowDefinition Height="Auto" />
-                                </Grid.RowDefinitions>
+                        <!-- Retail Customer Label Input -->
+                        <StackPanel Orientation="Horizontal"
+                                    VerticalAlignment="Center"
+                                    Visibility="{Binding IsWalkInRetailMode, Converter={StaticResource BoolToVisibilityConverter}}">
+                            <TextBlock Text="Customer Label:" Style="{StaticResource UniformLabelTextStyle}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                            <TextBox Text="{Binding WalkInCustomerNameInput, UpdateSourceTrigger=PropertyChanged}"
+                                     Width="240"
+                                     Height="30"
+                                     Style="{StaticResource UniformInputTextBoxStyle}"
+                                     Margin="0,0,10,0" />
+                            <TextBlock Text="OTC Counter Sale · 0% Doctor Commission"
+                                       Style="{StaticResource UniformMutedTextStyle}"
+                                       VerticalAlignment="Center" />
+                        </StackPanel>
 
-                                <Border Grid.Row="0" Grid.Column="0" Style="{StaticResource UniformSubtleCardBorderStyle}">
-                                    <StackPanel>
-                                        <TextBlock Text="Invoice Subtotal" Style="{StaticResource UniformLabelTextStyle}" />
-                                        <TextBlock Text="{Binding Invoice.Subtotal, StringFormat='RM {0:N2}'}"
-                                                   Style="{StaticResource UniformSectionTitleTextStyle}"
-                                                   Margin="0,3,0,0" />
-                                    </StackPanel>
-                                </Border>
+                        <!-- Registered Patient Search & Quick Pick -->
+                        <StackPanel Orientation="Horizontal"
+                                    VerticalAlignment="Center"
+                                    Visibility="{Binding IsRegisteredPatientMode, Converter={StaticResource BoolToVisibilityConverter}}">
+                            <TextBlock Text="Find Patient:" Style="{StaticResource UniformLabelTextStyle}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                            <TextBox Text="{Binding PatientSearchInput, UpdateSourceTrigger=PropertyChanged}"
+                                     Width="165"
+                                     Height="30"
+                                     Style="{StaticResource UniformInputTextBoxStyle}"
+                                     Margin="0,0,8,0" />
+                            <ItemsControl ItemsSource="{Binding SuggestedPatients}" VerticalAlignment="Center">
+                                <ItemsControl.ItemsPanel>
+                                    <ItemsPanelTemplate><StackPanel Orientation="Horizontal" /></ItemsPanelTemplate>
+                                </ItemsControl.ItemsPanel>
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Button Content="{Binding FullName}"
+                                                Command="{Binding DataContext.ChooseSuggestedPatientCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                CommandParameter="{Binding}"
+                                                Style="{StaticResource UniformChipButtonStyle}"
+                                                Margin="0,0,5,0" />
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </StackPanel>
+                    </DockPanel>
+                </Border>
 
-                                <Border Grid.Row="0" Grid.Column="2" Style="{StaticResource UniformSubtleCardBorderStyle}">
-                                    <StackPanel>
-                                        <TextBlock Text="Patient Payable (After Panel)" Style="{StaticResource UniformLabelTextStyle}" />
-                                        <TextBlock Text="{Binding ProjectedPayable, StringFormat='RM {0:N2}'}"
-                                                   Style="{StaticResource UniformSectionTitleTextStyle}"
-                                                   Foreground="{StaticResource BrandPrimaryBrush}"
-                                                   Margin="0,3,0,0" />
-                                    </StackPanel>
-                                </Border>
+                <!-- Row 1: Two-Column Invoice Builder & Settlement Layout -->
+                <Grid Grid.Row="1">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1.22*" />
+                        <ColumnDefinition Width="14" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
 
-                                <Border Grid.Row="2" Grid.Column="0" Style="{StaticResource UniformSubtleCardBorderStyle}">
-                                    <StackPanel>
-                                        <TextBlock Text="Already Paid" Style="{StaticResource UniformLabelTextStyle}" />
-                                        <TextBlock Text="{Binding Invoice.PaidAmount, StringFormat='RM {0:N2}'}"
-                                                   Style="{StaticResource UniformSectionTitleTextStyle}"
-                                                   Margin="0,3,0,0" />
-                                    </StackPanel>
-                                </Border>
+                    <!-- LEFT COLUMN: Smart Suggestions, Line Editor, Paged Itemized Grid, KPI Summary -->
+                    <Grid Grid.Column="0">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="10" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
 
-                                <Border Grid.Row="2" Grid.Column="2" Style="{StaticResource UniformSubtleCardBorderStyle}">
-                                    <StackPanel>
-                                        <TextBlock Text="Projected Balance Due" Style="{StaticResource UniformLabelTextStyle}" />
-                                        <TextBlock Text="{Binding ProjectedBalanceDue, StringFormat='RM {0:N2}'}"
-                                                   Style="{StaticResource UniformSectionTitleTextStyle}"
-                                                   Foreground="{StaticResource DangerBrush}"
-                                                   Margin="0,3,0,0" />
-                                    </StackPanel>
-                                </Border>
-                            </Grid>
-
-                            <Border Background="{StaticResource BrandSecondarySoftBrush}"
-                                    BorderBrush="{StaticResource InfoBorderBrush}"
-                                    BorderThickness="1"
-                                    CornerRadius="6"
-                                    Padding="12,8">
-                                <DockPanel LastChildFill="False">
+                        <!-- 1. Smart Suggestion Chips Strip (From Doctor Settings & SOAP Notes) -->
+                        <Border Grid.Row="0"
+                                Visibility="{Binding HasSuggestions, Converter={StaticResource BoolToVisibilityConverter}}"
+                                Style="{StaticResource UniformSubtleCardBorderStyle}"
+                                Padding="10,7"
+                                Margin="0,0,0,8">
+                            <StackPanel>
+                                <DockPanel Margin="0,0,0,5" LastChildFill="False">
                                     <TextBlock DockPanel.Dock="Left"
-                                               Text="Estimated Doctor Commission (40% Net)"
+                                               Text="{Binding SuggestionHeaderText}"
                                                Style="{StaticResource UniformLabelTextStyle}"
-                                               Foreground="{StaticResource BrandSecondaryBrush}"
+                                               Foreground="{StaticResource BrandPrimaryBrush}"
                                                VerticalAlignment="Center" />
                                     <TextBlock DockPanel.Dock="Right"
-                                               Text="{Binding ProjectedCommission, StringFormat='RM {0:N2}'}"
-                                               Style="{StaticResource UniformSectionTitleTextStyle}"
-                                               Foreground="{StaticResource BrandSecondaryBrush}"
+                                               Text="Click any chip to add (⚠ checks Medical Alerts)"
+                                               Style="{StaticResource UniformMutedTextStyle}"
                                                VerticalAlignment="Center" />
                                 </DockPanel>
-                            </Border>
-                        </StackPanel>
-                    </Border>
-                </Grid>
 
-                <!-- Right Column: Corporate Panel, Split-Payments, Soft-Void -->
-                <Grid Grid.Column="2">
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="12" />
-                        <RowDefinition Height="*" />
-                    </Grid.RowDefinitions>
+                                <ItemsControl ItemsSource="{Binding SuggestedChips}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate><WrapPanel Orientation="Horizontal" /></ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Button Content="{Binding Label}"
+                                                    ToolTip="{Binding ToolTipText}"
+                                                    Command="{Binding DataContext.AddSuggestedChipCommand, RelativeSource={RelativeSource AncestorType=Window}}"
+                                                    CommandParameter="{Binding}"
+                                                    Style="{StaticResource UniformChipButtonStyle}"
+                                                    Margin="0,0,6,3" />
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
 
-                    <!-- Settlement Card -->
-                    <Border Grid.Row="0" Style="{StaticResource UniformCardBorderStyle}">
-                        <StackPanel IsEnabled="{Binding IsEditable}">
-                            <TextBlock Text="Corporate Panel &amp; Split-Payment Settlement"
-                                       Style="{StaticResource UniformSectionTitleTextStyle}"
-                                       Margin="0,0,0,12" />
+                        <!-- 2. Draft Line-Item Builder & Editor (Editable by Dentist at Checkout AND Receptionist before Payment) -->
+                        <Border Grid.Row="1"
+                                Visibility="{Binding CanEditDraftLines, Converter={StaticResource BoolToVisibilityConverter}}"
+                                Style="{StaticResource UniformCardBorderStyle}"
+                                Padding="10,8"
+                                Margin="0,0,0,8">
+                            <StackPanel>
+                                <DockPanel Margin="0,0,0,6" LastChildFill="True">
+                                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center" Margin="8,0,0,0">
+                                        <Button Content="Scan Dr Notes"
+                                                Command="{Binding ScanVisitNotesCommand}"
+                                                Visibility="{Binding HasVisitContext, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                Style="{StaticResource UniformChipButtonStyle}"
+                                                Margin="0,0,6,0" />
+                                        <Button Content="Clear Blank"
+                                                Command="{Binding ClearAllLinesCommand}"
+                                                Style="{StaticResource UniformChipButtonStyle}" />
+                                    </StackPanel>
 
-                            <Grid Margin="0,0,0,10">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="1.25*" />
-                                    <ColumnDefinition Width="8" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="8" />
-                                    <ColumnDefinition Width="0.9*" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel Grid.Column="0">
-                                    <TextBlock Text="Corporate Panel" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,4" />
-                                    <ComboBox ItemsSource="{Binding AvailablePanels}"
-                                              SelectedItem="{Binding SelectedPanel}"
+                                    <DockPanel LastChildFill="True">
+                                        <TextBlock DockPanel.Dock="Left"
+                                                   Text="Catalog:"
+                                                   Style="{StaticResource UniformLabelTextStyle}"
+                                                   VerticalAlignment="Center"
+                                                   Margin="0,0,6,0" />
+                                        <ComboBox ItemsSource="{Binding CatalogOptions}"
+                                                  SelectedItem="{Binding SelectedCatalogOption, Mode=TwoWay}"
+                                                  DisplayMemberPath="DisplayLabel"
+                                                  Height="30"
+                                                  Style="{StaticResource UniformComboBoxStyle}" />
+                                    </DockPanel>
+                                </DockPanel>
+
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="108" />
+                                        <ColumnDefinition Width="6" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="6" />
+                                        <ColumnDefinition Width="58" />
+                                        <ColumnDefinition Width="6" />
+                                        <ColumnDefinition Width="48" />
+                                        <ColumnDefinition Width="6" />
+                                        <ColumnDefinition Width="82" />
+                                        <ColumnDefinition Width="8" />
+                                        <ColumnDefinition Width="Auto" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <ComboBox Grid.Column="0"
+                                              ItemsSource="{Binding AvailableCategories}"
+                                              SelectedItem="{Binding LineCategoryInput, Mode=TwoWay}"
+                                              Height="30"
                                               Style="{StaticResource UniformComboBoxStyle}" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="2">
-                                    <TextBlock Text="Panel Cover (RM)" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,4" />
-                                    <TextBox Text="{Binding PanelCoverageInput, UpdateSourceTrigger=PropertyChanged}"
-                                             Style="{StaticResource UniformInputTextBoxStyle}" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="4">
-                                    <TextBlock Text="Discount (RM)" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,4" />
-                                    <TextBox Text="{Binding DiscountInput, UpdateSourceTrigger=PropertyChanged}"
-                                             Style="{StaticResource UniformInputTextBoxStyle}" />
-                                </StackPanel>
-                            </Grid>
 
-                            <Grid Margin="0,0,0,10">
-                                <Grid.ColumnDefinitions>
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="8" />
-                                    <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="8" />
-                                    <ColumnDefinition Width="*" />
-                                </Grid.ColumnDefinitions>
-                                <StackPanel Grid.Column="0">
-                                    <TextBlock Text="Cash (RM)" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,4" />
-                                    <TextBox Text="{Binding CashInput, UpdateSourceTrigger=PropertyChanged}"
+                                    <TextBox Grid.Column="2"
+                                             Text="{Binding LineNameInput, UpdateSourceTrigger=PropertyChanged}"
+                                             Height="30"
+                                             ToolTip="Billable procedure, radiograph, medication, or OTC product name"
                                              Style="{StaticResource UniformInputTextBoxStyle}" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="2">
-                                    <TextBlock Text="Card (RM)" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,4" />
-                                    <TextBox Text="{Binding CardInput, UpdateSourceTrigger=PropertyChanged}"
-                                             Style="{StaticResource UniformInputTextBoxStyle}" />
-                                </StackPanel>
-                                <StackPanel Grid.Column="4">
-                                    <TextBlock Text="QR / Transfer (RM)" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,4" />
-                                    <TextBox Text="{Binding QrInput, UpdateSourceTrigger=PropertyChanged}"
-                                             Style="{StaticResource UniformInputTextBoxStyle}" />
-                                </StackPanel>
-                            </Grid>
 
-                            <TextBlock Text="Payment / Terminal Reference #" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,4" />
-                            <TextBox Text="{Binding ReferenceNoInput, UpdateSourceTrigger=PropertyChanged}"
-                                     Style="{StaticResource UniformInputTextBoxStyle}"
-                                     Margin="0,0,0,12" />
+                                    <TextBox Grid.Column="4"
+                                             Text="{Binding LineToothInput, UpdateSourceTrigger=PropertyChanged}"
+                                             Height="30"
+                                             ToolTip="Optional FDI Tooth # (11-48 or 51-85)"
+                                             Style="{StaticResource UniformInputTextBoxStyle}" />
 
-                            <DockPanel LastChildFill="False">
-                                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
-                                    <Button Content="Full Cash"
-                                            Command="{Binding FillRemainingInCashCommand}"
-                                            Style="{StaticResource UniformSecondaryButtonStyle}"
-                                            Margin="0,0,8,0" />
-                                    <Button Content="Full QR"
-                                            Command="{Binding FillRemainingInQrCommand}"
+                                    <TextBox Grid.Column="6"
+                                             Text="{Binding LineQtyInput, UpdateSourceTrigger=PropertyChanged}"
+                                             Height="30"
+                                             ToolTip="Quantity"
+                                             Style="{StaticResource UniformInputTextBoxStyle}" />
+
+                                    <TextBox Grid.Column="8"
+                                             Text="{Binding LineUnitPriceInput, UpdateSourceTrigger=PropertyChanged}"
+                                             Height="30"
+                                             ToolTip="Unit Price (RM)"
+                                             Style="{StaticResource UniformInputTextBoxStyle}" />
+
+                                    <StackPanel Grid.Column="10" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Button Content="+ Add"
+                                                Command="{Binding AddLineItemCommand}"
+                                                Style="{StaticResource UniformPrimaryButtonStyle}"
+                                                Height="30"
+                                                Padding="10,0"
+                                                Margin="0,0,5,0" />
+                                        <Button Content="Update"
+                                                Command="{Binding UpdateSelectedLineCommand}"
+                                                IsEnabled="{Binding HasSelectedLine}"
+                                                Style="{StaticResource UniformSecondaryButtonStyle}"
+                                                Height="30"
+                                                Padding="9,0"
+                                                Margin="0,0,5,0" />
+                                        <Button Content="Remove"
+                                                Command="{Binding RemoveSelectedLineCommand}"
+                                                IsEnabled="{Binding HasSelectedLine}"
+                                                Style="{StaticResource UniformGhostButtonStyle}"
+                                                Foreground="{StaticResource DangerBrush}"
+                                                Height="30"
+                                                Padding="7,0" />
+                                    </StackPanel>
+                                </Grid>
+                            </StackPanel>
+                        </Border>
+
+                        <!-- 3. Paged 4-Column Invoice Lines Grid (Zero Scrollbars) -->
+                        <controls:UniformPagedGrid Grid.Row="2"
+                                                   Title="Itemized Invoice Lines"
+                                                   Subtitle="Select any row to adjust Qty or RM Price (Doctor's Visit Report is never altered)"
+                                                   EmptyMessage="Blank invoice — pick from Catalog, click a Suggestion Chip, or Scan Dr Notes."
+                                                   ItemsSource="{Binding LineRows}"
+                                                   SelectedItem="{Binding SelectedLineRow, Mode=TwoWay}"
+                                                   AutoPageSize="False"
+                                                   PageSize="4">
+                            <controls:UniformColumnDef Header="Type / Tooth" BindingPath="ToothDisplay" WidthRatio="1.05" IsMonospace="True" />
+                            <controls:UniformColumnDef Header="Invoice Item" BindingPath="ProcedureName" WidthRatio="2.25" IsBold="True" />
+                            <controls:UniformColumnDef Header="Qty × Unit" BindingPath="QtyUnitDisplay" WidthRatio="1.15" IsMonospace="True" HorizontalAlignment="Right" />
+                            <controls:UniformColumnDef Header="Total (RM)" BindingPath="LineTotalDisplay" WidthRatio="1.0" IsMonospace="True" HorizontalAlignment="Right" />
+                        </controls:UniformPagedGrid>
+
+                        <!-- 4. Symmetric KPI Financial Summary Card -->
+                        <Border Grid.Row="4" Style="{StaticResource UniformCardBorderStyle}" Padding="12,10">
+                            <StackPanel>
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="10" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="8" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+
+                                    <Border Grid.Row="0" Grid.Column="0" Style="{StaticResource UniformSubtleCardBorderStyle}" Padding="10,6">
+                                        <StackPanel>
+                                            <TextBlock Text="Invoice Subtotal" Style="{StaticResource UniformLabelTextStyle}" />
+                                            <TextBlock Text="{Binding ProjectedSubtotal, StringFormat='RM {0:N2}'}"
+                                                       Style="{StaticResource UniformSectionTitleTextStyle}"
+                                                       Margin="0,2,0,0" />
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Grid.Row="0" Grid.Column="2" Style="{StaticResource UniformSubtleCardBorderStyle}" Padding="10,6">
+                                        <StackPanel>
+                                            <TextBlock Text="Patient Payable (Net)" Style="{StaticResource UniformLabelTextStyle}" />
+                                            <TextBlock Text="{Binding ProjectedPayable, StringFormat='RM {0:N2}'}"
+                                                       Style="{StaticResource UniformSectionTitleTextStyle}"
+                                                       Foreground="{StaticResource BrandPrimaryBrush}"
+                                                       Margin="0,2,0,0" />
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Grid.Row="2" Grid.Column="0" Style="{StaticResource UniformSubtleCardBorderStyle}" Padding="10,6">
+                                        <StackPanel>
+                                            <TextBlock Text="Patient Credit Wallet (All Branches)" Style="{StaticResource UniformLabelTextStyle}" />
+                                            <TextBlock Text="{Binding AvailableCreditDisplay}"
+                                                       Style="{StaticResource UniformSectionTitleTextStyle}"
+                                                       Foreground="{StaticResource BrandSecondaryBrush}"
+                                                       Margin="0,2,0,0" />
+                                        </StackPanel>
+                                    </Border>
+
+                                    <Border Grid.Row="2" Grid.Column="2" Style="{StaticResource UniformSubtleCardBorderStyle}" Padding="10,6">
+                                        <StackPanel>
+                                            <TextBlock Text="Projected Balance Due" Style="{StaticResource UniformLabelTextStyle}" />
+                                            <TextBlock Text="{Binding ProjectedBalanceDue, StringFormat='RM {0:N2}'}"
+                                                       Style="{StaticResource UniformSectionTitleTextStyle}"
+                                                       Foreground="{StaticResource DangerBrush}"
+                                                       Margin="0,2,0,0" />
+                                        </StackPanel>
+                                    </Border>
+                                </Grid>
+
+                                <Border Background="{StaticResource BrandSecondarySoftBrush}"
+                                        BorderBrush="{StaticResource InfoBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="10,6">
+                                    <DockPanel LastChildFill="False">
+                                        <TextBlock DockPanel.Dock="Left"
+                                                   Text="Doctor Commission (40% Clinical · 0% OTC Products)"
+                                                   Style="{StaticResource UniformLabelTextStyle}"
+                                                   Foreground="{StaticResource BrandSecondaryBrush}"
+                                                   VerticalAlignment="Center" />
+                                        <TextBlock DockPanel.Dock="Right"
+                                                   Text="{Binding ProjectedCommission, StringFormat='RM {0:N2}'}"
+                                                   Style="{StaticResource UniformSectionTitleTextStyle}"
+                                                   Foreground="{StaticResource BrandSecondaryBrush}"
+                                                   VerticalAlignment="Center" />
+                                    </DockPanel>
+                                </Border>
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+
+                    <!-- RIGHT COLUMN: Panel, Credit Redemption, Overpayment Handling, Settlement & Soft-Void -->
+                    <Grid Grid.Column="2">
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="10" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <!-- Settlement & Credit Wallet Card -->
+                        <Border Grid.Row="0" Style="{StaticResource UniformCardBorderStyle}" Padding="14,12">
+                            <StackPanel IsEnabled="{Binding IsEditable}">
+                                <TextBlock Text="Counter Checkout, Credit Wallet &amp; Split Payment"
+                                           Style="{StaticResource UniformSectionTitleTextStyle}"
+                                           Margin="0,0,0,10" />
+
+                                <!-- Panel & Discount -->
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="1.25*" />
+                                        <ColumnDefinition Width="8" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="8" />
+                                        <ColumnDefinition Width="0.9*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="Corporate Panel" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,3" />
+                                        <ComboBox ItemsSource="{Binding AvailablePanels}"
+                                                  SelectedItem="{Binding SelectedPanel}"
+                                                  Style="{StaticResource UniformComboBoxStyle}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="Panel Cover (RM)" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,3" />
+                                        <TextBox Text="{Binding PanelCoverageInput, UpdateSourceTrigger=PropertyChanged}"
+                                                 Style="{StaticResource UniformInputTextBoxStyle}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="4">
+                                        <TextBlock Text="Discount (RM)" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,3" />
+                                        <TextBox Text="{Binding DiscountInput, UpdateSourceTrigger=PropertyChanged}"
+                                                 Style="{StaticResource UniformInputTextBoxStyle}" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <!-- Split Payment Inputs: Credit + Cash + Card + QR -->
+                                <Grid Margin="0,0,0,8">
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="6" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="6" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="6" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <StackPanel Grid.Column="0">
+                                        <TextBlock Text="Use Credit (RM)" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,3" />
+                                        <TextBox Text="{Binding CreditRedeemInput, UpdateSourceTrigger=PropertyChanged}"
+                                                 IsEnabled="{Binding CanUsePatientCredit}"
+                                                 Style="{StaticResource UniformInputTextBoxStyle}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="2">
+                                        <TextBlock Text="Cash (RM)" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,3" />
+                                        <TextBox Text="{Binding CashInput, UpdateSourceTrigger=PropertyChanged}"
+                                                 Style="{StaticResource UniformInputTextBoxStyle}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="4">
+                                        <TextBlock Text="Card (RM)" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,3" />
+                                        <TextBox Text="{Binding CardInput, UpdateSourceTrigger=PropertyChanged}"
+                                                 Style="{StaticResource UniformInputTextBoxStyle}" />
+                                    </StackPanel>
+                                    <StackPanel Grid.Column="6">
+                                        <TextBlock Text="QR / DuitNow" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,3" />
+                                        <TextBox Text="{Binding QrInput, UpdateSourceTrigger=PropertyChanged}"
+                                                 Style="{StaticResource UniformInputTextBoxStyle}" />
+                                    </StackPanel>
+                                </Grid>
+
+                                <!-- Overpayment Handling Banner (Appears automatically when Tendered > Payable) -->
+                                <Border Visibility="{Binding HasProjectedExcess, Converter={StaticResource BoolToVisibilityConverter}}"
+                                        Background="{StaticResource WarningBgBrush}"
+                                        BorderBrush="{StaticResource WarningBorderBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="6"
+                                        Padding="10,7"
+                                        Margin="0,0,0,8">
+                                    <DockPanel LastChildFill="False">
+                                        <TextBlock DockPanel.Dock="Left"
+                                                   Text="{Binding ProjectedExcessAmount, StringFormat='Overpayment Excess: RM {0:N2}'}"
+                                                   FontWeight="SemiBold"
+                                                   Foreground="{StaticResource WarningBrush}"
+                                                   VerticalAlignment="Center" />
+                                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                            <RadioButton GroupName="OverpayMode"
+                                                         Content="Cash Change"
+                                                         IsChecked="{Binding IsReturnCashChangeSelected, Mode=OneWay}"
+                                                         Command="{Binding SetOverpaymentModeCommand}"
+                                                         CommandParameter="Change"
+                                                         Style="{StaticResource UniformSegmentedToggleRadioStyle}"
+                                                         Margin="0,0,5,0" />
+                                            <RadioButton GroupName="OverpayMode"
+                                                         Content="Save to Credit"
+                                                         IsEnabled="{Binding CanStoreOverpaymentCredit}"
+                                                         IsChecked="{Binding IsStoreCreditSelected, Mode=OneWay}"
+                                                         Command="{Binding SetOverpaymentModeCommand}"
+                                                         CommandParameter="Credit"
+                                                         Style="{StaticResource UniformSegmentedToggleRadioStyle}" />
+                                        </StackPanel>
+                                    </DockPanel>
+                                </Border>
+
+                                <TextBlock Text="Payment / Terminal Reference #" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,3" />
+                                <TextBox Text="{Binding ReferenceNoInput, UpdateSourceTrigger=PropertyChanged}"
+                                         Style="{StaticResource UniformInputTextBoxStyle}"
+                                         Margin="0,0,0,10" />
+
+                                <!-- Quick-Fill Row -->
+                                <DockPanel Margin="0,0,0,8" LastChildFill="False">
+                                    <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Button Content="Max Credit"
+                                                Command="{Binding ApplyMaxCreditCommand}"
+                                                IsEnabled="{Binding CanUsePatientCredit}"
+                                                Style="{StaticResource UniformChipButtonStyle}"
+                                                Margin="0,0,6,0" />
+                                        <Button Content="Full Cash"
+                                                Command="{Binding FillRemainingInCashCommand}"
+                                                Style="{StaticResource UniformChipButtonStyle}"
+                                                Margin="0,0,6,0" />
+                                        <Button Content="Full QR"
+                                                Command="{Binding FillRemainingInQrCommand}"
+                                                Style="{StaticResource UniformChipButtonStyle}" />
+                                    </StackPanel>
+                                    <Button DockPanel.Dock="Right"
+                                            Content="No-Charge Visit"
+                                            Command="{Binding CompleteNoChargeVisitCommand}"
+                                            Visibility="{Binding IsDentistCheckoutMode, Converter={StaticResource BoolToVisibilityConverter}}"
+                                            Style="{StaticResource UniformGhostButtonStyle}"
+                                            Height="28" />
+                                </DockPanel>
+
+                                <!-- Primary Actions: Draft / Send to Counter vs Settle Now -->
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="8" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+
+                                    <Button Grid.Column="0"
+                                            Content="{Binding SaveDraftButtonText}"
+                                            Command="{Binding SaveDraftInvoiceCommand}"
+                                            Visibility="{Binding CanEditDraftLines, Converter={StaticResource BoolToVisibilityConverter}}"
                                             Style="{StaticResource UniformSecondaryButtonStyle}" />
-                                </StackPanel>
-                                <Button DockPanel.Dock="Right"
-                                        Content="Settle Payment"
-                                        Command="{Binding SettlePaymentCommand}"
-                                        Style="{StaticResource UniformPrimaryButtonStyle}" />
-                            </DockPanel>
-                        </StackPanel>
-                    </Border>
 
-                    <!-- Audited Soft-Void Card -->
-                    <Border Grid.Row="2" Style="{StaticResource UniformCardBorderStyle}">
-                        <Grid>
-                            <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="Auto" />
-                                <RowDefinition Height="*" />
-                            </Grid.RowDefinitions>
+                                    <Button Grid.Column="2"
+                                            Content="Settle Payment"
+                                            Command="{Binding SettlePaymentCommand}"
+                                            Style="{StaticResource UniformPrimaryButtonStyle}" />
+                                </Grid>
+                            </StackPanel>
+                        </Border>
 
-                            <TextBlock Grid.Row="0"
-                                       Text="Immutable Audit &amp; Soft-Void Control"
-                                       Style="{StaticResource UniformSectionTitleTextStyle}"
-                                       Margin="0,0,0,4" />
-                            <TextBlock Grid.Row="1"
-                                       Text="Financial records are never hard-deleted. Soft-voiding requires a mandatory reason logged to Audit Trail."
-                                       Style="{StaticResource UniformMutedTextStyle}"
-                                       TextWrapping="Wrap"
-                                       Margin="0,0,0,10" />
+                        <!-- Audited Soft-Void Card -->
+                        <Border Grid.Row="2" Style="{StaticResource UniformCardBorderStyle}" Padding="14,12">
+                            <Grid>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="Auto" />
+                                    <RowDefinition Height="*" />
+                                </Grid.RowDefinitions>
 
-                            <TextBlock Grid.Row="2"
-                                       Text="Mandatory Void Reason"
-                                       Style="{StaticResource UniformLabelTextStyle}"
-                                       Margin="0,0,0,4" />
-                            <TextBox Grid.Row="3"
-                                     Text="{Binding VoidReasonInput, UpdateSourceTrigger=PropertyChanged}"
-                                     Style="{StaticResource UniformInputTextBoxStyle}"
-                                     Margin="0,0,0,12" />
+                                <TextBlock Grid.Row="0"
+                                           Text="Immutable Audit &amp; Soft-Void Control"
+                                           Style="{StaticResource UniformSectionTitleTextStyle}"
+                                           Margin="0,0,0,4" />
+                                <TextBlock Grid.Row="1"
+                                           Text="Invoices are never hard-deleted. Soft-voiding reverses any linked patient credit entries in the append-only ledger."
+                                           Style="{StaticResource UniformMutedTextStyle}"
+                                           TextWrapping="Wrap"
+                                           Margin="0,0,0,8" />
 
-                            <DockPanel Grid.Row="4" VerticalAlignment="Bottom" LastChildFill="False">
-                                <Button DockPanel.Dock="Right"
-                                        Content="Soft-Void Invoice"
-                                        Command="{Binding SoftVoidInvoiceCommand}"
-                                        Style="{StaticResource UniformDangerButtonStyle}" />
-                            </DockPanel>
-                        </Grid>
-                    </Border>
+                                <TextBlock Grid.Row="2"
+                                           Text="Mandatory Void Reason"
+                                           Style="{StaticResource UniformLabelTextStyle}"
+                                           Margin="0,0,0,4" />
+                                <TextBox Grid.Row="3"
+                                         Text="{Binding VoidReasonInput, UpdateSourceTrigger=PropertyChanged}"
+                                         IsEnabled="{Binding CanVoidInvoice}"
+                                         Style="{StaticResource UniformInputTextBoxStyle}"
+                                         Margin="0,0,0,10" />
+
+                                <DockPanel Grid.Row="4" VerticalAlignment="Bottom" LastChildFill="False">
+                                    <Button DockPanel.Dock="Right"
+                                            Content="Soft-Void Invoice"
+                                            Command="{Binding SoftVoidInvoiceCommand}"
+                                            IsEnabled="{Binding CanVoidInvoice}"
+                                            Style="{StaticResource UniformDangerButtonStyle}" />
+                                </DockPanel>
+                            </Grid>
+                        </Border>
+                    </Grid>
                 </Grid>
             </Grid>
         </controls:ModalDialogShell.DialogContent>

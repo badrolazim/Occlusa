@@ -266,7 +266,8 @@
                                  IsChecked="{Binding IsWhatsAppWorkspace, Mode=OneWay}"
                                  Command="{Binding SelectWorkspaceCommand}"
                                  CommandParameter="4"
-                                 Style="{StaticResource UniformNavTabRadioStyle}">
+                                 Style="{StaticResource UniformNavTabRadioStyle}"
+                                 Margin="0,0,0,6">
                         <Grid>
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="22" />
@@ -294,6 +295,47 @@
                                     MinWidth="26"
                                     VerticalAlignment="Center">
                                 <TextBlock Text="{Binding WhatsAppCount}"
+                                           FontSize="11"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource SidebarTextSecondaryBrush}"
+                                           HorizontalAlignment="Center" />
+                            </Border>
+                        </Grid>
+                    </RadioButton>
+
+                    <!-- 6. Master Catalogue & Doctor Settings -->
+                    <RadioButton GroupName="MainWorkspaces"
+                                 IsChecked="{Binding IsSettingsWorkspace, Mode=OneWay}"
+                                 Command="{Binding SelectWorkspaceCommand}"
+                                 CommandParameter="5"
+                                 Style="{StaticResource UniformNavTabRadioStyle}">
+                        <Grid>
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="22" />
+                                <ColumnDefinition Width="*" />
+                                <ColumnDefinition Width="Auto" />
+                            </Grid.ColumnDefinitions>
+                            <Viewbox Grid.Column="0" Width="16" Height="16" HorizontalAlignment="Left" VerticalAlignment="Center">
+                                <Canvas Width="24" Height="24">
+                                    <Path Data="M 12 15 C 13.66 15 15 13.66 15 12 C 15 10.34 13.66 9 12 9 C 10.34 9 9 10.34 9 12 C 9 13.66 10.34 15 12 15 Z M 19.4 15 L 21 16.5 L 19 19.8 L 16.9 19.1 C 16.2 19.6 15.5 20 14.7 20.3 L 14.3 22.5 H 9.7 L 9.3 20.3 C 8.5 20 7.8 19.6 7.1 19.1 L 5 19.8 L 3 16.5 L 4.6 15 C 4.5 14.5 4.5 13.5 4.6 13 L 3 11.5 L 5 8.2 L 7.1 8.9 C 7.8 8.4 8.5 8 9.3 7.7 L 9.7 5.5 H 14.3 L 14.7 7.7 C 15.5 8 16.2 8.4 16.9 8.9 L 19 8.2 L 21 11.5 L 19.4 13 C 19.5 13.5 19.5 14.5 19.4 15 Z"
+                                          Stroke="{Binding Foreground, RelativeSource={RelativeSource AncestorType=RadioButton}}"
+                                          StrokeThickness="1.9"
+                                          StrokeStartLineCap="Round"
+                                          StrokeEndLineCap="Round"
+                                          StrokeLineJoin="Round" />
+                                </Canvas>
+                            </Viewbox>
+                            <TextBlock Grid.Column="1"
+                                       Text="Master Catalogue"
+                                       Margin="6,0,8,0"
+                                       VerticalAlignment="Center" />
+                            <Border Grid.Column="2"
+                                    Background="{StaticResource SidebarSurfaceBrush}"
+                                    CornerRadius="10"
+                                    Padding="7,2"
+                                    MinWidth="26"
+                                    VerticalAlignment="Center">
+                                <TextBlock Text="{Binding BillingSettings.CatalogCount}"
                                            FontSize="11"
                                            FontWeight="SemiBold"
                                            Foreground="{StaticResource SidebarTextSecondaryBrush}"
@@ -456,10 +498,10 @@
                 </Grid>
             </Border>
 
-            <!-- Row 1: Pinned Clinical Safety Banner (Hidden on Appointments tab) -->
+            <!-- Row 1: Pinned Clinical Safety Banner (Hidden on Appointments & Settings tabs) -->
             <controls:MedicalAlertsBanner Grid.Row="1"
                                           Margin="0,0,0,10"
-                                          Visibility="{Binding IsAppointmentsWorkspace, Converter={StaticResource InverseBoolToVisibilityConverter}}"
+                                          Visibility="{Binding ShowMedicalBanner, Converter={StaticResource BoolToVisibilityConverter}}"
                                           PatientName="{Binding BannerPatientName}"
                                           IcNumber="{Binding BannerIcNumber}"
                                           IsMyKadVerified="{Binding BannerIsMyKadVerified}"
@@ -510,9 +552,8 @@
                                     IsEnabled="{Binding CanCallToChairSelected}"
                                     Style="{StaticResource UniformSegmentButtonStyle}"
                                     Margin="0,0,5,0" />
-                            <Button Content="Checkout"
-                                    Command="{Binding AdvanceQueueStatusCommand}"
-                                    CommandParameter="AwaitingCheckout"
+                            <Button Content="Checkout / Invoice"
+                                    Click="CheckoutSelectedQueuePatientButton_Click"
                                     IsEnabled="{Binding CanSendToCheckoutSelected}"
                                     Style="{StaticResource UniformSegmentButtonStyle}"
                                     Margin="0,0,5,0" />
@@ -791,14 +832,28 @@
                         </StackPanel>
                     </DockPanel>
 
-                    <!-- 3. Billing Tab Actions -->
+                    <!-- 4. Billing Tab Actions -->
                     <DockPanel Visibility="{Binding IsBillingWorkspace, Converter={StaticResource BoolToVisibilityConverter}}" LastChildFill="False">
                         <TextBlock DockPanel.Dock="Left"
-                                   Text="Double-click an invoice to split-pay (Panel + Cash + Card + QR) or soft-void with audit trail."
+                                   Text="Decoupled from Doctor's Notes · OTC 0% Commission · Shared Patient Credit Wallet"
                                    Style="{StaticResource UniformMutedTextStyle}"
                                    VerticalAlignment="Center" />
                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                            <Button Content="Open Invoice Checkout"
+                            <Button Content="+ Walk-In OTC Sale"
+                                    Click="NewRetailInvoiceButton_Click"
+                                    Style="{StaticResource UniformPrimaryButtonStyle}"
+                                    Height="32"
+                                    Padding="12,0"
+                                    FontSize="12"
+                                    Margin="0,0,8,0" />
+                            <Button Content="+ Patient Invoice"
+                                    Click="NewPatientInvoiceButton_Click"
+                                    Style="{StaticResource UniformSecondaryButtonStyle}"
+                                    Height="32"
+                                    Padding="12,0"
+                                    FontSize="12"
+                                    Margin="0,0,8,0" />
+                            <Button Content="Open Invoice"
                                     Click="OpenSelectedInvoiceButton_Click"
                                     Style="{StaticResource UniformSecondaryButtonStyle}"
                                     Height="32"
@@ -807,14 +862,14 @@
                                     Margin="0,0,8,0" />
                             <Button Content="End-of-Day Reconciliation"
                                     Click="OpenDailyReconciliationButton_Click"
-                                    Style="{StaticResource UniformPrimaryButtonStyle}"
+                                    Style="{StaticResource UniformSecondaryButtonStyle}"
                                     Height="32"
                                     Padding="12,0"
                                     FontSize="12" />
                         </StackPanel>
                     </DockPanel>
 
-                    <!-- 4. WhatsApp Tab Actions -->
+                    <!-- 5. WhatsApp Tab Actions -->
                     <DockPanel Visibility="{Binding IsWhatsAppWorkspace, Converter={StaticResource BoolToVisibilityConverter}}" LastChildFill="False">
                         <TextBlock DockPanel.Dock="Left"
                                    Text="AI bookings default to AiBookedPending. Emergency red flags immediately halt booking and escalate."
@@ -828,6 +883,133 @@
                                 Padding="14,0"
                                 FontSize="12" />
                     </DockPanel>
+
+                    <!-- 6. Master Catalogue & Doctor Settings Tab Actions -->
+                    <Grid Visibility="{Binding IsSettingsWorkspace, Converter={StaticResource BoolToVisibilityConverter}}">
+                        <StackPanel DataContext="{Binding BillingSettings}">
+                            <!-- Row A: Sub-Tab Switcher & Primary Actions -->
+                            <DockPanel LastChildFill="False">
+                                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <RadioButton GroupName="SettingsSubTabs"
+                                                 Content="1. Master Catalogue (Appts, Chart &amp; Prices)"
+                                                 IsChecked="{Binding IsCatalogSubTab, Mode=OneWay}"
+                                                 Command="{Binding SetSubTabCommand}"
+                                                 CommandParameter="0"
+                                                 Style="{StaticResource UniformSegmentedToggleRadioStyle}"
+                                                 Margin="0,0,6,0" />
+                                    <RadioButton GroupName="SettingsSubTabs"
+                                                 Content="2. Doctor Invoice Modes &amp; Suggestions"
+                                                 IsChecked="{Binding IsDoctorRulesSubTab, Mode=OneWay}"
+                                                 Command="{Binding SetSubTabCommand}"
+                                                 CommandParameter="1"
+                                                 Style="{StaticResource UniformSegmentedToggleRadioStyle}" />
+                                </StackPanel>
+
+                                <!-- Catalog Sub-Tab Primary Actions -->
+                                <StackPanel DockPanel.Dock="Right"
+                                            Orientation="Horizontal"
+                                            VerticalAlignment="Center"
+                                            Visibility="{Binding IsCatalogSubTab, Converter={StaticResource BoolToVisibilityConverter}}">
+                                    <Button Content="Edit Selected"
+                                            Command="{Binding RequestEditSelectedCatalogItemCommand}"
+                                            Style="{StaticResource UniformSecondaryButtonStyle}"
+                                            Height="32"
+                                            Padding="11,0"
+                                            FontSize="12"
+                                            Margin="0,0,8,0" />
+                                    <Button Content="+ Add Catalogue Item"
+                                            Command="{Binding RequestNewCatalogItemCommand}"
+                                            Style="{StaticResource UniformPrimaryButtonStyle}"
+                                            Height="32"
+                                            Padding="12,0"
+                                            FontSize="12" />
+                                </StackPanel>
+
+                                <!-- Doctor Rules Sub-Tab Primary Actions -->
+                                <StackPanel DockPanel.Dock="Right"
+                                            Orientation="Horizontal"
+                                            VerticalAlignment="Center"
+                                            Visibility="{Binding IsDoctorRulesSubTab, Converter={StaticResource BoolToVisibilityConverter}}">
+                                    <Button Content="Save Mode"
+                                            Click="SaveDoctorModeButton_Click"
+                                            Style="{StaticResource UniformSecondaryButtonStyle}"
+                                            Height="32"
+                                            Padding="11,0"
+                                            FontSize="12"
+                                            Margin="0,0,8,0" />
+                                    <Button Content="Configure Add-Ons"
+                                            Command="{Binding RequestEditSelectedRuleCommand}"
+                                            Style="{StaticResource UniformPrimaryButtonStyle}"
+                                            Height="32"
+                                            Padding="12,0"
+                                            FontSize="12" />
+                                </StackPanel>
+                            </DockPanel>
+
+                            <!-- Row B: Contextual Filter / Doctor Scope Controls -->
+                            <DockPanel Margin="0,8,0,0"
+                                       LastChildFill="False"
+                                       Visibility="{Binding IsCatalogSubTab, Converter={StaticResource BoolToVisibilityConverter}}">
+                                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="Filter:"
+                                               Style="{StaticResource UniformLabelTextStyle}"
+                                               VerticalAlignment="Center"
+                                               Margin="0,0,8,0" />
+                                    <ComboBox ItemsSource="{Binding CategoryFilterOptions}"
+                                              SelectedItem="{Binding SelectedCategoryFilter, Mode=TwoWay}"
+                                              Width="200"
+                                              Height="30"
+                                              FontSize="12"
+                                              Style="{StaticResource UniformComboBoxStyle}"
+                                              Margin="0,0,10,0" />
+                                    <TextBlock Text="Search:"
+                                               Style="{StaticResource UniformLabelTextStyle}"
+                                               VerticalAlignment="Center"
+                                               Margin="0,0,8,0" />
+                                    <TextBox Text="{Binding CatalogSearchText, UpdateSourceTrigger=PropertyChanged}"
+                                             Width="260"
+                                             Height="30"
+                                             ToolTip="Filter catalogue items, subcategories, or note keywords"
+                                             Style="{StaticResource UniformInputTextBoxStyle}" />
+                                </StackPanel>
+                                <TextBlock DockPanel.Dock="Right"
+                                           Text="Single source of truth for Appointments, Odontogram Presets, Billing &amp; WhatsApp AI"
+                                           Style="{StaticResource UniformMutedTextStyle}"
+                                           VerticalAlignment="Center" />
+                            </DockPanel>
+
+                            <DockPanel Margin="0,8,0,0"
+                                       LastChildFill="False"
+                                       Visibility="{Binding IsDoctorRulesSubTab, Converter={StaticResource BoolToVisibilityConverter}}">
+                                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                                    <TextBlock Text="Scope:" Style="{StaticResource UniformLabelTextStyle}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                    <ComboBox ItemsSource="{Binding DoctorScopes}"
+                                              SelectedItem="{Binding SelectedDoctorScope, Mode=TwoWay}"
+                                              DisplayMemberPath="DisplayName"
+                                              Width="220"
+                                              Height="30"
+                                              FontSize="12"
+                                              Style="{StaticResource UniformComboBoxStyle}"
+                                              Margin="0,0,14,0" />
+
+                                    <TextBlock Text="Checkout Mode:" Style="{StaticResource UniformLabelTextStyle}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                    <ComboBox ItemsSource="{Binding InitModeOptions}"
+                                              SelectedItem="{Binding SelectedInitModeOption, Mode=TwoWay}"
+                                              DisplayMemberPath="Label"
+                                              Width="230"
+                                              Height="30"
+                                              FontSize="12"
+                                              Style="{StaticResource UniformComboBoxStyle}"
+                                              Margin="0,0,14,0" />
+
+                                    <CheckBox Content="Scan Dr Notes Automatically"
+                                              IsChecked="{Binding EnableNoteKeywordEngine, Mode=TwoWay}"
+                                              VerticalAlignment="Center"
+                                              Style="{StaticResource UniformCheckBoxStyle}" />
+                                </StackPanel>
+                            </DockPanel>
+                        </StackPanel>
+                    </Grid>
                 </Grid>
             </Border>
 
@@ -1052,7 +1234,7 @@
                     <controls:UniformColumnDef Header="Status" BindingPath="StatusDisplay" WidthRatio="1.3" />
                 </controls:UniformPagedGrid>
 
-                <!-- 4. WhatsApp AI Console -->
+                <!-- 5. WhatsApp AI Console -->
                 <controls:UniformPagedGrid x:Name="WhatsAppPagedGrid"
                                            Visibility="{Binding IsWhatsAppWorkspace, Converter={StaticResource BoolToVisibilityConverter}}"
                                            Title="WhatsApp AI Receptionist Threads"
@@ -1066,6 +1248,39 @@
                     <controls:UniformColumnDef Header="Triage" BindingPath="TriageDisplay" WidthRatio="1.1" />
                     <controls:UniformColumnDef Header="State" BindingPath="StateDisplay" WidthRatio="1.2" />
                 </controls:UniformPagedGrid>
+
+                <!-- 6. Unified Master Catalogue & Doctor Invoice Suggestions -->
+                <Grid Visibility="{Binding IsSettingsWorkspace, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <Grid DataContext="{Binding BillingSettings}">
+                        <controls:UniformPagedGrid x:Name="BillingCatalogPagedGrid"
+                                                   Visibility="{Binding IsCatalogSubTab, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                   Title="Unified Master Catalogue (Appointments · Odontogram · Billing · AI Quotes)"
+                                                   Subtitle="Single source of truth — double-click any item to edit Price, Appointment Booking, Odontogram Preset, or SOAP Keywords"
+                                                   EmptyMessage="No matching catalogue items found."
+                                                   ItemsSource="{Binding CatalogRows}"
+                                                   SelectedItem="{Binding SelectedCatalogRow, Mode=TwoWay}"
+                                                   RowDoubleClicked="BillingCatalogPagedGrid_RowDoubleClicked">
+                            <controls:UniformColumnDef Header="Catalogue Item" BindingPath="Name" WidthRatio="1.95" IsBold="True" />
+                            <controls:UniformColumnDef Header="Usage &amp; Commission" BindingPath="CategoryDisplay" WidthRatio="1.7" />
+                            <controls:UniformColumnDef Header="SOAP Note Keywords" BindingPath="KeywordsDisplay" WidthRatio="1.7" IsMonospace="True" />
+                            <controls:UniformColumnDef Header="Unit Price" BindingPath="PriceDisplay" WidthRatio="0.9" IsMonospace="True" HorizontalAlignment="Right" />
+                        </controls:UniformPagedGrid>
+
+                        <controls:UniformPagedGrid x:Name="DoctorRulesPagedGrid"
+                                                   Visibility="{Binding IsDoctorRulesSubTab, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                   Title="Treatment → Companion Invoice Item Suggestions"
+                                                   Subtitle="Double-click any treatment to customize suggested painkillers, X-rays, or OTC products for the selected Doctor Scope"
+                                                   EmptyMessage="No clinical treatments configured."
+                                                   ItemsSource="{Binding RuleRows}"
+                                                   SelectedItem="{Binding SelectedRuleRow, Mode=TwoWay}"
+                                                   RowDoubleClicked="DoctorRulesPagedGrid_RowDoubleClicked">
+                            <controls:UniformColumnDef Header="Primary Treatment" BindingPath="TreatmentName" WidthRatio="1.85" IsBold="True" />
+                            <controls:UniformColumnDef Header="Rule Scope" BindingPath="RuleSourceDisplay" WidthRatio="1.1" />
+                            <controls:UniformColumnDef Header="Suggested Companion Invoice Items" BindingPath="SuggestedSummary" WidthRatio="2.45" />
+                            <controls:UniformColumnDef Header="Add-Ons" BindingPath="CountDisplay" WidthRatio="0.8" IsMonospace="True" HorizontalAlignment="Right" />
+                        </controls:UniformPagedGrid>
+                    </Grid>
+                </Grid>
             </Grid>
 
             <!-- Row 4: Clean Status Footer Strip -->

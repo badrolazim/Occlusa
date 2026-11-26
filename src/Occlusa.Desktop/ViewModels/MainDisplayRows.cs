@@ -237,7 +237,9 @@ public sealed class PatientRowItem
         FullName = source.FullName;
         Phone = string.IsNullOrWhiteSpace(source.Phone) ? "No Phone" : source.Phone;
         string visitWord = source.VisitCount == 1 ? "1 Visit" : $"{source.VisitCount} Visits";
-        ContactVisitsDisplay = $"{Phone} · {visitWord}";
+        ContactVisitsDisplay = source.CreditBalance > 0m
+            ? $"{Phone} · {visitWord} · Cr RM {source.CreditBalance:N0}"
+            : $"{Phone} · {visitWord}";
         AlertsDisplay = source.MedicalAlerts.HasAnyCriticalAlert
             ? source.MedicalAlerts.BuildAlertSummary()
             : "Clear";
@@ -287,13 +289,15 @@ public sealed class InvoiceRowItem
     {
         Source = source;
         InvoiceNumber = source.InvoiceNumber;
-        PatientName = source.PatientName;
+        PatientName = source.IsWalkInRetail ? $"{source.PatientName} (OTC)" : source.PatientName;
         PayableDisplay = $"RM {source.PatientPayableAmount:N2}";
         StatusDisplay = source.IsVoided
             ? "Voided"
-            : source.BalanceDue <= 0m
-                ? "Settled"
-                : $"Due RM {source.BalanceDue:N2}";
+            : (source.Payments.Count > 0 && source.BalanceDue <= 0m)
+                ? (source.CreditedOverpaymentAmount > 0m ? $"Settled (+Cr RM {source.CreditedOverpaymentAmount:N0})" : "Settled")
+                : source.Payments.Count == 0
+                    ? $"Draft · RM {source.BalanceDue:N2}"
+                    : $"Due RM {source.BalanceDue:N2}";
     }
 
     public InvoiceDto Source { get; }
@@ -338,9 +342,19 @@ public sealed class InvoiceLineRowItem
     public InvoiceLineRowItem(InvoiceLineDto source)
     {
         Source = source;
-        ToothDisplay = source.ToothNumber.HasValue ? $"#{source.ToothNumber.Value}" : "General";
+        string shortCat = source.Category switch
+        {
+            BillingCatalogCategory.OtcProduct => "OTC (0%)",
+            BillingCatalogCategory.Medication => "Med",
+            BillingCatalogCategory.Radiograph => "X-Ray",
+            _ => "Proc"
+        };
+        ToothDisplay = source.ToothNumber.HasValue
+            ? $"#{source.ToothNumber.Value} · {shortCat}"
+            : shortCat;
         ProcedureName = source.ProcedureName;
         Quantity = source.Quantity;
+        QtyUnitDisplay = $"{source.Quantity} × RM {source.UnitPrice:N2}";
         LineTotalDisplay = $"RM {source.LineTotal:N2}";
     }
 
@@ -348,7 +362,86 @@ public sealed class InvoiceLineRowItem
     public string ToothDisplay { get; }
     public string ProcedureName { get; }
     public int Quantity { get; }
+    public string QtyUnitDisplay { get; }
     public string LineTotalDisplay { get; }
+}
+
+/// <summary>
+/// Concise 4-column presentation row for the Unified Master Catalogue UniformPagedGrid inside Settings.
+/// </summary>
+public sealed class BillingCatalogRowItem
+{
+    public BillingCatalogRowItem(BillingCatalogItemDto source)
+    {
+        Source = source;
+        Name = source.IsActive ? source.Name : $"{source.Name} (Inactive)";
+
+        var tags = new List<string>
+        {
+            source.Category switch
+            {
+                BillingCatalogCategory.OtcProduct => "OTC Retail",
+                BillingCatalogCategory.Medication => "Medication",
+                BillingCatalogCategory.Radiograph => "Radiograph",
+                _ => "Procedure"
+            }
+        };
+
+        if (source.IsBookableAppointment)
+        {
+            tags.Add($"Appt {source.DefaultDurationMinutes}m");
+        }
+        if (source.ShowInOdontogramPresets)
+        {
+            tags.Add("Chart");
+        }
+        tags.Add(source.Category != BillingCatalogCategory.OtcProduct && source.IsCommissionable ? "40%" : "0% Comm");
+
+        CategoryDisplay = string.Join(" · ", tags);
+        KeywordsDisplay = string.IsNullOrWhiteSpace(source.NoteKeywords)
+            ? "—"
+            : AppointmentCalendarHelper.FormatCompactReceptionNote(source.NoteKeywords, 34);
+        PriceDisplay = $"RM {source.UnitPrice:N2}";
+    }
+
+    public BillingCatalogItemDto Source { get; }
+    public string Name { get; }
+    public string CategoryDisplay { get; }
+    public string KeywordsDisplay { get; }
+    public string PriceDisplay { get; }
+}
+
+/// <summary>
+/// Concise 4-column presentation row for Per-Doctor Treatment Suggestion Rules inside Settings.
+/// </summary>
+public sealed class DoctorTreatmentRuleRowItem
+{
+    public DoctorTreatmentRuleRowItem(
+        BillingCatalogItemDto procedureItem,
+        IReadOnlyList<BillingCatalogItemDto> suggestedItems,
+        bool isDoctorScope,
+        bool isDoctorOverride)
+    {
+        ProcedureItem = procedureItem;
+        SuggestedItems = suggestedItems;
+        IsDoctorOverride = isDoctorOverride;
+        TreatmentName = procedureItem.Name;
+        RuleSourceDisplay = !isDoctorScope
+            ? "Clinic Default"
+            : (isDoctorOverride ? "Doctor Custom" : "Inherited Default");
+        SuggestedSummary = suggestedItems.Count == 0
+            ? "None (No Add-Ons)"
+            : AppointmentCalendarHelper.FormatCompactReceptionNote(string.Join(", ", suggestedItems.Select(i => i.Name)), 44);
+        CountDisplay = suggestedItems.Count == 1 ? "1 Item" : $"{suggestedItems.Count} Items";
+    }
+
+    public BillingCatalogItemDto ProcedureItem { get; }
+    public IReadOnlyList<BillingCatalogItemDto> SuggestedItems { get; }
+    public bool IsDoctorOverride { get; }
+    public string TreatmentName { get; }
+    public string RuleSourceDisplay { get; }
+    public string SuggestedSummary { get; }
+    public string CountDisplay { get; }
 }
 
 /// <summary>

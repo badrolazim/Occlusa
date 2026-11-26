@@ -21,6 +21,7 @@ public partial class MainViewModel : ObservableObject
     public const int WorkspacePatients = 2;
     public const int WorkspaceBilling = 3;
     public const int WorkspaceWhatsApp = 4;
+    public const int WorkspaceSettings = 5;
 
     private readonly OcclusaApiClient _apiClient;
     private readonly MyKadPcscReaderService _myKadService;
@@ -50,6 +51,8 @@ public partial class MainViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(IsPatientsWorkspace))]
     [NotifyPropertyChangedFor(nameof(IsBillingWorkspace))]
     [NotifyPropertyChangedFor(nameof(IsWhatsAppWorkspace))]
+    [NotifyPropertyChangedFor(nameof(IsSettingsWorkspace))]
+    [NotifyPropertyChangedFor(nameof(ShowMedicalBanner))]
     [NotifyPropertyChangedFor(nameof(ActiveWorkspaceTitle))]
     [NotifyPropertyChangedFor(nameof(ActiveWorkspaceSubtitle))]
     private int _activeWorkspaceIndex;
@@ -185,6 +188,7 @@ public partial class MainViewModel : ObservableObject
         WhatsAppRows = new ObservableCollection<WhatsAppThreadRowItem>();
 
         Appointments = new AppointmentsViewModel();
+        BillingSettings = new BillingSettingsViewModel(_apiClient);
         Appointments.AppointmentSelectedForBanner += (_, appt) =>
             SelectPatientById(appt.PatientId, appt.PatientName, appt.PatientIc);
         Appointments.AppointmentRescheduleRequested += (_, args) =>
@@ -222,18 +226,20 @@ public partial class MainViewModel : ObservableObject
     public ObservableCollection<WhatsAppThreadRowItem> WhatsAppRows { get; }
 
     public AppointmentsViewModel Appointments { get; }
+    public BillingSettingsViewModel BillingSettings { get; }
     public IReadOnlyList<PatientDto> AllPatients => _allPatients;
     public IReadOnlyList<DentistDto> Dentists => _dentists;
     public IReadOnlyList<TreatmentDto> Treatments => _treatments;
     public IReadOnlyList<SoapMacroDto> SoapMacros => _soapMacros;
     public IReadOnlyList<AppointmentQueueItemDto> AllQueueItems => _allQueue;
+    public IReadOnlyList<InvoiceDto> AllInvoices => _allInvoices;
     public DailySalesReconciliationDto? LatestReconciliation => _latestReconciliation;
 
     public bool HasSelectedQueueRow => SelectedQueueRow != null;
     public bool CanApproveSelectedAi => SelectedQueueRow?.Source.Status == QueueStatus.AiBookedPending;
     public bool CanCheckInSelected => SelectedQueueRow?.Source.Status is QueueStatus.Scheduled or QueueStatus.AiBookedPending;
     public bool CanCallToChairSelected => SelectedQueueRow?.Source.Status is QueueStatus.Waiting or QueueStatus.Arrived or QueueStatus.Scheduled;
-    public bool CanSendToCheckoutSelected => SelectedQueueRow?.Source.Status == QueueStatus.InChair;
+    public bool CanSendToCheckoutSelected => SelectedQueueRow?.Source.Status is QueueStatus.InChair or QueueStatus.AwaitingCheckout;
     public bool CanCompleteSelected => SelectedQueueRow?.Source.Status is QueueStatus.InChair or QueueStatus.AwaitingCheckout;
     public bool CanCancelSelectedQueue => SelectedQueueRow != null && !AppointmentCalendarHelper.IsFinishedQueueStatus(SelectedQueueRow.Source.Status);
 
@@ -242,22 +248,26 @@ public partial class MainViewModel : ObservableObject
     public bool IsPatientsWorkspace => ActiveWorkspaceIndex == WorkspacePatients;
     public bool IsBillingWorkspace => ActiveWorkspaceIndex == WorkspaceBilling;
     public bool IsWhatsAppWorkspace => ActiveWorkspaceIndex == WorkspaceWhatsApp;
+    public bool IsSettingsWorkspace => ActiveWorkspaceIndex == WorkspaceSettings;
+    public bool ShowMedicalBanner => !IsAppointmentsWorkspace && !IsSettingsWorkspace;
 
     public string ActiveWorkspaceTitle => ActiveWorkspaceIndex switch
     {
         WorkspaceQueue => "Live Queue & Chair Schedule",
         WorkspaceAppointments => "Appointments & Clinic Calendar",
         WorkspacePatients => "Malaysian Patients Registry",
-        WorkspaceBilling => "Reception Billing & Invoices",
+        WorkspaceBilling => "Reception Billing, OTC & Credit Wallet",
+        WorkspaceSettings => "Master Catalogue & Doctor Settings",
         _ => "WhatsApp AI Receptionist"
     };
 
     public string ActiveWorkspaceSubtitle => ActiveWorkspaceIndex switch
     {
-        WorkspaceQueue => "Real-time patient arrival, chair allocation & AI booking approvals",
+        WorkspaceQueue => "Real-time patient arrival, chair allocation & dentist invoice checkout",
         WorkspaceAppointments => "Multi-day dentist schedule, treatments & table directory",
-        WorkspacePatients => "MyKad IC verification, clinical safety alerts & SOAP notes",
-        WorkspaceBilling => "Split-payment checkout, corporate panels & audited soft-voids",
+        WorkspacePatients => "MyKad IC verification, clinical safety alerts & pure clinical visit notes",
+        WorkspaceBilling => "Draft invoices, walk-in OTC sales, shared patient credit & split-payment checkout",
+        WorkspaceSettings => "Single source of truth for Appointments, Odontogram Presets, Prices, OTC 0% Comm & Note Keywords",
         _ => "Automated triage monitoring, simulator & emergency takeover"
     };
 
@@ -354,7 +364,14 @@ public partial class MainViewModel : ObservableObject
     {
         if (value != null)
         {
-            SelectPatientById(value.Source.PatientId, value.Source.PatientName, string.Empty);
+            if (value.Source.IsWalkInRetail || value.Source.PatientId == Guid.Empty)
+            {
+                SelectedPatient = null;
+            }
+            else
+            {
+                SelectPatientById(value.Source.PatientId, value.Source.PatientName, string.Empty);
+            }
         }
     }
 
@@ -363,7 +380,7 @@ public partial class MainViewModel : ObservableObject
     {
         if (int.TryParse(indexStr, out int index))
         {
-            ActiveWorkspaceIndex = Math.Clamp(index, WorkspaceQueue, WorkspaceWhatsApp);
+            ActiveWorkspaceIndex = Math.Clamp(index, WorkspaceQueue, WorkspaceSettings);
         }
     }
 
@@ -736,6 +753,16 @@ public partial class MainViewModel : ObservableObject
     public PatientDto? FindPatient(Guid patientId) =>
         _allPatients.FirstOrDefault(p => p.Id == patientId);
 
+    public InvoiceDto? FindActiveInvoiceForVisitOrAppointment(Guid? visitId, Guid? appointmentId)
+    {
+        return _allInvoices
+            .Where(i => !i.IsVoided && (
+                (visitId.HasValue && i.VisitId == visitId.Value)
+                || (appointmentId.HasValue && i.AppointmentId == appointmentId.Value)))
+            .OrderByDescending(i => i.CreatedAt)
+            .FirstOrDefault();
+    }
+
     private async Task SwitchBranchInternalAsync(string branchId)
     {
         await _apiClient.SwitchBranchAsync(branchId);
@@ -759,6 +786,7 @@ public partial class MainViewModel : ObservableObject
         RebuildPatientRows();
         RebuildInvoiceRows();
         RebuildWhatsAppRows();
+        BillingSettings.ApplySnapshot(snapshot.BillingSettings, _dentists);
         UpdateTopBadges();
 
         if (SelectedPatient != null)

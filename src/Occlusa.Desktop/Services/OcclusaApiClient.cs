@@ -566,6 +566,49 @@ public sealed class OcclusaApiClient : IAsyncDisposable
             (http, token) => http.GetFromJsonAsync<InvoiceDto>($"/api/invoices/{invoiceId}", JsonOptions, token),
             ct);
 
+    public Task<InvoiceDto> SaveInvoiceDraftAsync(
+        SaveInvoiceDraftRequest request,
+        CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(async (http, token) =>
+        {
+            var resp = await http.PostAsJsonAsync("/api/invoices/draft", request, JsonOptions, token);
+            return await ReadRequiredAsync<InvoiceDto>(resp, token);
+        }, ct);
+
+    public Task<List<PatientCreditEntryDto>> GetPatientCreditsAsync(Guid patientId, CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(
+            async (http, token) => await http.GetFromJsonAsync<List<PatientCreditEntryDto>>(
+                $"/api/patients/{patientId}/credits",
+                JsonOptions,
+                token) ?? new(),
+            ct);
+
+    public Task<BillingSettingsSnapshotDto> GetBillingSettingsAsync(CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(
+            async (http, token) => await http.GetFromJsonAsync<BillingSettingsSnapshotDto>(
+                "/api/billing-settings",
+                JsonOptions,
+                token) ?? new(),
+            ct);
+
+    public Task<BillingCatalogItemDto> UpsertBillingCatalogItemAsync(
+        UpsertBillingCatalogItemRequest request,
+        CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(async (http, token) =>
+        {
+            var resp = await http.PostAsJsonAsync("/api/billing-settings/catalog", request, JsonOptions, token);
+            return await ReadRequiredAsync<BillingCatalogItemDto>(resp, token);
+        }, ct);
+
+    public Task<DoctorInvoicePreferenceDto> SaveDoctorInvoicePreferenceAsync(
+        SaveDoctorInvoicePreferenceRequest request,
+        CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(async (http, token) =>
+        {
+            var resp = await http.PutAsJsonAsync("/api/billing-settings/doctor-preferences", request, JsonOptions, token);
+            return await ReadRequiredAsync<DoctorInvoicePreferenceDto>(resp, token);
+        }, ct);
+
     public Task<InvoiceDto> ApplyPaymentAsync(
         Guid invoiceId,
         ApplyPaymentRequest request,

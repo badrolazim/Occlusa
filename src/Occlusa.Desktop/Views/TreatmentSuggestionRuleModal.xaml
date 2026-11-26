@@ -1,0 +1,91 @@
+<Window x:Class="Occlusa.Desktop.Views.TreatmentSuggestionRuleModal"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:Occlusa.Desktop.Controls"
+        Title="Configure Treatment Invoice Suggestions"
+        Width="940"
+        Height="680"
+        MinWidth="840"
+        MinHeight="620"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="{StaticResource SurfaceCanvasBrush}"
+        ScrollViewer.VerticalScrollBarVisibility="Disabled"
+        ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+
+    <controls:ModalDialogShell x:Name="DialogShell"
+                               Title="{Binding ModalTitle}"
+                               Subtitle="{Binding ModalSubtitle}"
+                               BadgeText="{Binding BadgeText}"
+                               HasUnsavedChanges="{Binding HasUnsavedChanges, Mode=TwoWay}"
+                               SaveCommand="{Binding SaveRuleCommand}"
+                               UnsavedPromptTitle="Unsaved Suggestion Rule Changes"
+                               UnsavedPromptMessage="Save your companion invoice item suggestions before closing?">
+
+        <controls:ModalDialogShell.DialogContent>
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Border Grid.Row="0" Style="{StaticResource UniformCardBorderStyle}" Padding="12,8" Margin="0,0,0,10">
+                    <DockPanel LastChildFill="False">
+                        <TextBlock DockPanel.Dock="Left"
+                                   Text="Double-click any catalog item below to toggle whether it is suggested on invoices for this treatment."
+                                   Style="{StaticResource UniformMutedTextStyle}"
+                                   VerticalAlignment="Center" />
+
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                            <Button Content="Toggle Selected"
+                                    Command="{Binding ToggleRowCommand}"
+                                    Style="{StaticResource UniformSecondaryButtonStyle}"
+                                    Height="30"
+                                    Margin="0,0,6,0" />
+                            <Button Content="Clear All"
+                                    Command="{Binding ClearAllSelectionsCommand}"
+                                    Style="{StaticResource UniformGhostButtonStyle}"
+                                    Height="30"
+                                    Margin="0,0,6,0" />
+                            <Button Content="Inherit Clinic Default"
+                                    Command="{Binding ResetToClinicDefaultCommand}"
+                                    Visibility="{Binding IsDoctorSpecific, Converter={StaticResource BoolToVisibilityConverter}}"
+                                    Style="{StaticResource UniformWarningButtonStyle}"
+                                    Height="30" />
+                        </StackPanel>
+                    </DockPanel>
+                </Border>
+
+                <controls:UniformPagedGrid Grid.Row="1"
+                                           Title="Companion Catalog Items (Medications, X-Rays, Procedures &amp; OTC)"
+                                           Subtitle="4 Columns · Paged (Double-click row to toggle ✓ Suggested)"
+                                           EmptyMessage="No active catalog items available."
+                                           ItemsSource="{Binding CandidateRows}"
+                                           SelectedItem="{Binding SelectedRow, Mode=TwoWay}"
+                                           RowDoubleClicked="CandidateGrid_RowDoubleClicked"
+                                           AutoPageSize="False"
+                                           PageSize="8">
+                    <controls:UniformColumnDef Header="Status" BindingPath="SelectedDisplay" WidthRatio="0.95" IsBold="True" />
+                    <controls:UniformColumnDef Header="Catalog Item" BindingPath="Name" WidthRatio="2.25" IsBold="True" />
+                    <controls:UniformColumnDef Header="Category" BindingPath="CategoryDisplay" WidthRatio="1.15" />
+                    <controls:UniformColumnDef Header="Price (RM)" BindingPath="PriceDisplay" WidthRatio="0.95" IsMonospace="True" HorizontalAlignment="Right" />
+                </controls:UniformPagedGrid>
+            </Grid>
+        </controls:ModalDialogShell.DialogContent>
+
+        <controls:ModalDialogShell.FooterLeftContent>
+            <TextBlock Text="{Binding StatusMessage}"
+                       Style="{StaticResource UniformBodyTextStyle}"
+                       Foreground="{StaticResource BrandPrimaryBrush}"
+                       FontWeight="SemiBold"
+                       VerticalAlignment="Center" />
+        </controls:ModalDialogShell.FooterLeftContent>
+
+        <controls:ModalDialogShell.FooterContent>
+            <Button Content="Save Suggestion Rule"
+                    Command="{Binding SaveRuleCommand}"
+                    Style="{StaticResource UniformPrimaryButtonStyle}" />
+        </controls:ModalDialogShell.FooterContent>
+    </controls:ModalDialogShell>
+</Window>
+

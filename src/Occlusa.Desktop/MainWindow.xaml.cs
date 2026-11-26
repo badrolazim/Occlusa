@@ -7,7 +7,7 @@ using Occlusa.Shared.Models;
 namespace Occlusa.Desktop;
 
 /// <summary>
-/// Main 5-workspace single-screen clinical window opening True Modal Popups via ShowDialog().
+/// Main 6-workspace single-screen clinical window opening True Modal Popups via ShowDialog().
 /// </summary>
 public partial class MainWindow : Window
 {
@@ -28,6 +28,11 @@ public partial class MainWindow : Window
         _viewModel.WalkInIntakeRequested += (_, patient) =>
             OpenWalkInModal(patient);
 
+        _viewModel.BillingSettings.OpenCatalogItemModalRequested += (_, item) =>
+            OpenBillingCatalogItemModal(item);
+        _viewModel.BillingSettings.OpenTreatmentRuleModalRequested += (_, args) =>
+            OpenTreatmentSuggestionRuleModal(args.ProcedureItem, args.DentistId, args.DoctorName);
+
         Closed += (_, _) => _viewModel.StopTimers();
     }
 
@@ -38,7 +43,11 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (row.Source.Status is QueueStatus.InChair or QueueStatus.AwaitingCheckout || row.Source.VisitId.HasValue)
+        if (row.Source.Status == QueueStatus.AwaitingCheckout)
+        {
+            await OpenCheckoutForQueueItemAsync(row.Source);
+        }
+        else if (row.Source.Status == QueueStatus.InChair || row.Source.VisitId.HasValue)
         {
             await OpenVisitForQueueItemAsync(row.Source, this);
         }
@@ -56,11 +65,11 @@ public partial class MainWindow : Window
         }
     }
 
-    private void InvoicesPagedGrid_RowDoubleClicked(object? sender, object? rowObj)
+    private async void InvoicesPagedGrid_RowDoubleClicked(object? sender, object? rowObj)
     {
         if (rowObj is InvoiceRowItem row)
         {
-            OpenInvoiceModal(row.Source);
+            await OpenExistingInvoiceModalAsync(row.Source);
         }
     }
 
@@ -69,6 +78,30 @@ public partial class MainWindow : Window
         if (rowObj is WhatsAppThreadRowItem row)
         {
             OpenWhatsAppModal(row.Source);
+        }
+    }
+
+    private void BillingCatalogPagedGrid_RowDoubleClicked(object? sender, object? rowObj)
+    {
+        if (rowObj is BillingCatalogRowItem row)
+        {
+            OpenBillingCatalogItemModal(row.Source);
+        }
+    }
+
+    private void DoctorRulesPagedGrid_RowDoubleClicked(object? sender, object? rowObj)
+    {
+        if (rowObj is DoctorTreatmentRuleRowItem row && _viewModel.BillingSettings.SelectedDoctorScope is { } scope)
+        {
+            OpenTreatmentSuggestionRuleModal(row.ProcedureItem, scope.DentistId, scope.DisplayName);
+        }
+    }
+
+    private async void CheckoutSelectedQueuePatientButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel.SelectedQueueRow is { } row)
+        {
+            await OpenCheckoutForQueueItemAsync(row.Source);
         }
     }
 
@@ -126,12 +159,39 @@ public partial class MainWindow : Window
         }
     }
 
-    private void OpenSelectedInvoiceButton_Click(object sender, RoutedEventArgs e)
+    private void NewRetailInvoiceButton_Click(object sender, RoutedEventArgs e)
+    {
+        OpenInvoiceBuilderModal(
+            existingInvoice: null,
+            preselectedPatient: null,
+            visit: null,
+            appointment: null,
+            startAsWalkInRetail: true,
+            isDentistCheckout: false);
+    }
+
+    private void NewPatientInvoiceButton_Click(object sender, RoutedEventArgs e)
+    {
+        OpenInvoiceBuilderModal(
+            existingInvoice: null,
+            preselectedPatient: _viewModel.SelectedPatient,
+            visit: null,
+            appointment: null,
+            startAsWalkInRetail: false,
+            isDentistCheckout: false);
+    }
+
+    private async void OpenSelectedInvoiceButton_Click(object sender, RoutedEventArgs e)
     {
         if (_viewModel.SelectedInvoiceRow is { } row)
         {
-            OpenInvoiceModal(row.Source);
+            await OpenExistingInvoiceModalAsync(row.Source);
         }
+    }
+
+    private async void SaveDoctorModeButton_Click(object sender, RoutedEventArgs e)
+    {
+        await _viewModel.BillingSettings.SaveCurrentDoctorModeAsync(_viewModel.SelectedStaffName);
     }
 
     private void OpenDailyReconciliationButton_Click(object sender, RoutedEventArgs e)
@@ -321,6 +381,7 @@ public partial class MainWindow : Window
 
     private void OpenVisitRecordModal(PatientDto patient, PatientVisitDto visit, Window? owner)
     {
+        PatientVisitDto? checkoutTarget = null;
         var vm = new VisitRecordViewModel(
             patient,
             visit,
@@ -330,7 +391,8 @@ public partial class MainWindow : Window
             _viewModel.SelectedStaffName,
             VisitWorkspaceTab.Odontogram,
             savedVisit => { _ = _viewModel.RefreshSnapshotAsync(); },
-            () => _ = _viewModel.RefreshSnapshotAsync());
+            savedForCheckout => checkoutTarget = savedForCheckout,
+            _viewModel.BillingSettings.CurrentSettings.CatalogItems);
 
         var modal = new VisitRecordModal(vm)
         {
@@ -338,16 +400,163 @@ public partial class MainWindow : Window
         };
         modal.ShowDialog();
         _ = _viewModel.RefreshSnapshotAsync();
+
+        if (checkoutTarget is not null)
+        {
+            var linkedAppt = checkoutTarget.AppointmentId.HasValue
+                ? _viewModel.AllQueueItems.FirstOrDefault(q => q.Id == checkoutTarget.AppointmentId.Value)
+                : null;
+            var existingInv = _viewModel.FindActiveInvoiceForVisitOrAppointment(checkoutTarget.Id, checkoutTarget.AppointmentId);
+            OpenInvoiceBuilderModal(
+                existingInvoice: existingInv,
+                preselectedPatient: _viewModel.FindPatient(patient.Id) ?? patient,
+                visit: checkoutTarget,
+                appointment: linkedAppt,
+                startAsWalkInRetail: false,
+                isDentistCheckout: linkedAppt?.Status == QueueStatus.InChair || existingInv is null,
+                owner: owner ?? this);
+        }
     }
 
-    private void OpenInvoiceModal(InvoiceDto invoice)
+    private async Task OpenCheckoutForQueueItemAsync(AppointmentQueueItemDto queueItem)
+    {
+        try
+        {
+            PatientVisitDto? visit = null;
+            if (queueItem.VisitId.HasValue)
+            {
+                visit = await _apiClient.GetVisitAsync(queueItem.VisitId.Value);
+            }
+
+            visit ??= await _apiClient.EnsureVisitForAppointmentAsync(queueItem.Id, _viewModel.SelectedStaffName);
+            var patient = _viewModel.FindPatient(queueItem.PatientId) ?? new PatientDto
+            {
+                Id = queueItem.PatientId,
+                FullName = queueItem.PatientName,
+                IcNumber = queueItem.PatientIc,
+                PrimaryBranchId = queueItem.BranchId
+            };
+
+            var existingInvoice = _viewModel.FindActiveInvoiceForVisitOrAppointment(visit.Id, queueItem.Id);
+            bool dentistCheckout = queueItem.Status == QueueStatus.InChair && existingInvoice is null;
+
+            OpenInvoiceBuilderModal(
+                existingInvoice: existingInvoice,
+                preselectedPatient: patient,
+                visit: visit,
+                appointment: queueItem,
+                startAsWalkInRetail: false,
+                isDentistCheckout: dentistCheckout);
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show(
+                $"Could not initiate checkout invoice: {ex.Message}",
+                "Checkout Error",
+                MessageBoxButton.OK,
+                MessageBoxImage.Warning);
+        }
+    }
+
+    private async Task OpenExistingInvoiceModalAsync(InvoiceDto invoice)
+    {
+        PatientVisitDto? visit = null;
+        if (invoice.VisitId.HasValue && invoice.Payments.Count == 0 && !invoice.IsVoided)
+        {
+            try
+            {
+                visit = await _apiClient.GetVisitAsync(invoice.VisitId.Value);
+            }
+            catch
+            {
+                // Proceed even if clinical visit cannot be prefetched.
+            }
+        }
+
+        var linkedAppt = invoice.AppointmentId.HasValue
+            ? _viewModel.AllQueueItems.FirstOrDefault(a => a.Id == invoice.AppointmentId.Value)
+            : null;
+        var patient = !invoice.IsWalkInRetail && invoice.PatientId != Guid.Empty
+            ? _viewModel.FindPatient(invoice.PatientId)
+            : null;
+
+        OpenInvoiceBuilderModal(
+            existingInvoice: invoice,
+            preselectedPatient: patient,
+            visit: visit,
+            appointment: linkedAppt,
+            startAsWalkInRetail: invoice.IsWalkInRetail,
+            isDentistCheckout: false);
+    }
+
+    private void OpenInvoiceBuilderModal(
+        InvoiceDto? existingInvoice,
+        PatientDto? preselectedPatient,
+        PatientVisitDto? visit,
+        AppointmentQueueItemDto? appointment,
+        bool startAsWalkInRetail,
+        bool isDentistCheckout,
+        Window? owner = null)
     {
         var vm = new InvoiceCheckoutViewModel(
-            invoice,
+            existingInvoice,
             _apiClient,
-            _inv => _ = _viewModel.RefreshSnapshotAsync());
+            inv => { _ = _viewModel.RefreshSnapshotAsync(); },
+            _viewModel.SelectedBranchId,
+            _viewModel.SelectedStaffName,
+            _viewModel.AllPatients,
+            _viewModel.Dentists,
+            _viewModel.BillingSettings.CurrentSettings,
+            preselectedPatient,
+            visit,
+            appointment,
+            startAsWalkInRetail,
+            isDentistCheckout);
 
         var modal = new InvoiceCheckoutModal(vm)
+        {
+            Owner = owner ?? this
+        };
+        modal.ShowDialog();
+        _ = _viewModel.RefreshSnapshotAsync();
+    }
+
+    private void OpenBillingCatalogItemModal(BillingCatalogItemDto? existing)
+    {
+        var vm = new BillingCatalogItemViewModel(
+            existing,
+            _apiClient,
+            _viewModel.SelectedStaffName,
+            saved =>
+            {
+                _viewModel.BillingSettings.MergeSavedCatalogItem(saved);
+                _ = _viewModel.RefreshSnapshotAsync();
+            });
+
+        var modal = new BillingCatalogItemModal(vm)
+        {
+            Owner = this
+        };
+        modal.ShowDialog();
+    }
+
+    private void OpenTreatmentSuggestionRuleModal(BillingCatalogItemDto procedureItem, Guid? dentistId, string doctorName)
+    {
+        var editable = _viewModel.BillingSettings.ResolveEditablePreference(dentistId, doctorName);
+        var clinicDefault = _viewModel.BillingSettings.GetClinicDefaultPreference();
+
+        var vm = new TreatmentSuggestionRuleViewModel(
+            procedureItem,
+            dentistId,
+            doctorName,
+            editable,
+            clinicDefault,
+            _viewModel.BillingSettings.CurrentSettings.CatalogItems,
+            _apiClient,
+            _viewModel.SelectedStaffName,
+            saved => _viewModel.BillingSettings.MergeSavedPreference(saved));
+
+        var modal = new TreatmentSuggestionRuleModal(vm)
         {
             Owner = this
         };

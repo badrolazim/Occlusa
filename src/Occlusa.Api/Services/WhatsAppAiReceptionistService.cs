@@ -233,17 +233,19 @@ public sealed class WhatsAppAiReceptionistService : IWhatsAppAiReceptionistServi
         CancellationToken ct)
     {
         var branchLabel = branchId == "PJ-SS2" ? "PJ SS2" : "KL Sentral HQ";
+        var settings = await _repository.GetBillingSettingsAsync(ct);
+        var routineFeeSummary = BuildLiveRoutineFeeSummary(settings.CatalogItems);
 
         if (!triage.IsRoutineBookingEligible)
         {
             var slots = await GetAvailableSlotsAsync(branchId, null, ct);
             var nextSlotText = slots.Count > 0 ? slots[0] : "tomorrow 10:00 AM";
             return (
-                $"Occlusa Dental ({branchLabel}) is open Mon–Sat, 9:00am–6:00pm (KL Sentral HQ & PJ SS2). Standard routine fees: Consultation RM50, Scaling & Polishing RM120–RM180, Simple Filling RM150–RM250. Our next open slot is {nextSlotText} — reply with 'book' and your preferred procedure to reserve an AI-Booked (Pending) slot.",
+                $"Occlusa Dental ({branchLabel}) is open Mon–Sat, 9:00am–6:00pm (KL Sentral HQ & PJ SS2). Standard routine fees: {routineFeeSummary}. Our next open slot is {nextSlotText} — reply with 'book' and your preferred procedure to reserve an AI-Booked (Pending) slot.",
                 null);
         }
 
-        var (procedure, feeRange) = DetectRoutineProcedure(messageText);
+        var (procedure, feeLabel) = DetectRoutineProcedure(messageText, settings.CatalogItems);
         var slot = await PickNextOpenSlotAsync(branchId, messageText, ct);
 
         var created = await CreatePendingAiAppointmentAsync(
@@ -256,7 +258,7 @@ public sealed class WhatsAppAiReceptionistService : IWhatsAppAiReceptionistServi
 
         var malaysiaLocalTime = created.ScheduledAt.ToOffset(MalaysiaOffset);
         var reply =
-            $"Booked! I've reserved a provisional slot for {procedure} ({feeRange}) at {branchLabel} with {created.DoctorName} on {malaysiaLocalTime:ddd dd MMM, hh:mm tt}. Status: AI-Booked (Pending) — our front-desk team will confirm shortly.";
+            $"Booked! I've reserved a provisional slot for {procedure} ({feeLabel}) at {branchLabel} with {created.DoctorName} on {malaysiaLocalTime:ddd dd MMM, hh:mm tt}. Status: AI-Booked (Pending) — our front-desk team will confirm shortly.";
 
         return (reply, created.Id);
     }
@@ -275,10 +277,12 @@ public sealed class WhatsAppAiReceptionistService : IWhatsAppAiReceptionistServi
             var model = string.IsNullOrWhiteSpace(_geminiOptions.Model) ? "gemini-2.5-flash" : _geminiOptions.Model.Trim();
             var url = $"https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent?key={_geminiOptions.ApiKey}";
 
-            var systemPrompt = """
+            var settings = await _repository.GetBillingSettingsAsync(ct);
+            var routineFeeSummary = BuildLiveRoutineFeeSummary(settings.CatalogItems);
+            var systemPrompt = $"""
                 You are Occlusa Dental Clinic's WhatsApp AI Receptionist in Malaysia.
                 STRICT GUARDRAILS (NEVER VIOLATE):
-                1. Allowed scope ONLY: clinic hours (Mon-Sat 9:00am-6:00pm, closed Sunday), clinic locations (KL Sentral HQ [HQ-KL] & PJ SS2 [PJ-SS2]), standard price ranges (Consultation RM50, Scaling & Polishing RM120-RM180, Simple Filling RM150-RM250), and routine appointment booking.
+                1. Allowed scope ONLY: clinic hours (Mon-Sat 9:00am-6:00pm, closed Sunday), clinic locations (KL Sentral HQ [HQ-KL] & PJ SS2 [PJ-SS2]), standard Master Catalogue fees ({routineFeeSummary}), and routine appointment booking.
                 2. NEVER diagnose, prescribe, or auto-book complex/surgical procedures (implants, wisdom tooth surgery, full-mouth rehab, braces, sedation). Redirect those to human front-desk callback.
                 3. Every booking created MUST go through `create_appointment` (which marks it AiBookedPending).
                 4. If the patient reports severe pain, facial swelling, uncontrolled bleeding, trauma, or difficulty breathing/swallowing, IMMEDIATELY call `escalate_emergency_to_staff` and do NOT book.
@@ -674,20 +678,39 @@ public sealed class WhatsAppAiReceptionistService : IWhatsAppAiReceptionistServi
         return fallbackBranch;
     }
 
-    private static (string Procedure, string FeeRange) DetectRoutineProcedure(string messageText)
+    private static string BuildLiveRoutineFeeSummary(IReadOnlyList<BillingCatalogItemDto> catalog)
+    {
+        decimal PriceOf(string fragment, decimal fallback) =>
+            catalog.FirstOrDefault(c => c.IsActive && c.Name.Contains(fragment, StringComparison.OrdinalIgnoreCase))?.UnitPrice ?? fallback;
+
+        var consult = PriceOf("Consultation", 50m);
+        var scaling = PriceOf("Scaling", 150m);
+        var filling = PriceOf("Composite Filling", 200m);
+        return $"Consultation RM{consult:0.##}, Scaling & Polishing RM{scaling:0.##}, Composite Filling RM{filling:0.##}";
+    }
+
+    private static (string Procedure, string FeeLabel) DetectRoutineProcedure(
+        string messageText,
+        IReadOnlyList<BillingCatalogItemDto> catalog)
     {
         var lower = messageText.ToLowerInvariant();
+        BillingCatalogItemDto? Find(string fragment) =>
+            catalog.FirstOrDefault(c => c.IsActive && c.Name.Contains(fragment, StringComparison.OrdinalIgnoreCase));
+
         if (lower.Contains("scaling") || lower.Contains("polish") || lower.Contains("clean") || lower.Contains("cuci"))
         {
-            return ("Routine Scaling & Polishing", "RM120–RM180");
+            var item = Find("Scaling");
+            return (item?.Name ?? "Routine Scaling & Polishing", $"RM{(item?.UnitPrice ?? 150m):0.##}");
         }
 
         if (lower.Contains("filling") || lower.Contains("tampal"))
         {
-            return ("Simple Composite Filling", "RM150–RM250");
+            var item = Find("Composite Filling");
+            return (item?.Name ?? "Posterior Composite Filling", $"RM{(item?.UnitPrice ?? 200m):0.##}");
         }
 
-        return ("Dental Consultation & Checkup", "RM50");
+        var consult = Find("Consultation");
+        return (consult?.Name ?? "Dental Consultation & Checkup", $"RM{(consult?.UnitPrice ?? 50m):0.##}");
     }
 
     private static string CollapseToSingleBubble(string? text)

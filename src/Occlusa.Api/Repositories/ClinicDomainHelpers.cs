@@ -240,6 +240,7 @@ public static class ClinicDomainHelpers
         },
         IsMyKadVerified = p.IsMyKadVerified,
         ConsentSignedAt = p.ConsentSignedAt,
+        CreditBalance = p.CreditBalance,
         VisitCount = p.VisitCount,
         LastVisitAt = p.LastVisitAt
     };
@@ -369,6 +370,7 @@ public static class ClinicDomainHelpers
         InvoiceNumber = inv.InvoiceNumber,
         BranchId = inv.BranchId,
         PatientId = inv.PatientId,
+        IsWalkInRetail = inv.IsWalkInRetail,
         PatientName = inv.PatientName,
         DoctorName = inv.DoctorName,
         AppointmentId = inv.AppointmentId,
@@ -376,8 +378,11 @@ public static class ClinicDomainHelpers
         Lines = inv.Lines.Select(l => new InvoiceLineDto
         {
             Id = l.Id,
+            CatalogItemId = l.CatalogItemId,
             ToothNumber = l.ToothNumber,
             ProcedureName = l.ProcedureName,
+            Category = l.Category,
+            IsCommissionable = l.IsCommissionable,
             UnitPrice = l.UnitPrice,
             Quantity = l.Quantity,
             LineTotal = l.LineTotal,
@@ -389,6 +394,7 @@ public static class ClinicDomainHelpers
         PanelName = inv.PanelName,
         PatientPayableAmount = inv.PatientPayableAmount,
         PaidAmount = inv.PaidAmount,
+        CreditedOverpaymentAmount = inv.CreditedOverpaymentAmount,
         DoctorCommissionAmount = inv.DoctorCommissionAmount,
         Payments = inv.Payments.Select(p => new PaymentSplitDto
         {
@@ -401,6 +407,357 @@ public static class ClinicDomainHelpers
         VoidReason = inv.VoidReason,
         CreatedAt = inv.CreatedAt
     };
+
+    public static BillingCatalogItemDto Clone(BillingCatalogItemDto c) => new()
+    {
+        Id = c.Id,
+        Name = c.Name,
+        Category = c.Category,
+        ClinicalSubcategory = c.ClinicalSubcategory,
+        UnitPrice = c.UnitPrice,
+        IsCommissionable = c.Category != BillingCatalogCategory.OtcProduct && c.IsCommissionable,
+        IsBookableAppointment = c.Category is BillingCatalogCategory.Procedure or BillingCatalogCategory.Radiograph && c.IsBookableAppointment,
+        DefaultDurationMinutes = Math.Clamp(c.DefaultDurationMinutes > 0 ? c.DefaultDurationMinutes : 30, 15, 480),
+        ShowInOdontogramPresets = c.ShowInOdontogramPresets,
+        DefaultToothCondition = c.DefaultToothCondition,
+        NoteKeywords = c.NoteKeywords,
+        SafetyAlertTags = c.SafetyAlertTags,
+        IsActive = c.IsActive
+    };
+
+    public static TreatmentSuggestionRuleDto Clone(TreatmentSuggestionRuleDto r) => new()
+    {
+        TreatmentId = r.TreatmentId,
+        TreatmentName = r.TreatmentName,
+        SuggestedCatalogItemIds = r.SuggestedCatalogItemIds.ToList()
+    };
+
+    public static DoctorInvoicePreferenceDto Clone(DoctorInvoicePreferenceDto p) => new()
+    {
+        DentistId = p.DentistId,
+        DoctorName = p.DoctorName,
+        InitMode = p.InitMode,
+        EnableNoteKeywordEngine = p.EnableNoteKeywordEngine,
+        TreatmentRules = p.TreatmentRules.Select(Clone).ToList()
+    };
+
+    public static BillingSettingsSnapshotDto Clone(BillingSettingsSnapshotDto s) => new()
+    {
+        CatalogItems = s.CatalogItems.Select(Clone).ToList(),
+        DoctorPreferences = s.DoctorPreferences.Select(Clone).ToList(),
+        CorporatePanels = s.CorporatePanels.ToList()
+    };
+
+    public static PatientCreditEntryDto Clone(PatientCreditEntryDto e) => new()
+    {
+        Id = e.Id,
+        PatientId = e.PatientId,
+        BranchId = e.BranchId,
+        InvoiceId = e.InvoiceId,
+        InvoiceNumber = e.InvoiceNumber,
+        AmountDelta = e.AmountDelta,
+        BalanceAfter = e.BalanceAfter,
+        EntryType = e.EntryType,
+        Notes = e.Notes,
+        RecordedBy = e.RecordedBy,
+        CreatedAt = e.CreatedAt
+    };
+
+    /// <summary>
+    /// Creates the single unified Master Catalogue powering Appointment Booking, Odontogram Presets,
+    /// Doctor Suggestion Rules, Invoice Checkout, Walk-In OTC Retail Sales, and WhatsApp AI quotes.
+    /// </summary>
+    public static BillingSettingsSnapshotDto CreateDefaultBillingSettings(IReadOnlyList<DentistDto> dentists)
+    {
+        // Canonical Bookable Clinical Treatments (60000000-... IDs shared directly with Appointments & Dentists)
+        var cConsult = new BillingCatalogItemDto
+        {
+            Id = Guid.Parse("60000000-0000-0000-0000-000000000001"),
+            Name = "Dental Consultation & Checkup",
+            Category = BillingCatalogCategory.Procedure,
+            ClinicalSubcategory = "Diagnostic",
+            UnitPrice = 50.00m,
+            IsCommissionable = true,
+            IsBookableAppointment = true,
+            DefaultDurationMinutes = 30,
+            ShowInOdontogramPresets = false,
+            DefaultToothCondition = ToothCondition.Healthy,
+            NoteKeywords = "consultation, checkup, routine exam, dental assessment"
+        };
+        var cScaling = new BillingCatalogItemDto
+        {
+            Id = Guid.Parse("60000000-0000-0000-0000-000000000002"),
+            Name = "Routine Scaling & Polishing",
+            Category = BillingCatalogCategory.Procedure,
+            ClinicalSubcategory = "Preventive",
+            UnitPrice = 150.00m,
+            IsCommissionable = true,
+            IsBookableAppointment = true,
+            DefaultDurationMinutes = 30,
+            ShowInOdontogramPresets = true,
+            DefaultToothCondition = ToothCondition.Healthy,
+            NoteKeywords = "scaling, polishing, ultrasonic scaling, s&p, prophy"
+        };
+        var cFilling = new BillingCatalogItemDto
+        {
+            Id = Guid.Parse("60000000-0000-0000-0000-000000000003"),
+            Name = "Posterior Composite Filling",
+            Category = BillingCatalogCategory.Procedure,
+            ClinicalSubcategory = "Restorative",
+            UnitPrice = 200.00m,
+            IsCommissionable = true,
+            IsBookableAppointment = true,
+            DefaultDurationMinutes = 45,
+            ShowInOdontogramPresets = true,
+            DefaultToothCondition = ToothCondition.Filling,
+            NoteKeywords = "composite, filling, restoration, tampal, gic"
+        };
+        var cSimpleExo = new BillingCatalogItemDto
+        {
+            Id = Guid.Parse("60000000-0000-0000-0000-000000000004"),
+            Name = "Simple Tooth Extraction",
+            Category = BillingCatalogCategory.Procedure,
+            ClinicalSubcategory = "Oral Surgery",
+            UnitPrice = 180.00m,
+            IsCommissionable = true,
+            IsBookableAppointment = true,
+            DefaultDurationMinutes = 30,
+            ShowInOdontogramPresets = true,
+            DefaultToothCondition = ToothCondition.ExtractionNeeded,
+            NoteKeywords = "extraction, forceps, exo, cabut, elevation"
+        };
+        var cRct = new BillingCatalogItemDto
+        {
+            Id = Guid.Parse("60000000-0000-0000-0000-000000000005"),
+            Name = "Root Canal Therapy (Stage 1)",
+            Category = BillingCatalogCategory.Procedure,
+            ClinicalSubcategory = "Endodontics",
+            UnitPrice = 450.00m,
+            IsCommissionable = true,
+            IsBookableAppointment = true,
+            DefaultDurationMinutes = 60,
+            ShowInOdontogramPresets = true,
+            DefaultToothCondition = ToothCondition.RootCanal,
+            NoteKeywords = "root canal, rct, pulpitis, pulpectomy, chemo-mechanical"
+        };
+        var cCrown = new BillingCatalogItemDto
+        {
+            Id = Guid.Parse("60000000-0000-0000-0000-000000000006"),
+            Name = "Crown Preparation & Cementation",
+            Category = BillingCatalogCategory.Procedure,
+            ClinicalSubcategory = "Prosthodontics",
+            UnitPrice = 950.00m,
+            IsCommissionable = true,
+            IsBookableAppointment = true,
+            DefaultDurationMinutes = 60,
+            ShowInOdontogramPresets = true,
+            DefaultToothCondition = ToothCondition.Crown,
+            NoteKeywords = "crown, zirconia, pfm, cementation"
+        };
+        var cImplant = new BillingCatalogItemDto
+        {
+            Id = Guid.Parse("60000000-0000-0000-0000-000000000007"),
+            Name = "Implant Crown Review",
+            Category = BillingCatalogCategory.Procedure,
+            ClinicalSubcategory = "Prosthodontics",
+            UnitPrice = 350.00m,
+            IsCommissionable = true,
+            IsBookableAppointment = true,
+            DefaultDurationMinutes = 30,
+            ShowInOdontogramPresets = true,
+            DefaultToothCondition = ToothCondition.Implant,
+            NoteKeywords = "implant, abutment, peri-implant"
+        };
+
+        // Additional Chairside Procedures (Non-Default Appointment Slots unless toggled Bookable in Settings)
+        var cSurgExo = new BillingCatalogItemDto
+        {
+            Id = Guid.Parse("80000000-0000-0000-0000-000000000005"),
+            Name = "Surgical Extraction (MOS)",
+            Category = BillingCatalogCategory.Procedure,
+            ClinicalSubcategory = "Oral Surgery",
+            UnitPrice = 450.00m,
+            IsCommissionable = true,
+            IsBookableAppointment = false,
+            DefaultDurationMinutes = 60,
+            ShowInOdontogramPresets = true,
+            DefaultToothCondition = ToothCondition.ExtractionNeeded,
+            NoteKeywords = "surgical extraction, mos, wisdom tooth, mucoperiosteal flap, odontectomy"
+        };
+        var cFluoride = new BillingCatalogItemDto
+        {
+            Id = Guid.Parse("80000000-0000-0000-0000-000000000009"),
+            Name = "Topical Fluoride Varnish",
+            Category = BillingCatalogCategory.Procedure,
+            ClinicalSubcategory = "Preventive",
+            UnitPrice = 45.00m,
+            IsCommissionable = true,
+            IsBookableAppointment = false,
+            DefaultDurationMinutes = 15,
+            ShowInOdontogramPresets = false,
+            NoteKeywords = "fluoride, varnish, desensitizing gel"
+        };
+
+        // Radiographs
+        var rIopa = new BillingCatalogItemDto
+        {
+            Id = Guid.Parse("80000000-0000-0000-0000-000000000010"),
+            Name = "Periapical X-Ray (IOPA)",
+            Category = BillingCatalogCategory.Radiograph,
+            ClinicalSubcategory = "Radiology",
+            UnitPrice = 40.00m,
+            IsCommissionable = true,
+            NoteKeywords = "iopa, periapical, pa xray, pre-op pa, radiograph",
+            SafetyAlertTags = "Pregnancy"
+        };
+        var rOpg = new BillingCatalogItemDto
+        {
+            Id = Guid.Parse("80000000-0000-0000-0000-000000000011"),
+            Name = "OPG Panoramic X-Ray",
+            Category = BillingCatalogCategory.Radiograph,
+            ClinicalSubcategory = "Radiology",
+            UnitPrice = 90.00m,
+            IsCommissionable = true,
+            NoteKeywords = "opg, panoramic, full mouth xray",
+            SafetyAlertTags = "Pregnancy"
+        };
+
+        // Clinic Medications
+        var mPcm = new BillingCatalogItemDto
+        {
+            Id = Guid.Parse("80000000-0000-0000-0000-000000000012"),
+            Name = "Paracetamol 500mg (10 Tabs)",
+            Category = BillingCatalogCategory.Medication,
+            ClinicalSubcategory = "Pharmacy",
+            UnitPrice = 10.00m,
+            IsCommissionable = false,
+            NoteKeywords = "paracetamol, pcm, panadol, analgesia"
+        };
+        var mIbuprofen = new BillingCatalogItemDto
+        {
+            Id = Guid.Parse("80000000-0000-0000-0000-000000000013"),
+            Name = "Ibuprofen 400mg Painkiller (10 Tabs)",
+            Category = BillingCatalogCategory.Medication,
+            ClinicalSubcategory = "Pharmacy",
+            UnitPrice = 15.00m,
+            IsCommissionable = false,
+            NoteKeywords = "ibuprofen, brufen, nsaid, ponstan, mefenamic",
+            SafetyAlertTags = "Ibuprofen,NSAID,Pregnancy,Anticoagulants"
+        };
+        var mAmox = new BillingCatalogItemDto
+        {
+            Id = Guid.Parse("80000000-0000-0000-0000-000000000014"),
+            Name = "Amoxicillin 500mg Antibiotic (15 Caps)",
+            Category = BillingCatalogCategory.Medication,
+            ClinicalSubcategory = "Pharmacy",
+            UnitPrice = 18.00m,
+            IsCommissionable = false,
+            NoteKeywords = "amoxicillin, amox, augmentin, antibiotic",
+            SafetyAlertTags = "Penicillin,Amoxicillin"
+        };
+
+        // Over-The-Counter (OTC) Retail Products — strictly 0% Doctor Commission
+        var otcBrush = new BillingCatalogItemDto
+        {
+            Id = Guid.Parse("80000000-0000-0000-0000-000000000015"),
+            Name = "Ultra-Soft Bristle Toothbrush",
+            Category = BillingCatalogCategory.OtcProduct,
+            ClinicalSubcategory = "Oral Care Retail",
+            UnitPrice = 12.00m,
+            IsCommissionable = false,
+            NoteKeywords = "toothbrush, soft brush, berus gigi"
+        };
+        var otcPaste = new BillingCatalogItemDto
+        {
+            Id = Guid.Parse("80000000-0000-0000-0000-000000000016"),
+            Name = "Fluoride Desensitizing Toothpaste 100g",
+            Category = BillingCatalogCategory.OtcProduct,
+            ClinicalSubcategory = "Oral Care Retail",
+            UnitPrice = 18.00m,
+            IsCommissionable = false,
+            NoteKeywords = "toothpaste, sensodyne, ubat gigi"
+        };
+        var otcWash = new BillingCatalogItemDto
+        {
+            Id = Guid.Parse("80000000-0000-0000-0000-000000000017"),
+            Name = "Chlorhexidine 0.12% Mouthwash 250ml",
+            Category = BillingCatalogCategory.OtcProduct,
+            ClinicalSubcategory = "Oral Care Retail",
+            UnitPrice = 25.00m,
+            IsCommissionable = false,
+            NoteKeywords = "mouthwash, chlorhexidine, oradex, antiseptic rinse"
+        };
+        var otcFloss = new BillingCatalogItemDto
+        {
+            Id = Guid.Parse("80000000-0000-0000-0000-000000000018"),
+            Name = "Interdental Brush & Superfloss Kit",
+            Category = BillingCatalogCategory.OtcProduct,
+            ClinicalSubcategory = "Oral Care Retail",
+            UnitPrice = 16.00m,
+            IsCommissionable = false,
+            NoteKeywords = "superfloss, interdental, floss"
+        };
+
+        static TreatmentSuggestionRuleDto Rule(BillingCatalogItemDto primary, params BillingCatalogItemDto[] companions) =>
+            new()
+            {
+                TreatmentId = primary.Id,
+                TreatmentName = primary.Name,
+                SuggestedCatalogItemIds = companions.Select(c => c.Id).ToList()
+            };
+
+        var defaultRules = new List<TreatmentSuggestionRuleDto>
+        {
+            Rule(cConsult, rIopa, rOpg),
+            Rule(cScaling, cFluoride, otcBrush, otcPaste),
+            Rule(cFilling, rIopa, otcPaste),
+            Rule(cSimpleExo, mPcm, mIbuprofen, mAmox, rIopa, otcWash),
+            Rule(cSurgExo, mPcm, mIbuprofen, mAmox, rOpg, otcWash),
+            Rule(cRct, rIopa, mPcm, mIbuprofen, mAmox),
+            Rule(cCrown, rIopa, otcFloss),
+            Rule(cImplant, rIopa, otcFloss, otcWash)
+        };
+
+        var prefs = new List<DoctorInvoicePreferenceDto>
+        {
+            new()
+            {
+                DentistId = null,
+                DoctorName = "Clinic Default (All Doctors)",
+                InitMode = DoctorInvoiceInitMode.AutoPopulateWithSuggestions,
+                EnableNoteKeywordEngine = true,
+                TreatmentRules = defaultRules
+            }
+        };
+
+        foreach (var doc in dentists)
+        {
+            var docMode = doc.FullName.Contains("Priya", StringComparison.OrdinalIgnoreCase)
+                ? DoctorInvoiceInitMode.BlankWithSuggestions
+                : DoctorInvoiceInitMode.AutoPopulateWithSuggestions;
+
+            prefs.Add(new DoctorInvoicePreferenceDto
+            {
+                DentistId = doc.Id,
+                DoctorName = doc.FullName,
+                InitMode = docMode,
+                EnableNoteKeywordEngine = true,
+                TreatmentRules = new List<TreatmentSuggestionRuleDto>()
+            });
+        }
+
+        return new BillingSettingsSnapshotDto
+        {
+            CatalogItems =
+            [
+                cConsult, cScaling, cFilling, cSimpleExo, cSurgExo, cRct, cCrown, cImplant, cFluoride,
+                rIopa, rOpg,
+                mPcm, mIbuprofen, mAmox,
+                otcBrush, otcPaste, otcWash, otcFloss
+            ],
+            DoctorPreferences = prefs
+        };
+    }
 
     public static WhatsAppThreadDto Clone(WhatsAppThreadDto th) => new()
     {

@@ -18,13 +18,14 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
 
     private readonly Dictionary<Guid, PatientDto> _patients = new();
     private readonly List<DentistDto> _dentists = new();
-    private readonly List<TreatmentDto> _treatments = new();
     private readonly Dictionary<Guid, AppointmentQueueItemDto> _appointments = new();
     private readonly Dictionary<Guid, PatientVisitDto> _visits = new();
     private readonly Dictionary<(Guid PatientId, int ToothNumber), OdontogramToothDto> _odontogram = new();
     private readonly Dictionary<Guid, List<SoapNoteDto>> _soapNotes = new();
     private readonly List<SoapMacroDto> _soapMacros = new();
     private readonly Dictionary<Guid, InvoiceDto> _invoices = new();
+    private readonly Dictionary<Guid, List<PatientCreditEntryDto>> _creditLedger = new();
+    private BillingSettingsSnapshotDto _billingSettings = new();
     private readonly Dictionary<(string BranchId, DateOnly Date), DailySalesReconciliationDto> _reconciliations = new();
     private readonly Dictionary<string, (string BranchId, WhatsAppThreadDto Thread)> _whatsAppThreads = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<AuditLogDto> _auditLogs = new();
@@ -94,12 +95,7 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
                     .ToList()
                 : new List<DentistDto>();
 
-            var treatments = _treatments
-                .Where(t => t.IsActive)
-                .OrderBy(t => t.Category, StringComparer.OrdinalIgnoreCase)
-                .ThenBy(t => t.Name, StringComparer.OrdinalIgnoreCase)
-                .Select(ClinicDomainHelpers.Clone)
-                .ToList();
+            var treatments = GetBookableTreatmentsLocked();
 
             var dailySummary = BillingCalculator.CalculateDailySalesReconciliation(
                 normalizedBranch,
@@ -119,7 +115,8 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
                 Invoices = invoices,
                 SoapMacros = _soapMacros.Select(CloneMacro).ToList(),
                 WhatsAppThreads = threads,
-                DailySummary = dailySummary
+                DailySummary = dailySummary,
+                BillingSettings = ClinicDomainHelpers.Clone(_billingSettings)
             });
         }
     }
@@ -359,14 +356,17 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
     {
         lock (_sync)
         {
-            return Task.FromResult<IReadOnlyList<TreatmentDto>>(
-                _treatments.Where(t => t.IsActive)
-                    .OrderBy(t => t.Category, StringComparer.OrdinalIgnoreCase)
-                    .ThenBy(t => t.Name, StringComparer.OrdinalIgnoreCase)
-                    .Select(ClinicDomainHelpers.Clone)
-                    .ToList());
+            return Task.FromResult<IReadOnlyList<TreatmentDto>>(GetBookableTreatmentsLocked());
         }
     }
+
+    private List<TreatmentDto> GetBookableTreatmentsLocked() =>
+        _billingSettings.CatalogItems
+            .Where(c => c.IsActive && c.IsBookableAppointment)
+            .OrderBy(c => c.ClinicalSubcategory, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(c => c.ToBookableTreatmentDto())
+            .ToList();
 
     public Task<IReadOnlyList<AppointmentQueueItemDto>> GetAppointmentsAsync(string? branchId = null, CancellationToken ct = default) =>
         GetAppointmentsAsync(branchId, null, null, null, null, ct);
@@ -412,7 +412,7 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
 
             if (treatmentId.HasValue)
             {
-                var treatmentName = _treatments.FirstOrDefault(t => t.Id == treatmentId.Value)?.Name;
+                var treatmentName = _billingSettings.CatalogItems.FirstOrDefault(c => c.Id == treatmentId.Value)?.Name;
                 query = query.Where(a =>
                     a.TreatmentId == treatmentId.Value
                     || (!a.TreatmentId.HasValue && !string.IsNullOrWhiteSpace(treatmentName)
@@ -1187,88 +1187,9 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
         visit.UpdatedAt = now;
 
         var branchId = ClinicDomainHelpers.NormalizeBranch(request.BranchId, visit.BranchId);
-        InvoiceDto? updatedInvoice = null;
 
-        // Visit-scoped billing sync: protect settled historical invoices while syncing draft visit invoices.
-        var linkedVisitInvoice = _invoices.Values
-            .Where(i => !i.IsVoided && (
-                i.VisitId == visit.Id
-                || (visit.InvoiceId.HasValue && i.Id == visit.InvoiceId.Value)
-                || (visit.AppointmentId.HasValue && i.AppointmentId == visit.AppointmentId.Value)))
-            .OrderByDescending(i => i.CreatedAt)
-            .FirstOrDefault();
-
-        bool isSettledHistoricalInvoice = linkedVisitInvoice is not null && linkedVisitInvoice.Payments.Count > 0;
-
-        if (!isSettledHistoricalInvoice
-            && request.Stage == TreatmentStage.Completed
-            && !string.IsNullOrWhiteSpace(tooth.ProcedureName)
-            && (tooth.Fee > 0m || linkedVisitInvoice is not null))
-        {
-            var draftInvoice = linkedVisitInvoice;
-            if (draftInvoice is null)
-            {
-                draftInvoice = new InvoiceDto
-                {
-                    Id = Guid.NewGuid(),
-                    InvoiceNumber = NextInvoiceNumber(branchId),
-                    BranchId = branchId,
-                    PatientId = visit.PatientId,
-                    PatientName = patient.FullName,
-                    DoctorName = tooth.DoctorName,
-                    AppointmentId = visit.AppointmentId,
-                    VisitId = visit.Id,
-                    CreatedAt = now
-                };
-                _invoices[draftInvoice.Id] = draftInvoice;
-            }
-            else
-            {
-                draftInvoice.VisitId ??= visit.Id;
-            }
-
-            visit.InvoiceId = draftInvoice.Id;
-
-            var normalizedReq = new UpdateOdontogramRequest
-            {
-                ToothNumber = request.ToothNumber,
-                Condition = request.Condition,
-                Surfaces = surfaces,
-                ProcedureName = tooth.ProcedureName,
-                Fee = tooth.Fee,
-                Stage = request.Stage,
-                DoctorName = tooth.DoctorName,
-                BranchId = branchId
-            };
-            var label = ClinicDomainHelpers.BuildCompletedToothProcedureLabel(normalizedReq);
-            var existingLine = draftInvoice.Lines.FirstOrDefault(l =>
-                l.ToothNumber == request.ToothNumber && l.SourceStage == TreatmentStage.Completed);
-
-            if (existingLine is not null)
-            {
-                existingLine.ProcedureName = label;
-                existingLine.UnitPrice = tooth.Fee;
-                existingLine.Quantity = 1;
-                existingLine.LineTotal = BillingCalculator.ComputeLineTotal(tooth.Fee, 1);
-            }
-            else
-            {
-                draftInvoice.Lines.Add(new InvoiceLineDto
-                {
-                    Id = Guid.NewGuid(),
-                    ToothNumber = request.ToothNumber,
-                    ProcedureName = label,
-                    UnitPrice = tooth.Fee,
-                    Quantity = 1,
-                    LineTotal = BillingCalculator.ComputeLineTotal(tooth.Fee, 1),
-                    SourceStage = TreatmentStage.Completed
-                });
-            }
-
-            BillingCalculator.RecalculateInvoice(draftInvoice, _clinicOptions.CommissionRate);
-            updatedInvoice = ClinicDomainHelpers.Clone(draftInvoice);
-        }
-
+        // Clinical visit records and odontograms are strictly decoupled from invoicing.
+        // Invoices are initiated and edited exclusively in the Billing / Checkout workflow.
         AppendAudit(
             branchId,
             actor,
@@ -1276,9 +1197,9 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
             "VisitOdontogramTooth",
             $"{visit.Id}:{request.ToothNumber}",
             oldSummary,
-            $"{tooth.Condition}({tooth.Surfaces}) | {tooth.ProcedureName} | {tooth.Stage} | RM{tooth.Fee:F2}");
+            $"{tooth.Condition}({tooth.Surfaces}) | {tooth.ProcedureName} | {tooth.Stage}");
 
-        return (ClinicDomainHelpers.Clone(tooth), updatedInvoice, null);
+        return (ClinicDomainHelpers.Clone(tooth), null, null);
     }
 
     private void RefreshPatientVisitStatsLocked(Guid patientId)
@@ -1474,6 +1395,166 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
         }
     }
 
+    public Task<(InvoiceDto? Invoice, AppointmentQueueItemDto? UpdatedQueueItem, string? Error)> SaveInvoiceDraftAsync(
+        SaveInvoiceDraftRequest request,
+        CancellationToken ct = default)
+    {
+        var claims = CurrentClaims;
+        lock (_sync)
+        {
+            var branch = ClinicDomainHelpers.NormalizeBranch(request.BranchId, _clinicOptions.DefaultBranchId);
+            if (!claims.CanAccessBranch(branch))
+            {
+                return Task.FromResult<(InvoiceDto?, AppointmentQueueItemDto?, string?)>(
+                    (null, null, "Access denied for branch."));
+            }
+
+            PatientDto? patient = null;
+            if (!request.IsWalkInRetail)
+            {
+                if (!request.PatientId.HasValue || request.PatientId.Value == Guid.Empty)
+                {
+                    return Task.FromResult<(InvoiceDto?, AppointmentQueueItemDto?, string?)>(
+                        (null, null, "Select a registered patient or choose Walk-In Retail Customer."));
+                }
+
+                if (!_patients.TryGetValue(request.PatientId.Value, out patient))
+                {
+                    return Task.FromResult<(InvoiceDto?, AppointmentQueueItemDto?, string?)>(
+                        (null, null, "Patient not found."));
+                }
+            }
+
+            if (request.Lines.Any(l => l.UnitPrice < 0m || l.Quantity <= 0 || string.IsNullOrWhiteSpace(l.ProcedureName)))
+            {
+                return Task.FromResult<(InvoiceDto?, AppointmentQueueItemDto?, string?)>(
+                    (null, null, "Every invoice line must have a valid item name, non-negative price, and quantity >= 1."));
+            }
+
+            var actor = string.IsNullOrWhiteSpace(request.UpdatedBy) ? claims.UserId : request.UpdatedBy.Trim();
+            var now = DateTimeOffset.UtcNow;
+
+            InvoiceDto? target = null;
+            if (request.InvoiceId.HasValue && request.InvoiceId.Value != Guid.Empty)
+            {
+                if (!_invoices.TryGetValue(request.InvoiceId.Value, out target) || !claims.CanAccessBranch(target.BranchId))
+                {
+                    return Task.FromResult<(InvoiceDto?, AppointmentQueueItemDto?, string?)>(
+                        (null, null, "Invoice not found."));
+                }
+
+                if (target.IsVoided)
+                {
+                    return Task.FromResult<(InvoiceDto?, AppointmentQueueItemDto?, string?)>(
+                        (null, null, "Cannot edit a voided invoice."));
+                }
+
+                if (target.Payments.Count > 0)
+                {
+                    return Task.FromResult<(InvoiceDto?, AppointmentQueueItemDto?, string?)>(
+                        (null, null, "Cannot modify line items on an invoice that already has recorded payments."));
+                }
+            }
+            else if (request.VisitId.HasValue)
+            {
+                target = _invoices.Values.FirstOrDefault(i =>
+                    !i.IsVoided
+                    && i.Payments.Count == 0
+                    && i.VisitId == request.VisitId.Value);
+            }
+            else if (request.AppointmentId.HasValue)
+            {
+                target = _invoices.Values.FirstOrDefault(i =>
+                    !i.IsVoided
+                    && i.Payments.Count == 0
+                    && i.AppointmentId == request.AppointmentId.Value);
+            }
+
+            bool isNew = target is null;
+            string customerName = request.IsWalkInRetail
+                ? (string.IsNullOrWhiteSpace(request.PatientName) ? "Walk-In Retail Customer" : request.PatientName.Trim())
+                : patient!.FullName;
+            string doctorName = request.IsWalkInRetail
+                ? "Counter / Retail"
+                : (string.IsNullOrWhiteSpace(request.DoctorName) ? "Dr. Aina Rahman" : request.DoctorName.Trim());
+
+            target ??= new InvoiceDto
+            {
+                Id = Guid.NewGuid(),
+                InvoiceNumber = NextInvoiceNumber(branch),
+                BranchId = branch,
+                CreatedAt = now
+            };
+
+            target.PatientId = request.IsWalkInRetail ? Guid.Empty : patient!.Id;
+            target.IsWalkInRetail = request.IsWalkInRetail;
+            target.PatientName = customerName;
+            target.DoctorName = doctorName;
+            target.AppointmentId = request.IsWalkInRetail ? null : (request.AppointmentId ?? target.AppointmentId);
+            target.VisitId = request.IsWalkInRetail ? null : (request.VisitId ?? target.VisitId);
+            target.DiscountAmount = Math.Max(0m, request.DiscountAmount);
+            target.PanelName = string.IsNullOrWhiteSpace(request.PanelName) || request.PanelName.Equals("None", StringComparison.OrdinalIgnoreCase)
+                ? null
+                : request.PanelName.Trim();
+            target.PanelCoveredAmount = Math.Max(0m, request.PanelCoveredAmount);
+
+            target.Lines = request.Lines.Select(l =>
+            {
+                var cat = l.Category;
+                bool isComm = !request.IsWalkInRetail && cat != BillingCatalogCategory.OtcProduct && l.IsCommissionable;
+                return new InvoiceLineDto
+                {
+                    Id = l.Id == Guid.Empty ? Guid.NewGuid() : l.Id,
+                    CatalogItemId = l.CatalogItemId,
+                    ToothNumber = l.ToothNumber,
+                    ProcedureName = l.ProcedureName.Trim(),
+                    Category = cat,
+                    IsCommissionable = isComm,
+                    UnitPrice = BillingCalculator.Round2(l.UnitPrice),
+                    Quantity = l.Quantity,
+                    LineTotal = BillingCalculator.ComputeLineTotal(l.UnitPrice, l.Quantity),
+                    SourceStage = l.SourceStage
+                };
+            }).ToList();
+
+            BillingCalculator.RecalculateInvoice(target, _clinicOptions.CommissionRate);
+            _invoices[target.Id] = target;
+
+            if (target.VisitId.HasValue && _visits.TryGetValue(target.VisitId.Value, out var linkedVisit))
+            {
+                linkedVisit.InvoiceId = target.Id;
+            }
+
+            AppointmentQueueItemDto? updatedQueue = null;
+            if (request.SendToCounterCheckout && target.AppointmentId.HasValue
+                && _appointments.TryGetValue(target.AppointmentId.Value, out var appt)
+                && appt.Status is QueueStatus.InChair or QueueStatus.Waiting or QueueStatus.Scheduled)
+            {
+                var oldStatus = appt.Status;
+                ClinicDomainHelpers.ApplyStatusMilestone(
+                    appt,
+                    oldStatus,
+                    QueueStatus.AwaitingCheckout,
+                    actor,
+                    now,
+                    $"Draft {target.InvoiceNumber} (RM {target.PatientPayableAmount:N2})");
+                updatedQueue = ClinicDomainHelpers.Clone(appt);
+            }
+
+            AppendAudit(
+                target.BranchId,
+                actor,
+                isNew ? "INVOICE_DRAFT_CREATED" : "INVOICE_DRAFT_UPDATED",
+                "Invoice",
+                target.InvoiceNumber,
+                null,
+                $"{target.PatientName} | Lines={target.Lines.Count} | Subtotal=RM{target.Subtotal:F2} | Payable=RM{target.PatientPayableAmount:F2} | SendToCounter={request.SendToCounterCheckout}");
+
+            return Task.FromResult<(InvoiceDto?, AppointmentQueueItemDto?, string?)>(
+                (ClinicDomainHelpers.Clone(target), updatedQueue, null));
+        }
+    }
+
     public Task<(InvoiceDto? Invoice, AppointmentQueueItemDto? UpdatedQueueItem, string? Error)> ApplyInvoicePaymentAsync(
         Guid invoiceId,
         ApplyPaymentRequest request,
@@ -1487,6 +1568,14 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
                 return Task.FromResult<(InvoiceDto?, AppointmentQueueItemDto?, string?)>((null, null, "Invoice not found."));
             }
 
+            PatientDto? patient = null;
+            if (!invoice.IsWalkInRetail && invoice.PatientId != Guid.Empty)
+            {
+                _patients.TryGetValue(invoice.PatientId, out patient);
+            }
+
+            request.AvailablePatientCredit = patient?.CreditBalance ?? 0m;
+
             var cloneForValidation = ClinicDomainHelpers.Clone(invoice);
             var validation = BillingCalculator.ValidateAndApplyPayments(cloneForValidation, request);
             if (!validation.IsValid)
@@ -1494,10 +1583,48 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
                 return Task.FromResult<(InvoiceDto?, AppointmentQueueItemDto?, string?)>((null, null, validation.ErrorMessage));
             }
 
+            var actor = string.IsNullOrWhiteSpace(request.CollectedBy) ? claims.UserId : request.CollectedBy.Trim();
+            var now = DateTimeOffset.UtcNow;
+
+            if (patient is not null)
+            {
+                if (validation.CreditRedeemed > 0m)
+                {
+                    patient.CreditBalance = BillingCalculator.Round2(Math.Max(0m, patient.CreditBalance - validation.CreditRedeemed));
+                    RecordCreditEntryLocked(
+                        patient.Id,
+                        validation.Invoice.BranchId,
+                        validation.Invoice.Id,
+                        validation.Invoice.InvoiceNumber,
+                        -validation.CreditRedeemed,
+                        patient.CreditBalance,
+                        "CREDIT_REDEEMED",
+                        $"Redeemed credit on {validation.Invoice.InvoiceNumber}",
+                        actor,
+                        now);
+                }
+
+                if (validation.CreditDeposited > 0m)
+                {
+                    patient.CreditBalance = BillingCalculator.Round2(patient.CreditBalance + validation.CreditDeposited);
+                    RecordCreditEntryLocked(
+                        patient.Id,
+                        validation.Invoice.BranchId,
+                        validation.Invoice.Id,
+                        validation.Invoice.InvoiceNumber,
+                        validation.CreditDeposited,
+                        patient.CreditBalance,
+                        "CREDIT_DEPOSIT",
+                        $"Overpayment stored as credit from {validation.Invoice.InvoiceNumber}",
+                        actor,
+                        now);
+                }
+            }
+
             _invoices[invoiceId] = validation.Invoice;
 
             AppointmentQueueItemDto? updatedQueue = null;
-            if (validation.Invoice.BalanceDue == 0m)
+            if (validation.Invoice.BalanceDue == 0m && !validation.Invoice.IsWalkInRetail && validation.Invoice.PatientId != Guid.Empty)
             {
                 AppointmentQueueItemDto? linkedAppt = null;
                 if (validation.Invoice.AppointmentId.HasValue)
@@ -1515,13 +1642,12 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
 
                 if (linkedAppt is not null && linkedAppt.Status != QueueStatus.Completed && linkedAppt.Status != QueueStatus.Cancelled)
                 {
-                    var actor = string.IsNullOrWhiteSpace(request.CollectedBy) ? claims.UserId : request.CollectedBy.Trim();
                     ClinicDomainHelpers.ApplyStatusMilestone(
                         linkedAppt,
                         linkedAppt.Status,
                         QueueStatus.Completed,
                         actor,
-                        DateTimeOffset.UtcNow,
+                        now,
                         $"Invoice {validation.Invoice.InvoiceNumber}");
                     updatedQueue = ClinicDomainHelpers.Clone(linkedAppt);
                 }
@@ -1529,12 +1655,12 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
 
             AppendAudit(
                 validation.Invoice.BranchId,
-                string.IsNullOrWhiteSpace(request.CollectedBy) ? claims.UserId : request.CollectedBy.Trim(),
+                actor,
                 "INVOICE_PAYMENT_APPLIED",
                 "Invoice",
                 validation.Invoice.InvoiceNumber,
                 null,
-                $"Paid=RM{validation.Invoice.PaidAmount:F2}; Panel=RM{validation.Invoice.PanelCoveredAmount:F2}; BalanceDue=RM{validation.Invoice.BalanceDue:F2}; Commission=RM{validation.Invoice.DoctorCommissionAmount:F2}");
+                $"Paid=RM{validation.Invoice.PaidAmount:F2}; Panel=RM{validation.Invoice.PanelCoveredAmount:F2}; CreditUsed=RM{validation.CreditRedeemed:F2}; CreditSaved=RM{validation.CreditDeposited:F2}; Change=RM{validation.CashChangeReturned:F2}; BalanceDue=RM{validation.Invoice.BalanceDue:F2}; Commission=RM{validation.Invoice.DoctorCommissionAmount:F2}");
 
             return Task.FromResult<(InvoiceDto?, AppointmentQueueItemDto?, string?)>(
                 (ClinicDomainHelpers.Clone(validation.Invoice), updatedQueue, null));
@@ -1564,12 +1690,43 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
                 return Task.FromResult<(InvoiceDto?, string?)>((null, "Invoice is already voided."));
             }
 
+            var voidedBy = string.IsNullOrWhiteSpace(request.VoidedBy) ? claims.UserId : request.VoidedBy.Trim();
+            if (!invoice.IsWalkInRetail && invoice.PatientId != Guid.Empty && _patients.TryGetValue(invoice.PatientId, out var patient))
+            {
+                var creditRedeemedOnInv = BillingCalculator.Round2(
+                    invoice.Payments.Where(p => p.Method == PaymentMethod.PatientCredit).Sum(p => p.Amount));
+                var creditDepositedOnInv = BillingCalculator.Round2(invoice.CreditedOverpaymentAmount);
+                var netCreditReversal = BillingCalculator.Round2(creditRedeemedOnInv - creditDepositedOnInv);
+
+                if (netCreditReversal < 0m && patient.CreditBalance < Math.Abs(netCreditReversal))
+                {
+                    return Task.FromResult<(InvoiceDto?, string?)>(
+                        (null, "Cannot void invoice because its overpayment credit has already been spent on another visit."));
+                }
+
+                if (netCreditReversal != 0m)
+                {
+                    patient.CreditBalance = BillingCalculator.Round2(patient.CreditBalance + netCreditReversal);
+                    RecordCreditEntryLocked(
+                        patient.Id,
+                        invoice.BranchId,
+                        invoice.Id,
+                        invoice.InvoiceNumber,
+                        netCreditReversal,
+                        patient.CreditBalance,
+                        "CREDIT_VOID_REVERSAL",
+                        $"Void reversal for {invoice.InvoiceNumber}: {request.VoidReason.Trim()}",
+                        voidedBy,
+                        DateTimeOffset.UtcNow);
+                }
+            }
+
             var oldValue = $"Subtotal=RM{invoice.Subtotal:F2}; Paid=RM{invoice.PaidAmount:F2}; IsVoided=false";
             invoice.IsVoided = true;
             invoice.VoidReason = request.VoidReason.Trim();
+            invoice.CreditedOverpaymentAmount = 0m;
             invoice.DoctorCommissionAmount = 0m;
 
-            var voidedBy = string.IsNullOrWhiteSpace(request.VoidedBy) ? claims.UserId : request.VoidedBy.Trim();
             AppendAudit(
                 invoice.BranchId,
                 voidedBy,
@@ -1581,6 +1738,193 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
 
             return Task.FromResult<(InvoiceDto?, string?)>((ClinicDomainHelpers.Clone(invoice), null));
         }
+    }
+
+    public Task<IReadOnlyList<PatientCreditEntryDto>> GetPatientCreditLedgerAsync(Guid patientId, CancellationToken ct = default)
+    {
+        lock (_sync)
+        {
+            if (!_creditLedger.TryGetValue(patientId, out var list))
+            {
+                return Task.FromResult<IReadOnlyList<PatientCreditEntryDto>>(Array.Empty<PatientCreditEntryDto>());
+            }
+
+            return Task.FromResult<IReadOnlyList<PatientCreditEntryDto>>(
+                list.OrderByDescending(e => e.CreatedAt)
+                    .Select(ClinicDomainHelpers.Clone)
+                    .ToList());
+        }
+    }
+
+    public Task<BillingSettingsSnapshotDto> GetBillingSettingsAsync(CancellationToken ct = default)
+    {
+        lock (_sync)
+        {
+            return Task.FromResult(ClinicDomainHelpers.Clone(_billingSettings));
+        }
+    }
+
+    public Task<(BillingCatalogItemDto? Item, string? Error)> UpsertBillingCatalogItemAsync(
+        UpsertBillingCatalogItemRequest request,
+        CancellationToken ct = default)
+    {
+        var claims = CurrentClaims;
+        lock (_sync)
+        {
+            if (string.IsNullOrWhiteSpace(request.Name))
+            {
+                return Task.FromResult<(BillingCatalogItemDto?, string?)>((null, "Catalog item name is required."));
+            }
+
+            if (request.UnitPrice < 0m)
+            {
+                return Task.FromResult<(BillingCatalogItemDto?, string?)>((null, "Unit price cannot be negative."));
+            }
+
+            BillingCatalogItemDto? existing = null;
+            if (request.Id.HasValue && request.Id.Value != Guid.Empty)
+            {
+                existing = _billingSettings.CatalogItems.FirstOrDefault(c => c.Id == request.Id.Value);
+            }
+
+            bool isNew = existing is null;
+            var target = existing ?? new BillingCatalogItemDto { Id = request.Id is { } g && g != Guid.Empty ? g : Guid.NewGuid() };
+            target.Name = request.Name.Trim();
+            target.Category = request.Category;
+            target.ClinicalSubcategory = string.IsNullOrWhiteSpace(request.ClinicalSubcategory)
+                ? request.Category.ToString()
+                : request.ClinicalSubcategory.Trim();
+            target.UnitPrice = BillingCalculator.Round2(request.UnitPrice);
+            target.IsCommissionable = request.Category != BillingCatalogCategory.OtcProduct && request.IsCommissionable;
+            target.IsBookableAppointment = request.Category is BillingCatalogCategory.Procedure or BillingCatalogCategory.Radiograph
+                && request.IsBookableAppointment;
+            target.DefaultDurationMinutes = Math.Clamp(request.DefaultDurationMinutes > 0 ? request.DefaultDurationMinutes : 30, 15, 480);
+            target.ShowInOdontogramPresets = request.Category == BillingCatalogCategory.Procedure && request.ShowInOdontogramPresets;
+            target.DefaultToothCondition = request.DefaultToothCondition;
+            target.NoteKeywords = request.NoteKeywords?.Trim() ?? string.Empty;
+            target.SafetyAlertTags = request.SafetyAlertTags?.Trim() ?? string.Empty;
+            target.IsActive = request.IsActive;
+
+            if (isNew)
+            {
+                _billingSettings.CatalogItems.Add(target);
+            }
+
+            if (target.IsBookableAppointment)
+            {
+                foreach (var doc in _dentists.Where(d => d.IsActive && !d.SupportedTreatmentIds.Contains(target.Id)))
+                {
+                    if (isNew)
+                    {
+                        doc.SupportedTreatmentIds.Add(target.Id);
+                    }
+                }
+            }
+
+            var actor = string.IsNullOrWhiteSpace(request.UpdatedBy) ? claims.UserId : request.UpdatedBy.Trim();
+            AppendAudit(
+                _clinicOptions.DefaultBranchId,
+                actor,
+                isNew ? "BILLING_CATALOG_CREATED" : "BILLING_CATALOG_UPDATED",
+                "BillingCatalogItem",
+                target.Id.ToString(),
+                null,
+                $"{target.Name} ({target.Category}) | RM {target.UnitPrice:F2} | Comm={target.IsCommissionable}");
+
+            return Task.FromResult<(BillingCatalogItemDto?, string?)>((ClinicDomainHelpers.Clone(target), null));
+        }
+    }
+
+    public Task<(DoctorInvoicePreferenceDto? Preference, string? Error)> SaveDoctorInvoicePreferenceAsync(
+        SaveDoctorInvoicePreferenceRequest request,
+        CancellationToken ct = default)
+    {
+        var claims = CurrentClaims;
+        lock (_sync)
+        {
+            DoctorInvoicePreferenceDto? target = request.DentistId.HasValue
+                ? _billingSettings.DoctorPreferences.FirstOrDefault(p => p.DentistId == request.DentistId.Value)
+                : _billingSettings.DoctorPreferences.FirstOrDefault(p => !p.DentistId.HasValue);
+
+            if (target is null)
+            {
+                var docName = request.DentistId.HasValue
+                    ? (_dentists.FirstOrDefault(d => d.Id == request.DentistId.Value)?.FullName ?? request.DoctorName.Trim())
+                    : "Clinic Default (All Doctors)";
+
+                target = new DoctorInvoicePreferenceDto
+                {
+                    DentistId = request.DentistId,
+                    DoctorName = docName
+                };
+                _billingSettings.DoctorPreferences.Add(target);
+            }
+            else if (!request.DentistId.HasValue)
+            {
+                target.DoctorName = "Clinic Default (All Doctors)";
+            }
+            else if (!string.IsNullOrWhiteSpace(request.DoctorName))
+            {
+                target.DoctorName = request.DoctorName.Trim();
+            }
+
+            target.InitMode = request.InitMode;
+            target.EnableNoteKeywordEngine = request.EnableNoteKeywordEngine;
+            target.TreatmentRules = (request.TreatmentRules ?? new List<TreatmentSuggestionRuleDto>())
+                .Select(r => new TreatmentSuggestionRuleDto
+                {
+                    TreatmentId = r.TreatmentId,
+                    TreatmentName = r.TreatmentName?.Trim() ?? string.Empty,
+                    SuggestedCatalogItemIds = r.SuggestedCatalogItemIds.Distinct().ToList()
+                })
+                .ToList();
+
+            var actor = string.IsNullOrWhiteSpace(request.UpdatedBy) ? claims.UserId : request.UpdatedBy.Trim();
+            AppendAudit(
+                _clinicOptions.DefaultBranchId,
+                actor,
+                "DOCTOR_INVOICE_PREF_UPDATED",
+                "DoctorInvoicePreference",
+                target.DentistId?.ToString() ?? "CLINIC_DEFAULT",
+                null,
+                $"{target.DoctorName} | Mode={target.InitMode} | NoteEngine={target.EnableNoteKeywordEngine} | Rules={target.TreatmentRules.Count}");
+
+            return Task.FromResult<(DoctorInvoicePreferenceDto?, string?)>((ClinicDomainHelpers.Clone(target), null));
+        }
+    }
+
+    private void RecordCreditEntryLocked(
+        Guid patientId,
+        string branchId,
+        Guid? invoiceId,
+        string invoiceNumber,
+        decimal amountDelta,
+        decimal balanceAfter,
+        string entryType,
+        string notes,
+        string recordedBy,
+        DateTimeOffset timestamp)
+    {
+        if (!_creditLedger.TryGetValue(patientId, out var list))
+        {
+            list = new List<PatientCreditEntryDto>();
+            _creditLedger[patientId] = list;
+        }
+
+        list.Add(new PatientCreditEntryDto
+        {
+            Id = Guid.NewGuid(),
+            PatientId = patientId,
+            BranchId = branchId,
+            InvoiceId = invoiceId,
+            InvoiceNumber = invoiceNumber,
+            AmountDelta = BillingCalculator.Round2(amountDelta),
+            BalanceAfter = BillingCalculator.Round2(balanceAfter),
+            EntryType = entryType,
+            Notes = notes,
+            RecordedBy = recordedBy,
+            CreatedAt = timestamp
+        });
     }
 
     public Task<DailySalesReconciliationDto> GetDailySalesSummaryAsync(string branchId, DateOnly date, CancellationToken ct = default)
@@ -1838,19 +2182,25 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
     {
         if (treatmentId.HasValue)
         {
-            var byId = _treatments.FirstOrDefault(t => t.Id == treatmentId.Value);
+            var byId = _billingSettings.CatalogItems.FirstOrDefault(c => c.Id == treatmentId.Value);
             if (byId is not null)
             {
-                return byId;
+                return byId.ToBookableTreatmentDto();
             }
         }
 
         if (!string.IsNullOrWhiteSpace(procedureSummary))
         {
             var trimmed = procedureSummary.Trim();
-            return _treatments.FirstOrDefault(t =>
-                string.Equals(t.Name, trimmed, StringComparison.OrdinalIgnoreCase)
-                || trimmed.Contains(t.Name, StringComparison.OrdinalIgnoreCase));
+            var match = _billingSettings.CatalogItems
+                .Where(c => c.IsBookableAppointment)
+                .FirstOrDefault(c =>
+                    string.Equals(c.Name, trimmed, StringComparison.OrdinalIgnoreCase)
+                    || trimmed.Contains(c.Name, StringComparison.OrdinalIgnoreCase));
+            if (match is not null)
+            {
+                return match.ToBookableTreatmentDto();
+            }
         }
 
         return null;
@@ -1899,8 +2249,7 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
         SubjectiveTemplate = m.SubjectiveTemplate,
         ObjectiveTemplate = m.ObjectiveTemplate,
         AssessmentTemplate = m.AssessmentTemplate,
-        PlanTemplate = m.PlanTemplate,
-        DefaultFee = m.DefaultFee
+        PlanTemplate = m.PlanTemplate
     };
 
     private void SeedData()
@@ -1912,15 +2261,14 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
         static DateTimeOffset LocalSlot(DateOnly date, int hour, int minute, TimeSpan offset) =>
             new(date.Year, date.Month, date.Day, hour, minute, 0, offset);
 
-        // 0. Seed Treatments & Dentists Catalog (aligned with SQL migrations 002 & 003)
-        var t1 = new TreatmentDto { Id = Guid.Parse("60000000-0000-0000-0000-000000000001"), Name = "Dental Consultation & Checkup", Category = "Diagnostic", DefaultDurationMinutes = 30, DefaultFee = 50.00m };
-        var t2 = new TreatmentDto { Id = Guid.Parse("60000000-0000-0000-0000-000000000002"), Name = "Routine Scaling & Polishing", Category = "Preventive", DefaultDurationMinutes = 30, DefaultFee = 150.00m };
-        var t3 = new TreatmentDto { Id = Guid.Parse("60000000-0000-0000-0000-000000000003"), Name = "Posterior Composite Filling", Category = "Restorative", DefaultDurationMinutes = 45, DefaultFee = 200.00m };
-        var t4 = new TreatmentDto { Id = Guid.Parse("60000000-0000-0000-0000-000000000004"), Name = "Simple Tooth Extraction", Category = "Oral Surgery", DefaultDurationMinutes = 30, DefaultFee = 180.00m };
-        var t5 = new TreatmentDto { Id = Guid.Parse("60000000-0000-0000-0000-000000000005"), Name = "Root Canal Therapy (Stage 1)", Category = "Endodontics", DefaultDurationMinutes = 60, DefaultFee = 450.00m };
-        var t6 = new TreatmentDto { Id = Guid.Parse("60000000-0000-0000-0000-000000000006"), Name = "Crown Preparation & Cementation", Category = "Prosthodontics", DefaultDurationMinutes = 60, DefaultFee = 950.00m };
-        var t7 = new TreatmentDto { Id = Guid.Parse("60000000-0000-0000-0000-000000000007"), Name = "Implant Crown Review", Category = "Prosthodontics", DefaultDurationMinutes = 30, DefaultFee = 350.00m };
-        _treatments.AddRange(new[] { t1, t2, t3, t4, t5, t6, t7 });
+        // 0. Seed Dentists & Single Unified Master Catalogue
+        var idConsult = Guid.Parse("60000000-0000-0000-0000-000000000001");
+        var idScaling = Guid.Parse("60000000-0000-0000-0000-000000000002");
+        var idFilling = Guid.Parse("60000000-0000-0000-0000-000000000003");
+        var idExo = Guid.Parse("60000000-0000-0000-0000-000000000004");
+        var idRct = Guid.Parse("60000000-0000-0000-0000-000000000005");
+        var idCrown = Guid.Parse("60000000-0000-0000-0000-000000000006");
+        var idImplant = Guid.Parse("60000000-0000-0000-0000-000000000007");
 
         var d1 = new DentistDto
         {
@@ -1929,7 +2277,7 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
             Specialty = "General & Restorative",
             DefaultRoom = "Suite 1",
             BranchIds = new List<string> { "HQ-KL", "PJ-SS2" },
-            SupportedTreatmentIds = new List<Guid> { t1.Id, t2.Id, t3.Id, t4.Id },
+            SupportedTreatmentIds = new List<Guid> { idConsult, idScaling, idFilling, idExo },
             IsActive = true
         };
         var d2 = new DentistDto
@@ -1939,7 +2287,7 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
             Specialty = "Endodontics & Prosthodontics",
             DefaultRoom = "Suite 2",
             BranchIds = new List<string> { "HQ-KL", "PJ-SS2" },
-            SupportedTreatmentIds = new List<Guid> { t1.Id, t3.Id, t4.Id, t5.Id, t6.Id, t7.Id },
+            SupportedTreatmentIds = new List<Guid> { idConsult, idFilling, idExo, idRct, idCrown, idImplant },
             IsActive = true
         };
         var d3 = new DentistDto
@@ -1949,12 +2297,23 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
             Specialty = "Preventive & Orthodontics",
             DefaultRoom = "Suite 3",
             BranchIds = new List<string> { "HQ-KL" },
-            SupportedTreatmentIds = new List<Guid> { t1.Id, t2.Id, t3.Id },
+            SupportedTreatmentIds = new List<Guid> { idConsult, idScaling, idFilling },
             IsActive = true
         };
         _dentists.AddRange(new[] { d1, d2, d3 });
+        _billingSettings = ClinicDomainHelpers.CreateDefaultBillingSettings(_dentists);
 
-        // 1. Seed Smart SOAP Macros (aligned with SQL migration)
+        TreatmentDto CatTreatment(Guid id) =>
+            _billingSettings.CatalogItems.Single(c => c.Id == id).ToBookableTreatmentDto();
+        var t1 = CatTreatment(idConsult);
+        var t2 = CatTreatment(idScaling);
+        var t3 = CatTreatment(idFilling);
+        var t4 = CatTreatment(idExo);
+        var t5 = CatTreatment(idRct);
+        var t6 = CatTreatment(idCrown);
+        var t7 = CatTreatment(idImplant);
+
+        // 1. Seed Pure-Clinical Smart SOAP Macros (zero prices)
         _soapMacros.AddRange(new[]
         {
             new SoapMacroDto
@@ -1965,8 +2324,7 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
                 SubjectiveTemplate = "Patient presents for routine 6-monthly dental hygiene scaling and polishing. No acute pain.",
                 ObjectiveTemplate = "Mild-to-moderate supragingival calculus lower linguals. Gingiva mildly inflamed, no mobile teeth.",
                 AssessmentTemplate = "Generalized mild plaque-induced gingivitis.",
-                PlanTemplate = "Full mouth ultrasonic scaling, prophy paste polishing, OHI reinforced. Recall in 6 months.",
-                DefaultFee = 150.00m
+                PlanTemplate = "Full mouth ultrasonic scaling, prophy paste polishing, OHI reinforced. Recall in 6 months."
             },
             new SoapMacroDto
             {
@@ -1976,8 +2334,7 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
                 SubjectiveTemplate = "Patient reports localized cold sensitivity on posterior tooth. No spontaneous nocturnal pain.",
                 ObjectiveTemplate = "Occlusal caries present. Cold vitality test positive with brief response. No percussion tenderness.",
                 AssessmentTemplate = "Dentinal caries without pulpal involvement.",
-                PlanTemplate = "LA infiltration (2% Lidocaine), caries excavation, selective enamel etch, composite restoration (Shade A2), occlusion checked.",
-                DefaultFee = 200.00m
+                PlanTemplate = "LA infiltration (2% Lidocaine), caries excavation, selective enamel etch, composite restoration (Shade A2), occlusion checked."
             },
             new SoapMacroDto
             {
@@ -1987,8 +2344,7 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
                 SubjectiveTemplate = "Patient complains of broken non-restorable tooth with intermittent discomfort.",
                 ObjectiveTemplate = "Grossly carious crown. Adjacent gingiva intact. Pre-op PA confirms favourable root morphology.",
                 AssessmentTemplate = "Non-restorable tooth indicated for simple forceps extraction.",
-                PlanTemplate = "LA 2% Lidocaine w/ 1:80,000 adrenaline, atraumatic elevation & forceps delivery, hemostasis achieved with gauze pack. Post-op instructions given.",
-                DefaultFee = 180.00m
+                PlanTemplate = "LA 2% Lidocaine w/ 1:80,000 adrenaline, atraumatic elevation & forceps delivery, hemostasis achieved with gauze pack. Post-op instructions given."
             },
             new SoapMacroDto
             {
@@ -1998,8 +2354,7 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
                 SubjectiveTemplate = "New patient seeking general dental assessment and treatment plan.",
                 ObjectiveTemplate = "Extra-oral NAD. Intra-oral exam completed; full FDI chart recorded.",
                 AssessmentTemplate = "Routine dental assessment completed.",
-                PlanTemplate = "Discuss treatment priorities, preventive care, and corporate panel coverage options.",
-                DefaultFee = 50.00m
+                PlanTemplate = "Discuss treatment priorities, preventive care, and corporate panel coverage options."
             },
             new SoapMacroDto
             {
@@ -2009,8 +2364,7 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
                 SubjectiveTemplate = "Patient reports lingering thermal sensitivity and spontaneous throbbing ache.",
                 ObjectiveTemplate = "Deep caries approximating pulp chamber. Positive percussion, prolonged cold test.",
                 AssessmentTemplate = "Symptomatic irreversible pulpitis.",
-                PlanTemplate = "Rubber dam isolation, LA block, access cavity, working length determination, canal chemo-mechanical prep, Ca(OH)2 dressing & Cavit temporary.",
-                DefaultFee = 450.00m
+                PlanTemplate = "Rubber dam isolation, LA block, access cavity, working length determination, canal chemo-mechanical prep, Ca(OH)2 dressing & Cavit temporary."
             }
         });
 
@@ -2048,10 +2402,22 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
         var p16 = CreateSeedPatient("20000000-0000-0000-0000-000000000016", "Azman Shah bin Ibrahim", "750916-02-5167", "+6019-5566778", "90 Jalan Section 17, 46400 Petaling Jaya, Selangor", "PJ-SS2", true, now.AddDays(-40),
             new MedicalAlertDto());
 
+        p5.CreditBalance = 30.00m;
         foreach (var pat in new[] { p1, p2, p3, p4, p5, p6, p7, p8, p9, p10, p11, p12, p13, p14, p15, p16 })
         {
             _patients[pat.Id] = pat;
         }
+        RecordCreditEntryLocked(
+            p5.Id,
+            "HQ-KL",
+            null,
+            "INV-KL-PRIOR-0994",
+            30.00m,
+            30.00m,
+            "CREDIT_DEPOSIT",
+            "Prior visit overpayment stored in clinic-group credit wallet",
+            "Siti (Reception)",
+            now.AddDays(-45));
 
         // 3. Seed Odontogram entries (clinical chart entries across patients)
         SeedTooth(p1.Id, 16, ToothCondition.Filling, "Posterior Composite Filling (DO)", 220m, TreatmentStage.Completed, "Dr. Aina Rahman", now.AddHours(-2));

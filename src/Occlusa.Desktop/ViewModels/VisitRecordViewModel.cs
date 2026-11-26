@@ -105,10 +105,15 @@ public partial class VisitToothCellViewModel : ObservableObject
                 return $"FDI #{ToothNumber} · {Condition}{surf} (Baseline / Existing)";
             }
 
-            return $"FDI #{ToothNumber} · {Condition}{surf}\nProcedure: {ProcedureName}\nStage: {Stage} · RM {Fee:N2}\nClinician: {DoctorName}";
+            return $"FDI #{ToothNumber} · {Condition}{surf}\nProcedure: {ProcedureName}\nStage: {Stage}\nClinician: {DoctorName}";
         }
     }
 }
+
+/// <summary>
+/// Pure clinical quick-preset chip sourced from the single Master Catalogue (zero prices).
+/// </summary>
+public sealed record OdontogramProcedurePresetVm(string Name, ToothCondition DefaultCondition);
 
 /// <summary>
 /// ViewModel for VisitRecordModal combining a Patient Visit's Kreloses-style Anatomical + 5-Surface
@@ -126,8 +131,10 @@ public partial class VisitRecordViewModel : ObservableObject
     private readonly OcclusaApiClient _apiClient;
     private readonly string _activeStaffName;
     private readonly Action<PatientVisitDto>? _onVisitSaved;
-    private readonly Action? _onBillingUpdated;
+    private readonly Action<PatientVisitDto>? _onCheckoutInvoiceRequested;
     private readonly Dictionary<int, VisitToothCellViewModel> _toothLookup = new();
+
+    public event EventHandler<PatientVisitDto>? CheckoutInvoiceRequested;
 
     private bool _suppressDirty;
     private bool _visitNotesDirty;
@@ -186,9 +193,6 @@ public partial class VisitRecordViewModel : ObservableObject
     private string _procedureName = string.Empty;
 
     [ObservableProperty]
-    private string _feeInput = "200.00";
-
-    [ObservableProperty]
     private TreatmentStage _selectedStage = TreatmentStage.Proposed;
 
     [ObservableProperty]
@@ -236,7 +240,8 @@ public partial class VisitRecordViewModel : ObservableObject
         string activeStaffName = "Dr. Aina Rahman",
         VisitWorkspaceTab initialTab = VisitWorkspaceTab.Odontogram,
         Action<PatientVisitDto>? onVisitSaved = null,
-        Action? onBillingUpdated = null)
+        Action<PatientVisitDto>? onCheckoutInvoiceRequested = null,
+        IReadOnlyList<BillingCatalogItemDto>? masterCatalog = null)
     {
         _patient = patient;
         _visit = visit;
@@ -244,7 +249,7 @@ public partial class VisitRecordViewModel : ObservableObject
         _activeStaffName = string.IsNullOrWhiteSpace(activeStaffName) ? "Desktop Clinician" : activeStaffName.Trim();
         _activeTab = initialTab;
         _onVisitSaved = onVisitSaved;
-        _onBillingUpdated = onBillingUpdated;
+        _onCheckoutInvoiceRequested = onCheckoutInvoiceRequested;
 
         UpperRightPermanent = BuildQuad(OdontogramHelper.UpperRightPermanent);
         UpperLeftPermanent = BuildQuad(OdontogramHelper.UpperLeftPermanent);
@@ -270,16 +275,23 @@ public partial class VisitRecordViewModel : ObservableObject
         SoapMacros = new ObservableCollection<SoapMacroDto>(soapMacros);
         SelectedMacro = SoapMacros.FirstOrDefault();
 
-        ProcedurePresets = new ObservableCollection<string>
-        {
-            "Posterior Composite Filling",
-            "Routine Scaling & Polishing",
-            "Root Canal Therapy (Stage 1)",
-            "Porcelain / Zirconia Crown",
-            "Simple Extraction",
-            "Surgical Extraction",
-            "Dental Implant"
-        };
+        var dynamicPresets = masterCatalog?
+            .Where(c => c.IsActive && c.ShowInOdontogramPresets)
+            .Select(c => new OdontogramProcedurePresetVm(c.Name, c.DefaultToothCondition))
+            .ToList();
+
+        ProcedurePresets = dynamicPresets is { Count: > 0 }
+            ? new ObservableCollection<OdontogramProcedurePresetVm>(dynamicPresets)
+            : new ObservableCollection<OdontogramProcedurePresetVm>
+            {
+                new("Posterior Composite Filling", ToothCondition.Filling),
+                new("Routine Scaling & Polishing", ToothCondition.Healthy),
+                new("Root Canal Therapy (Stage 1)", ToothCondition.RootCanal),
+                new("Crown Preparation & Cementation", ToothCondition.Crown),
+                new("Simple Tooth Extraction", ToothCondition.ExtractionNeeded),
+                new("Surgical Extraction (MOS)", ToothCondition.ExtractionNeeded),
+                new("Implant Crown Review", ToothCondition.Implant)
+            };
 
         HydrateFromVisit(visit);
         SelectTooth(16);
@@ -298,7 +310,7 @@ public partial class VisitRecordViewModel : ObservableObject
     public ToothCondition[] Conditions { get; }
     public ObservableCollection<string> DentistNames { get; }
     public ObservableCollection<SoapMacroDto> SoapMacros { get; }
-    public ObservableCollection<string> ProcedurePresets { get; }
+    public ObservableCollection<OdontogramProcedurePresetVm> ProcedurePresets { get; }
 
     public bool IsOdontogramTab => ActiveTab == VisitWorkspaceTab.Odontogram;
     public bool IsSoapTab => ActiveTab == VisitWorkspaceTab.SoapNotes;
@@ -338,7 +350,6 @@ public partial class VisitRecordViewModel : ObservableObject
 
     partial void OnSelectedSurfacesChanged(string value) => MarkToothDirty();
     partial void OnProcedureNameChanged(string value) => MarkToothDirty();
-    partial void OnFeeInputChanged(string value) => MarkToothDirty();
     partial void OnSelectedStageChanged(TreatmentStage value) => MarkToothDirty();
 
     partial void OnDoctorNameChanged(string value) => MarkVisitDirty();
@@ -424,7 +435,6 @@ public partial class VisitRecordViewModel : ObservableObject
         SelectedCondition = selected.Condition;
         SelectedSurfaces = selected.Surfaces;
         ProcedureName = selected.ProcedureName;
-        FeeInput = (selected.Fee > 0m ? selected.Fee : 200m).ToString("0.00", CultureInfo.InvariantCulture);
         SelectedStage = selected.Stage;
         _suppressDirty = false;
 
@@ -467,20 +477,18 @@ public partial class VisitRecordViewModel : ObservableObject
     }
 
     [RelayCommand]
-    private void ApplyProcedurePreset(string preset)
+    private void ApplyProcedurePreset(OdontogramProcedurePresetVm? preset)
     {
-        ProcedureName = preset;
-        (SelectedCondition, FeeInput) = preset switch
+        if (preset is null)
         {
-            "Routine Scaling & Polishing" => (SelectedCondition == ToothCondition.Healthy ? ToothCondition.Healthy : SelectedCondition, "150.00"),
-            "Posterior Composite Filling" => (ToothCondition.Filling, "200.00"),
-            "Simple Extraction" => (ToothCondition.ExtractionNeeded, "180.00"),
-            "Surgical Extraction" => (ToothCondition.ExtractionNeeded, "450.00"),
-            "Root Canal Therapy (Stage 1)" => (ToothCondition.RootCanal, "450.00"),
-            "Porcelain / Zirconia Crown" => (ToothCondition.Crown, "950.00"),
-            "Dental Implant" => (ToothCondition.Implant, "3500.00"),
-            _ => (SelectedCondition, FeeInput)
-        };
+            return;
+        }
+
+        ProcedureName = preset.Name;
+        if (preset.DefaultCondition != ToothCondition.Healthy)
+        {
+            SelectedCondition = preset.DefaultCondition;
+        }
     }
 
     [RelayCommand]
@@ -506,7 +514,7 @@ public partial class VisitRecordViewModel : ObservableObject
             ApplySavedToothToUi(saved);
             StatusMessage = saved.Condition == ToothCondition.Healthy
                 ? $"Cleared Tooth #{saved.ToothNumber} to Healthy."
-                : $"Recorded baseline existing {saved.Condition}{(string.IsNullOrEmpty(saved.Surfaces) ? string.Empty : $" ({saved.Surfaces})")} on Tooth #{saved.ToothNumber} (RM 0.00).";
+                : $"Recorded baseline existing {saved.Condition}{(string.IsNullOrEmpty(saved.Surfaces) ? string.Empty : $" ({saved.Surfaces})")} on Tooth #{saved.ToothNumber}.";
         }
         catch (Exception ex)
         {
@@ -653,14 +661,21 @@ public partial class VisitRecordViewModel : ObservableObject
         }
     }
 
-    private async Task<bool> SaveSelectedToothInternalAsync()
+    [RelayCommand]
+    private async Task SaveAndOpenInvoiceAsync()
     {
-        if (!decimal.TryParse(FeeInput, NumberStyles.Number, CultureInfo.InvariantCulture, out decimal fee) || fee < 0m)
+        await SaveAllVisitChangesAsync();
+        if (HasUnsavedChanges)
         {
-            StatusMessage = "Enter a valid non-negative RM fee.";
-            return false;
+            return;
         }
 
+        CheckoutInvoiceRequested?.Invoke(this, Visit);
+        _onCheckoutInvoiceRequested?.Invoke(Visit);
+    }
+
+    private async Task<bool> SaveSelectedToothInternalAsync()
+    {
         string effectiveProcedure = string.IsNullOrWhiteSpace(ProcedureName)
             ? (SelectedCondition == ToothCondition.Healthy ? string.Empty : $"{SelectedCondition} Treatment")
             : ProcedureName.Trim();
@@ -671,7 +686,7 @@ public partial class VisitRecordViewModel : ObservableObject
             Condition = SelectedCondition,
             Surfaces = SelectedSurfaces,
             ProcedureName = effectiveProcedure,
-            Fee = SelectedCondition == ToothCondition.Healthy && string.IsNullOrWhiteSpace(ProcedureName) ? 0m : fee,
+            Fee = 0m,
             Stage = SelectedStage,
             DoctorName = EffectiveDoctorName,
             BranchId = Visit.BranchId,
@@ -682,8 +697,7 @@ public partial class VisitRecordViewModel : ObservableObject
 
         if (saved.Stage == TreatmentStage.Completed && !string.IsNullOrWhiteSpace(saved.ProcedureName))
         {
-            StatusMessage = $"Tooth #{saved.ToothNumber}{(string.IsNullOrEmpty(saved.Surfaces) ? string.Empty : $" ({saved.Surfaces})")} COMPLETED — synced RM {saved.Fee:N2} to Visit Billing.";
-            _onBillingUpdated?.Invoke();
+            StatusMessage = $"Tooth #{saved.ToothNumber}{(string.IsNullOrEmpty(saved.Surfaces) ? string.Empty : $" ({saved.Surfaces})")} marked COMPLETED on clinical chart.";
         }
         else
         {
@@ -700,7 +714,7 @@ public partial class VisitRecordViewModel : ObservableObject
             cell.Condition = saved.Condition;
             cell.Surfaces = saved.Surfaces;
             cell.ProcedureName = saved.ProcedureName;
-            cell.Fee = saved.Fee;
+            cell.Fee = 0m;
             cell.Stage = saved.Stage;
             cell.DoctorName = saved.DoctorName;
         }
@@ -712,10 +726,6 @@ public partial class VisitRecordViewModel : ObservableObject
         _suppressDirty = true;
         ProcedureName = saved.ProcedureName;
         SelectedSurfaces = saved.Surfaces;
-        if (saved.Fee > 0m)
-        {
-            FeeInput = saved.Fee.ToString("0.00", CultureInfo.InvariantCulture);
-        }
         _suppressDirty = false;
 
         _toothEditDirty = false;
@@ -788,7 +798,7 @@ public partial class VisitRecordViewModel : ObservableObject
             : "Primary / Child (51–85 · 20)";
 
         VisitSummaryLabel =
-            $"Visit #{Visit.VisitNumber} · Charted: {permCharted + primCharted} teeth · Completed: {Visit.CompletedProceduresCount} (RM {Visit.CompletedTotalFee:N2})";
+            $"Visit #{Visit.VisitNumber} · Charted: {permCharted + primCharted} teeth · Completed: {Visit.CompletedProceduresCount} (Clinical Only)";
     }
 
     private ObservableCollection<VisitToothCellViewModel> BuildQuad(int[] numbers)

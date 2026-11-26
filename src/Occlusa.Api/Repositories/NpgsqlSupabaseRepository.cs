@@ -72,6 +72,7 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
         var invoices = await GetInvoicesAsync(branch, ct);
         var macros = await GetSoapMacrosAsync(ct);
         var threads = await GetWhatsAppThreadsAsync(branch, ct);
+        var billingSettings = await GetBillingSettingsAsync(ct);
         var summary = BillingCalculator.CalculateDailySalesReconciliation(branch, today, invoices, _claimsContext.UserId);
 
         return new ClinicDashboardSnapshotDto
@@ -86,7 +87,8 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
             Invoices = invoices.ToList(),
             SoapMacros = macros.ToList(),
             WhatsAppThreads = threads.ToList(),
-            DailySummary = summary
+            DailySummary = summary,
+            BillingSettings = billingSettings
         };
     }
 
@@ -102,7 +104,8 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
                        COALESCE(m.allergies, ''), COALESCE(m.on_anticoagulants, FALSE),
                        COALESCE(m.has_diabetes, FALSE), COALESCE(m.is_pregnant, FALSE), COALESCE(m.notes, ''),
                        (SELECT COUNT(*)::INT FROM public.patient_visits pv WHERE pv.patient_id = p.id AND pv.is_deleted = FALSE),
-                       (SELECT MAX(pv.visit_date) FROM public.patient_visits pv WHERE pv.patient_id = p.id AND pv.is_deleted = FALSE)
+                       (SELECT MAX(pv.visit_date) FROM public.patient_visits pv WHERE pv.patient_id = p.id AND pv.is_deleted = FALSE),
+                       COALESCE(p.credit_balance, 0.00)
                 FROM public.patients p
                 LEFT JOIN public.medical_alerts m ON m.patient_id = p.id
                 WHERE p.is_deleted = FALSE
@@ -149,7 +152,8 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
                        COALESCE(m.allergies, ''), COALESCE(m.on_anticoagulants, FALSE),
                        COALESCE(m.has_diabetes, FALSE), COALESCE(m.is_pregnant, FALSE), COALESCE(m.notes, ''),
                        (SELECT COUNT(*)::INT FROM public.patient_visits pv WHERE pv.patient_id = p.id AND pv.is_deleted = FALSE),
-                       (SELECT MAX(pv.visit_date) FROM public.patient_visits pv WHERE pv.patient_id = p.id AND pv.is_deleted = FALSE)
+                       (SELECT MAX(pv.visit_date) FROM public.patient_visits pv WHERE pv.patient_id = p.id AND pv.is_deleted = FALSE),
+                       COALESCE(p.credit_balance, 0.00)
                 FROM public.patients p
                 LEFT JOIN public.medical_alerts m ON m.patient_id = p.id
                 WHERE p.is_deleted = FALSE
@@ -414,36 +418,13 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
 
     public async Task<IReadOnlyList<TreatmentDto>> GetTreatmentsAsync(CancellationToken ct = default)
     {
-        var (conn, tx) = await OpenScopedTransactionAsync(ct);
-        await using (conn)
-        await using (tx)
-        {
-            const string sql = """
-                SELECT id, name, category, default_duration_minutes, default_fee, is_active
-                FROM public.treatments
-                WHERE is_active = TRUE
-                ORDER BY category ASC, name ASC;
-                """;
-
-            await using var cmd = new NpgsqlCommand(sql, conn, tx);
-            var list = new List<TreatmentDto>();
-            await using var reader = await cmd.ExecuteReaderAsync(ct);
-            while (await reader.ReadAsync(ct))
-            {
-                list.Add(new TreatmentDto
-                {
-                    Id = reader.GetGuid(0),
-                    Name = reader.GetString(1),
-                    Category = reader.GetString(2),
-                    DefaultDurationMinutes = reader.GetInt32(3),
-                    DefaultFee = reader.GetDecimal(4),
-                    IsActive = reader.GetBoolean(5)
-                });
-            }
-
-            await tx.CommitAsync(ct);
-            return list;
-        }
+        var settings = await GetBillingSettingsAsync(ct);
+        return settings.CatalogItems
+            .Where(c => c.IsActive && c.IsBookableAppointment)
+            .OrderBy(c => c.ClinicalSubcategory, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(c => c.Name, StringComparer.OrdinalIgnoreCase)
+            .Select(c => c.ToBookableTreatmentDto())
+            .ToList();
     }
 
     public Task<IReadOnlyList<AppointmentQueueItemDto>> GetAppointmentsAsync(string? branchId = null, CancellationToken ct = default) =>
@@ -1292,65 +1273,6 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
                 UpdatedAt = now
             };
 
-            InvoiceDto? updatedInvoice = null;
-            if (request.Stage == TreatmentStage.Completed)
-            {
-                var draftInvoice = await FindOrCreateDraftInvoiceAsync(conn, tx, patient, branchId, doctorName, ct);
-                var label = ClinicDomainHelpers.BuildCompletedToothProcedureLabel(request);
-                var existingLine = draftInvoice.Lines.FirstOrDefault(l =>
-                    l.ToothNumber == request.ToothNumber && l.SourceStage == TreatmentStage.Completed);
-
-                if (existingLine is not null)
-                {
-                    existingLine.ProcedureName = label;
-                    existingLine.UnitPrice = fee;
-                    existingLine.Quantity = 1;
-                    existingLine.LineTotal = BillingCalculator.ComputeLineTotal(fee, 1);
-
-                    await using var updateLineCmd = new NpgsqlCommand(
-                        "UPDATE public.invoice_lines SET procedure_name = @proc, unit_price = @price, quantity = 1, line_total = @total WHERE id = @id;",
-                        conn, tx);
-                    updateLineCmd.Parameters.AddWithValue("proc", existingLine.ProcedureName);
-                    updateLineCmd.Parameters.AddWithValue("price", existingLine.UnitPrice);
-                    updateLineCmd.Parameters.AddWithValue("total", existingLine.LineTotal);
-                    updateLineCmd.Parameters.AddWithValue("id", existingLine.Id);
-                    await updateLineCmd.ExecuteNonQueryAsync(ct);
-                }
-                else
-                {
-                    var newLine = new InvoiceLineDto
-                    {
-                        Id = Guid.NewGuid(),
-                        ToothNumber = request.ToothNumber,
-                        ProcedureName = label,
-                        UnitPrice = fee,
-                        Quantity = 1,
-                        LineTotal = BillingCalculator.ComputeLineTotal(fee, 1),
-                        SourceStage = TreatmentStage.Completed
-                    };
-                    draftInvoice.Lines.Add(newLine);
-
-                    await using var insertLineCmd = new NpgsqlCommand("""
-                        INSERT INTO public.invoice_lines
-                            (id, invoice_id, branch_id, tooth_number, procedure_name, unit_price, quantity, line_total, source_stage)
-                        VALUES
-                            (@id, @invoiceId, @branchId, @tooth, @proc, @price, 1, @total, 'Completed');
-                        """, conn, tx);
-                    insertLineCmd.Parameters.AddWithValue("id", newLine.Id);
-                    insertLineCmd.Parameters.AddWithValue("invoiceId", draftInvoice.Id);
-                    insertLineCmd.Parameters.AddWithValue("branchId", branchId);
-                    insertLineCmd.Parameters.AddWithValue("tooth", request.ToothNumber);
-                    insertLineCmd.Parameters.AddWithValue("proc", newLine.ProcedureName);
-                    insertLineCmd.Parameters.AddWithValue("price", newLine.UnitPrice);
-                    insertLineCmd.Parameters.AddWithValue("total", newLine.LineTotal);
-                    await insertLineCmd.ExecuteNonQueryAsync(ct);
-                }
-
-                BillingCalculator.RecalculateInvoice(draftInvoice, _clinicOptions.CommissionRate);
-                await PersistInvoiceTotalsInternalAsync(conn, tx, draftInvoice, ct);
-                updatedInvoice = draftInvoice;
-            }
-
             await InsertAuditLogInternalAsync(
                 conn,
                 tx,
@@ -1359,11 +1281,11 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
                 "OdontogramTooth",
                 $"{patientId}:{request.ToothNumber}",
                 prevStage,
-                $"{updatedTooth.Condition} | {updatedTooth.ProcedureName} | {updatedTooth.Stage} | RM{updatedTooth.Fee:F2}",
+                $"{updatedTooth.Condition} | {updatedTooth.ProcedureName} | {updatedTooth.Stage}",
                 ct);
 
             await tx.CommitAsync(ct);
-            return (updatedTooth, updatedInvoice, null);
+            return (updatedTooth, null, null);
         }
     }
 
@@ -1488,7 +1410,7 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
         await using (tx)
         {
             const string sql = """
-                SELECT id, title, category, subjective_template, objective_template, assessment_template, plan_template, default_fee
+                SELECT id, title, category, subjective_template, objective_template, assessment_template, plan_template
                 FROM public.soap_macros
                 WHERE is_active = TRUE
                 ORDER BY category, title;
@@ -1507,8 +1429,7 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
                     SubjectiveTemplate = reader.GetString(3),
                     ObjectiveTemplate = reader.GetString(4),
                     AssessmentTemplate = reader.GetString(5),
-                    PlanTemplate = reader.GetString(6),
-                    DefaultFee = reader.GetDecimal(7)
+                    PlanTemplate = reader.GetString(6)
                 });
             }
 
@@ -1541,6 +1462,251 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
         }
     }
 
+    public async Task<(InvoiceDto? Invoice, AppointmentQueueItemDto? UpdatedQueueItem, string? Error)> SaveInvoiceDraftAsync(
+        SaveInvoiceDraftRequest request,
+        CancellationToken ct = default)
+    {
+        var branch = ClinicDomainHelpers.NormalizeBranch(request.BranchId, _clinicOptions.DefaultBranchId);
+        if (!_claimsContext.CanAccessBranch(branch))
+        {
+            return (null, null, "Access denied for branch.");
+        }
+
+        if (request.Lines.Any(l => l.UnitPrice < 0m || l.Quantity <= 0 || string.IsNullOrWhiteSpace(l.ProcedureName)))
+        {
+            return (null, null, "Every invoice line must have a valid item name, non-negative price, and quantity >= 1.");
+        }
+
+        var (conn, tx) = await OpenScopedTransactionAsync(ct);
+        await using (conn)
+        await using (tx)
+        {
+            PatientDto? patient = null;
+            if (!request.IsWalkInRetail)
+            {
+                if (!request.PatientId.HasValue || request.PatientId.Value == Guid.Empty)
+                {
+                    return (null, null, "Select a registered patient or choose Walk-In Retail Customer.");
+                }
+
+                patient = await GetPatientInternalAsync(conn, tx, request.PatientId.Value, ct);
+                if (patient is null)
+                {
+                    return (null, null, "Patient not found.");
+                }
+            }
+
+            var actor = string.IsNullOrWhiteSpace(request.UpdatedBy) ? _claimsContext.UserId : request.UpdatedBy.Trim();
+            var now = DateTimeOffset.UtcNow;
+
+            InvoiceDto? target = null;
+            if (request.InvoiceId.HasValue && request.InvoiceId.Value != Guid.Empty)
+            {
+                target = (await QueryInvoicesInternalAsync(conn, tx, null, request.InvoiceId.Value, ct)).FirstOrDefault();
+                if (target is null)
+                {
+                    return (null, null, "Invoice not found.");
+                }
+
+                if (target.IsVoided)
+                {
+                    return (null, null, "Cannot edit a voided invoice.");
+                }
+
+                if (target.Payments.Count > 0)
+                {
+                    return (null, null, "Cannot modify line items on an invoice that already has recorded payments.");
+                }
+            }
+
+            bool isNew = target is null;
+            string customerName = request.IsWalkInRetail
+                ? (string.IsNullOrWhiteSpace(request.PatientName) ? "Walk-In Retail Customer" : request.PatientName.Trim())
+                : patient!.FullName;
+            string doctorName = request.IsWalkInRetail
+                ? "Counter / Retail"
+                : (string.IsNullOrWhiteSpace(request.DoctorName) ? "Dr. Aina Rahman" : request.DoctorName.Trim());
+
+            if (target is null)
+            {
+                var code = branch.StartsWith("PJ", StringComparison.OrdinalIgnoreCase) ? "PJ" : "KL";
+                target = new InvoiceDto
+                {
+                    Id = Guid.NewGuid(),
+                    InvoiceNumber = $"INV-{code}-{DateTime.UtcNow:yyyyMMdd}-{Random.Shared.Next(1000, 9999)}",
+                    BranchId = branch,
+                    CreatedAt = now
+                };
+            }
+
+            target.PatientId = request.IsWalkInRetail ? Guid.Empty : patient!.Id;
+            target.IsWalkInRetail = request.IsWalkInRetail;
+            target.PatientName = customerName;
+            target.DoctorName = doctorName;
+            target.AppointmentId = request.IsWalkInRetail ? null : (request.AppointmentId ?? target.AppointmentId);
+            target.VisitId = request.IsWalkInRetail ? null : (request.VisitId ?? target.VisitId);
+            target.DiscountAmount = Math.Max(0m, request.DiscountAmount);
+            target.PanelName = string.IsNullOrWhiteSpace(request.PanelName) || request.PanelName.Equals("None", StringComparison.OrdinalIgnoreCase)
+                ? null
+                : request.PanelName.Trim();
+            target.PanelCoveredAmount = Math.Max(0m, request.PanelCoveredAmount);
+
+            target.Lines = request.Lines.Select(l =>
+            {
+                var cat = l.Category;
+                bool isComm = !request.IsWalkInRetail && cat != BillingCatalogCategory.OtcProduct && l.IsCommissionable;
+                return new InvoiceLineDto
+                {
+                    Id = l.Id == Guid.Empty ? Guid.NewGuid() : l.Id,
+                    CatalogItemId = l.CatalogItemId,
+                    ToothNumber = l.ToothNumber,
+                    ProcedureName = l.ProcedureName.Trim(),
+                    Category = cat,
+                    IsCommissionable = isComm,
+                    UnitPrice = BillingCalculator.Round2(l.UnitPrice),
+                    Quantity = l.Quantity,
+                    LineTotal = BillingCalculator.ComputeLineTotal(l.UnitPrice, l.Quantity),
+                    SourceStage = l.SourceStage
+                };
+            }).ToList();
+
+            BillingCalculator.RecalculateInvoice(target, _clinicOptions.CommissionRate);
+
+            if (isNew)
+            {
+                await using var insInv = new NpgsqlCommand("""
+                    INSERT INTO public.invoices
+                        (id, invoice_number, branch_id, patient_id, is_walk_in_retail, patient_name, doctor_name,
+                         appointment_id, visit_id, subtotal, discount_amount, panel_covered_amount, panel_name,
+                         patient_payable_amount, paid_amount, credited_overpayment_amount, doctor_commission_amount, created_at)
+                    VALUES
+                        (@id, @invNo, @branchId, @pid, @retail, @pname, @doctor,
+                         @apptId, @vid, @subtotal, @discount, @panelAmt, @panelName,
+                         @payable, @paid, @credited, @commission, @createdAt);
+                    """, conn, tx);
+                insInv.Parameters.AddWithValue("id", target.Id);
+                insInv.Parameters.AddWithValue("invNo", target.InvoiceNumber);
+                insInv.Parameters.AddWithValue("branchId", target.BranchId);
+                insInv.Parameters.Add(new NpgsqlParameter("pid", NpgsqlDbType.Uuid) { Value = target.IsWalkInRetail ? DBNull.Value : target.PatientId });
+                insInv.Parameters.AddWithValue("retail", target.IsWalkInRetail);
+                insInv.Parameters.AddWithValue("pname", target.PatientName);
+                insInv.Parameters.AddWithValue("doctor", target.DoctorName);
+                insInv.Parameters.Add(new NpgsqlParameter("apptId", NpgsqlDbType.Uuid) { Value = (object?)target.AppointmentId ?? DBNull.Value });
+                insInv.Parameters.Add(new NpgsqlParameter("vid", NpgsqlDbType.Uuid) { Value = (object?)target.VisitId ?? DBNull.Value });
+                insInv.Parameters.AddWithValue("subtotal", target.Subtotal);
+                insInv.Parameters.AddWithValue("discount", target.DiscountAmount);
+                insInv.Parameters.AddWithValue("panelAmt", target.PanelCoveredAmount);
+                insInv.Parameters.AddWithValue("panelName", (object?)target.PanelName ?? DBNull.Value);
+                insInv.Parameters.AddWithValue("payable", target.PatientPayableAmount);
+                insInv.Parameters.AddWithValue("paid", target.PaidAmount);
+                insInv.Parameters.AddWithValue("credited", target.CreditedOverpaymentAmount);
+                insInv.Parameters.AddWithValue("commission", target.DoctorCommissionAmount);
+                insInv.Parameters.AddWithValue("createdAt", target.CreatedAt);
+                await insInv.ExecuteNonQueryAsync(ct);
+            }
+            else
+            {
+                await using var updHeader = new NpgsqlCommand("""
+                    UPDATE public.invoices
+                    SET patient_id = @pid,
+                        is_walk_in_retail = @retail,
+                        patient_name = @pname,
+                        doctor_name = @doctor,
+                        appointment_id = @apptId,
+                        visit_id = @vid
+                    WHERE id = @id;
+                    """, conn, tx);
+                updHeader.Parameters.Add(new NpgsqlParameter("pid", NpgsqlDbType.Uuid) { Value = target.IsWalkInRetail ? DBNull.Value : target.PatientId });
+                updHeader.Parameters.AddWithValue("retail", target.IsWalkInRetail);
+                updHeader.Parameters.AddWithValue("pname", target.PatientName);
+                updHeader.Parameters.AddWithValue("doctor", target.DoctorName);
+                updHeader.Parameters.Add(new NpgsqlParameter("apptId", NpgsqlDbType.Uuid) { Value = (object?)target.AppointmentId ?? DBNull.Value });
+                updHeader.Parameters.Add(new NpgsqlParameter("vid", NpgsqlDbType.Uuid) { Value = (object?)target.VisitId ?? DBNull.Value });
+                updHeader.Parameters.AddWithValue("id", target.Id);
+                await updHeader.ExecuteNonQueryAsync(ct);
+
+                await PersistInvoiceTotalsInternalAsync(conn, tx, target, ct);
+
+                // Replace draft lines without hard-delete by zeroing omitted draft lines and upserting active lines
+                var activeLineIds = target.Lines.Select(l => l.Id).ToArray();
+                await using var zeroRemoved = new NpgsqlCommand("""
+                    UPDATE public.invoice_lines
+                    SET quantity = 0, line_total = 0.00
+                    WHERE invoice_id = @invId AND NOT (id = ANY(@ids));
+                    """, conn, tx);
+                zeroRemoved.Parameters.AddWithValue("invId", target.Id);
+                zeroRemoved.Parameters.AddWithValue("ids", activeLineIds);
+                await zeroRemoved.ExecuteNonQueryAsync(ct);
+            }
+
+            foreach (var line in target.Lines)
+            {
+                await using var lineCmd = new NpgsqlCommand("""
+                    INSERT INTO public.invoice_lines
+                        (id, invoice_id, branch_id, catalog_item_id, tooth_number, procedure_name, category, is_commissionable, unit_price, quantity, line_total, source_stage)
+                    VALUES
+                        (@id, @invId, @branchId, @catId, @tooth, @proc, @cat, @comm, @price, @qty, @total, @stage)
+                    ON CONFLICT (id) DO UPDATE SET
+                        catalog_item_id = EXCLUDED.catalog_item_id,
+                        tooth_number = EXCLUDED.tooth_number,
+                        procedure_name = EXCLUDED.procedure_name,
+                        category = EXCLUDED.category,
+                        is_commissionable = EXCLUDED.is_commissionable,
+                        unit_price = EXCLUDED.unit_price,
+                        quantity = EXCLUDED.quantity,
+                        line_total = EXCLUDED.line_total,
+                        source_stage = EXCLUDED.source_stage;
+                    """, conn, tx);
+                lineCmd.Parameters.AddWithValue("id", line.Id);
+                lineCmd.Parameters.AddWithValue("invId", target.Id);
+                lineCmd.Parameters.AddWithValue("branchId", target.BranchId);
+                lineCmd.Parameters.Add(new NpgsqlParameter("catId", NpgsqlDbType.Uuid) { Value = (object?)line.CatalogItemId ?? DBNull.Value });
+                lineCmd.Parameters.AddWithValue("tooth", (object?)line.ToothNumber ?? DBNull.Value);
+                lineCmd.Parameters.AddWithValue("proc", line.ProcedureName);
+                lineCmd.Parameters.AddWithValue("cat", line.Category.ToString());
+                lineCmd.Parameters.AddWithValue("comm", line.IsCommissionable);
+                lineCmd.Parameters.AddWithValue("price", line.UnitPrice);
+                lineCmd.Parameters.AddWithValue("qty", line.Quantity);
+                lineCmd.Parameters.AddWithValue("total", line.LineTotal);
+                lineCmd.Parameters.AddWithValue("stage", (object?)line.SourceStage?.ToString() ?? DBNull.Value);
+                await lineCmd.ExecuteNonQueryAsync(ct);
+            }
+
+            AppointmentQueueItemDto? updatedQueue = null;
+            if (request.SendToCounterCheckout && target.AppointmentId.HasValue)
+            {
+                var linked = await GetAppointmentInternalAsync(conn, tx, target.AppointmentId.Value, ct);
+                if (linked is not null && linked.Status is QueueStatus.InChair or QueueStatus.Waiting or QueueStatus.Scheduled)
+                {
+                    ClinicDomainHelpers.ApplyStatusMilestone(
+                        linked,
+                        linked.Status,
+                        QueueStatus.AwaitingCheckout,
+                        actor,
+                        now,
+                        $"Draft {target.InvoiceNumber} (RM {target.PatientPayableAmount:N2})");
+                    await PersistAppointmentLifecycleAsync(conn, tx, linked, ct);
+                    updatedQueue = await GetAppointmentInternalAsync(conn, tx, linked.Id, ct);
+                }
+            }
+
+            await InsertAuditLogInternalAsync(
+                conn,
+                tx,
+                target.BranchId,
+                isNew ? "INVOICE_DRAFT_CREATED" : "INVOICE_DRAFT_UPDATED",
+                "Invoice",
+                target.InvoiceNumber,
+                null,
+                $"{target.PatientName} | Lines={target.Lines.Count} | Payable=RM{target.PatientPayableAmount:F2}",
+                ct,
+                actor);
+
+            await tx.CommitAsync(ct);
+            return (target, updatedQueue, null);
+        }
+    }
+
     public async Task<(InvoiceDto? Invoice, AppointmentQueueItemDto? UpdatedQueueItem, string? Error)> ApplyInvoicePaymentAsync(
         Guid invoiceId,
         ApplyPaymentRequest request,
@@ -1555,6 +1721,14 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
             {
                 return (null, null, "Invoice not found.");
             }
+
+            PatientDto? patient = null;
+            if (!invoice.IsWalkInRetail && invoice.PatientId != Guid.Empty)
+            {
+                patient = await GetPatientInternalAsync(conn, tx, invoice.PatientId, ct);
+            }
+
+            request.AvailablePatientCredit = patient?.CreditBalance ?? 0m;
 
             var existingCount = invoice.Payments.Count;
             var validation = BillingCalculator.ValidateAndApplyPayments(invoice, request);
@@ -1583,10 +1757,30 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
                 await payCmd.ExecuteNonQueryAsync(ct);
             }
 
+            if (patient is not null)
+            {
+                decimal newBal = patient.CreditBalance;
+                if (validation.CreditRedeemed > 0m)
+                {
+                    newBal = BillingCalculator.Round2(Math.Max(0m, newBal - validation.CreditRedeemed));
+                    await PersistPatientCreditMutationInternalAsync(
+                        conn, tx, patient.Id, validation.Invoice.BranchId, validation.Invoice.Id, validation.Invoice.InvoiceNumber,
+                        -validation.CreditRedeemed, newBal, "CREDIT_REDEEMED", $"Redeemed on {validation.Invoice.InvoiceNumber}", collectedBy, ct);
+                }
+
+                if (validation.CreditDeposited > 0m)
+                {
+                    newBal = BillingCalculator.Round2(newBal + validation.CreditDeposited);
+                    await PersistPatientCreditMutationInternalAsync(
+                        conn, tx, patient.Id, validation.Invoice.BranchId, validation.Invoice.Id, validation.Invoice.InvoiceNumber,
+                        validation.CreditDeposited, newBal, "CREDIT_DEPOSIT", $"Overpayment stored as credit from {validation.Invoice.InvoiceNumber}", collectedBy, ct);
+                }
+            }
+
             await PersistInvoiceTotalsInternalAsync(conn, tx, validation.Invoice, ct);
 
             AppointmentQueueItemDto? updatedQueue = null;
-            if (validation.Invoice.BalanceDue == 0m)
+            if (validation.Invoice.BalanceDue == 0m && !validation.Invoice.IsWalkInRetail && validation.Invoice.PatientId != Guid.Empty)
             {
                 Guid? apptId = validation.Invoice.AppointmentId;
                 if (!apptId.HasValue)
@@ -1633,7 +1827,7 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
                 "Invoice",
                 validation.Invoice.InvoiceNumber,
                 null,
-                $"Paid=RM{validation.Invoice.PaidAmount:F2}; Panel=RM{validation.Invoice.PanelCoveredAmount:F2}; BalanceDue=RM{validation.Invoice.BalanceDue:F2}; Commission=RM{validation.Invoice.DoctorCommissionAmount:F2}",
+                $"Paid=RM{validation.Invoice.PaidAmount:F2}; Panel=RM{validation.Invoice.PanelCoveredAmount:F2}; CreditUsed=RM{validation.CreditRedeemed:F2}; CreditSaved=RM{validation.CreditDeposited:F2}; BalanceDue=RM{validation.Invoice.BalanceDue:F2}; Commission=RM{validation.Invoice.DoctorCommissionAmount:F2}",
                 ct);
 
             await tx.CommitAsync(ct);
@@ -1666,9 +1860,34 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
                 return (null, "Invoice is already voided.");
             }
 
-            var oldValue = $"Subtotal=RM{invoice.Subtotal:F2}; Paid=RM{invoice.PaidAmount:F2}; IsVoided=false";
             var voidedBy = string.IsNullOrWhiteSpace(request.VoidedBy) ? _claimsContext.UserId : request.VoidedBy.Trim();
             var reason = request.VoidReason.Trim();
+
+            if (!invoice.IsWalkInRetail && invoice.PatientId != Guid.Empty)
+            {
+                var patient = await GetPatientInternalAsync(conn, tx, invoice.PatientId, ct);
+                if (patient is not null)
+                {
+                    var redeemed = BillingCalculator.Round2(invoice.Payments.Where(p => p.Method == PaymentMethod.PatientCredit).Sum(p => p.Amount));
+                    var deposited = BillingCalculator.Round2(invoice.CreditedOverpaymentAmount);
+                    var reversal = BillingCalculator.Round2(redeemed - deposited);
+
+                    if (reversal < 0m && patient.CreditBalance < Math.Abs(reversal))
+                    {
+                        return (null, "Cannot void invoice because its overpayment credit has already been spent on another visit.");
+                    }
+
+                    if (reversal != 0m)
+                    {
+                        var newBal = BillingCalculator.Round2(patient.CreditBalance + reversal);
+                        await PersistPatientCreditMutationInternalAsync(
+                            conn, tx, patient.Id, invoice.BranchId, invoice.Id, invoice.InvoiceNumber,
+                            reversal, newBal, "CREDIT_VOID_REVERSAL", $"Void reversal: {reason}", voidedBy, ct);
+                    }
+                }
+            }
+
+            var oldValue = $"Subtotal=RM{invoice.Subtotal:F2}; Paid=RM{invoice.PaidAmount:F2}; IsVoided=false";
 
             await using (var cmd = new NpgsqlCommand("""
                 UPDATE public.invoices
@@ -1676,6 +1895,7 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
                     void_reason = @reason,
                     voided_by = @voidedBy,
                     voided_at = NOW(),
+                    credited_overpayment_amount = 0.00,
                     doctor_commission_amount = 0.00
                 WHERE id = @id;
                 """, conn, tx))
@@ -1688,6 +1908,7 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
 
             invoice.IsVoided = true;
             invoice.VoidReason = reason;
+            invoice.CreditedOverpaymentAmount = 0m;
             invoice.DoctorCommissionAmount = 0m;
 
             await InsertAuditLogInternalAsync(
@@ -1703,6 +1924,351 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
 
             await tx.CommitAsync(ct);
             return (invoice, null);
+        }
+    }
+
+    public async Task<IReadOnlyList<PatientCreditEntryDto>> GetPatientCreditLedgerAsync(Guid patientId, CancellationToken ct = default)
+    {
+        var (conn, tx) = await OpenScopedTransactionAsync(ct);
+        await using (conn)
+        await using (tx)
+        {
+            const string sql = """
+                SELECT id, patient_id, branch_id, invoice_id, invoice_number, amount_delta, balance_after, entry_type, notes, recorded_by, created_at
+                FROM public.patient_credit_ledger
+                WHERE patient_id = @pid
+                ORDER BY created_at DESC;
+                """;
+
+            var list = new List<PatientCreditEntryDto>();
+            await using var cmd = new NpgsqlCommand(sql, conn, tx);
+            cmd.Parameters.AddWithValue("pid", patientId);
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                list.Add(new PatientCreditEntryDto
+                {
+                    Id = reader.GetGuid(0),
+                    PatientId = reader.GetGuid(1),
+                    BranchId = reader.GetString(2),
+                    InvoiceId = reader.IsDBNull(3) ? null : reader.GetGuid(3),
+                    InvoiceNumber = reader.GetString(4),
+                    AmountDelta = reader.GetDecimal(5),
+                    BalanceAfter = reader.GetDecimal(6),
+                    EntryType = reader.GetString(7),
+                    Notes = reader.GetString(8),
+                    RecordedBy = reader.GetString(9),
+                    CreatedAt = reader.GetFieldValue<DateTimeOffset>(10)
+                });
+            }
+
+            await tx.CommitAsync(ct);
+            return list;
+        }
+    }
+
+    public async Task<BillingSettingsSnapshotDto> GetBillingSettingsAsync(CancellationToken ct = default)
+    {
+        var dentists = await GetDentistsAsync(null, ct);
+        var defaults = ClinicDomainHelpers.CreateDefaultBillingSettings(dentists);
+
+        var (conn, tx) = await OpenScopedTransactionAsync(ct);
+        await using (conn)
+        await using (tx)
+        {
+            var items = new List<BillingCatalogItemDto>();
+            await using (var cmd = new NpgsqlCommand("""
+                SELECT id, name, category, COALESCE(clinical_subcategory, 'General'), unit_price, is_commissionable,
+                       COALESCE(is_bookable_appointment, FALSE), COALESCE(default_duration_minutes, 30),
+                       COALESCE(show_in_odontogram_presets, FALSE), COALESCE(default_tooth_condition, 'Healthy'),
+                       note_keywords, safety_alert_tags, is_active
+                FROM public.billing_catalog_items
+                ORDER BY category, name;
+                """, conn, tx))
+            await using (var reader = await cmd.ExecuteReaderAsync(ct))
+            {
+                while (await reader.ReadAsync(ct))
+                {
+                    var cat = Enum.Parse<BillingCatalogCategory>(reader.GetString(2));
+                    items.Add(new BillingCatalogItemDto
+                    {
+                        Id = reader.GetGuid(0),
+                        Name = reader.GetString(1),
+                        Category = cat,
+                        ClinicalSubcategory = reader.GetString(3),
+                        UnitPrice = reader.GetDecimal(4),
+                        IsCommissionable = cat != BillingCatalogCategory.OtcProduct && reader.GetBoolean(5),
+                        IsBookableAppointment = cat is BillingCatalogCategory.Procedure or BillingCatalogCategory.Radiograph && reader.GetBoolean(6),
+                        DefaultDurationMinutes = reader.GetInt32(7),
+                        ShowInOdontogramPresets = reader.GetBoolean(8),
+                        DefaultToothCondition = Enum.TryParse<ToothCondition>(reader.GetString(9), out var tc) ? tc : ToothCondition.Healthy,
+                        NoteKeywords = reader.GetString(10),
+                        SafetyAlertTags = reader.GetString(11),
+                        IsActive = reader.GetBoolean(12)
+                    });
+                }
+            }
+
+            var prefs = new List<DoctorInvoicePreferenceDto>();
+            await using (var pCmd = new NpgsqlCommand("""
+                SELECT dentist_id, doctor_name, init_mode, enable_note_keyword_engine, treatment_rules_json
+                FROM public.doctor_invoice_preferences;
+                """, conn, tx))
+            await using (var reader = await pCmd.ExecuteReaderAsync(ct))
+            {
+                while (await reader.ReadAsync(ct))
+                {
+                    var rulesJson = reader.GetString(4);
+                    var rules = JsonSerializer.Deserialize<List<TreatmentSuggestionRuleDto>>(rulesJson, ActivityJsonOptions) ?? new();
+                    prefs.Add(new DoctorInvoicePreferenceDto
+                    {
+                        DentistId = reader.IsDBNull(0) ? null : reader.GetGuid(0),
+                        DoctorName = reader.GetString(1),
+                        InitMode = Enum.Parse<DoctorInvoiceInitMode>(reader.GetString(2)),
+                        EnableNoteKeywordEngine = reader.GetBoolean(3),
+                        TreatmentRules = rules
+                    });
+                }
+            }
+
+            await tx.CommitAsync(ct);
+
+            return new BillingSettingsSnapshotDto
+            {
+                CatalogItems = items.Count > 0 ? items : defaults.CatalogItems,
+                DoctorPreferences = prefs.Count > 0 ? prefs : defaults.DoctorPreferences,
+                CorporatePanels = defaults.CorporatePanels
+            };
+        }
+    }
+
+    public async Task<(BillingCatalogItemDto? Item, string? Error)> UpsertBillingCatalogItemAsync(
+        UpsertBillingCatalogItemRequest request,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(request.Name))
+        {
+            return (null, "Catalog item name is required.");
+        }
+
+        if (request.UnitPrice < 0m)
+        {
+            return (null, "Unit price cannot be negative.");
+        }
+
+        var (conn, tx) = await OpenScopedTransactionAsync(ct);
+        await using (conn)
+        await using (tx)
+        {
+            var id = request.Id is { } g && g != Guid.Empty ? g : Guid.NewGuid();
+            var isComm = request.Category != BillingCatalogCategory.OtcProduct && request.IsCommissionable;
+            var isBookable = request.Category is BillingCatalogCategory.Procedure or BillingCatalogCategory.Radiograph && request.IsBookableAppointment;
+            var duration = Math.Clamp(request.DefaultDurationMinutes > 0 ? request.DefaultDurationMinutes : 30, 15, 480);
+            var subcat = string.IsNullOrWhiteSpace(request.ClinicalSubcategory) ? request.Category.ToString() : request.ClinicalSubcategory.Trim();
+            var showPreset = request.Category == BillingCatalogCategory.Procedure && request.ShowInOdontogramPresets;
+            var price = BillingCalculator.Round2(request.UnitPrice);
+
+            await using (var cmd = new NpgsqlCommand("""
+                INSERT INTO public.billing_catalog_items
+                    (id, clinic_group_id, name, category, clinical_subcategory, unit_price, is_commissionable,
+                     is_bookable_appointment, default_duration_minutes, show_in_odontogram_presets, default_tooth_condition,
+                     note_keywords, safety_alert_tags, is_active, updated_at)
+                VALUES
+                    (@id, @groupId, @name, @cat, @subcat, @price, @comm,
+                     @bookable, @dur, @preset, @cond,
+                     @kw, @tags, @active, NOW())
+                ON CONFLICT (id) DO UPDATE SET
+                    name = EXCLUDED.name,
+                    category = EXCLUDED.category,
+                    clinical_subcategory = EXCLUDED.clinical_subcategory,
+                    unit_price = EXCLUDED.unit_price,
+                    is_commissionable = EXCLUDED.is_commissionable,
+                    is_bookable_appointment = EXCLUDED.is_bookable_appointment,
+                    default_duration_minutes = EXCLUDED.default_duration_minutes,
+                    show_in_odontogram_presets = EXCLUDED.show_in_odontogram_presets,
+                    default_tooth_condition = EXCLUDED.default_tooth_condition,
+                    note_keywords = EXCLUDED.note_keywords,
+                    safety_alert_tags = EXCLUDED.safety_alert_tags,
+                    is_active = EXCLUDED.is_active,
+                    updated_at = NOW();
+                """, conn, tx))
+            {
+                cmd.Parameters.AddWithValue("id", id);
+                cmd.Parameters.AddWithValue("groupId", _claimsContext.ClinicGroupId);
+                cmd.Parameters.AddWithValue("name", request.Name.Trim());
+                cmd.Parameters.AddWithValue("cat", request.Category.ToString());
+                cmd.Parameters.AddWithValue("subcat", subcat);
+                cmd.Parameters.AddWithValue("price", price);
+                cmd.Parameters.AddWithValue("comm", isComm);
+                cmd.Parameters.AddWithValue("bookable", isBookable);
+                cmd.Parameters.AddWithValue("dur", duration);
+                cmd.Parameters.AddWithValue("preset", showPreset);
+                cmd.Parameters.AddWithValue("cond", request.DefaultToothCondition.ToString());
+                cmd.Parameters.AddWithValue("kw", request.NoteKeywords?.Trim() ?? string.Empty);
+                cmd.Parameters.AddWithValue("tags", request.SafetyAlertTags?.Trim() ?? string.Empty);
+                cmd.Parameters.AddWithValue("active", request.IsActive);
+                await cmd.ExecuteNonQueryAsync(ct);
+            }
+
+            // Mirror bookable Master Catalogue items into public.treatments to satisfy appointments.treatment_id foreign key
+            if (isBookable)
+            {
+                await using var mirrorCmd = new NpgsqlCommand("""
+                    INSERT INTO public.treatments
+                        (id, clinic_group_id, name, category, default_duration_minutes, default_fee, is_active)
+                    VALUES
+                        (@id, @groupId, @name, @cat, @dur, @fee, @active)
+                    ON CONFLICT (id) DO UPDATE SET
+                        name = EXCLUDED.name,
+                        category = EXCLUDED.category,
+                        default_duration_minutes = EXCLUDED.default_duration_minutes,
+                        default_fee = EXCLUDED.default_fee,
+                        is_active = EXCLUDED.is_active;
+                    """, conn, tx);
+                mirrorCmd.Parameters.AddWithValue("id", id);
+                mirrorCmd.Parameters.AddWithValue("groupId", _claimsContext.ClinicGroupId);
+                mirrorCmd.Parameters.AddWithValue("name", request.Name.Trim());
+                mirrorCmd.Parameters.AddWithValue("cat", subcat);
+                mirrorCmd.Parameters.AddWithValue("dur", duration);
+                mirrorCmd.Parameters.AddWithValue("fee", price);
+                mirrorCmd.Parameters.AddWithValue("active", request.IsActive);
+                await mirrorCmd.ExecuteNonQueryAsync(ct);
+            }
+
+            await tx.CommitAsync(ct);
+            return (new BillingCatalogItemDto
+            {
+                Id = id,
+                Name = request.Name.Trim(),
+                Category = request.Category,
+                ClinicalSubcategory = subcat,
+                UnitPrice = price,
+                IsCommissionable = isComm,
+                IsBookableAppointment = isBookable,
+                DefaultDurationMinutes = duration,
+                ShowInOdontogramPresets = showPreset,
+                DefaultToothCondition = request.DefaultToothCondition,
+                NoteKeywords = request.NoteKeywords?.Trim() ?? string.Empty,
+                SafetyAlertTags = request.SafetyAlertTags?.Trim() ?? string.Empty,
+                IsActive = request.IsActive
+            }, null);
+        }
+    }
+
+    public async Task<(DoctorInvoicePreferenceDto? Preference, string? Error)> SaveDoctorInvoicePreferenceAsync(
+        SaveDoctorInvoicePreferenceRequest request,
+        CancellationToken ct = default)
+    {
+        var (conn, tx) = await OpenScopedTransactionAsync(ct);
+        await using (conn)
+        await using (tx)
+        {
+            var docName = request.DentistId.HasValue
+                ? (string.IsNullOrWhiteSpace(request.DoctorName) ? "Dentist" : request.DoctorName.Trim())
+                : "Clinic Default (All Doctors)";
+            var rules = request.TreatmentRules ?? new List<TreatmentSuggestionRuleDto>();
+            var rulesJson = JsonSerializer.Serialize(rules, ActivityJsonOptions);
+
+            if (request.DentistId.HasValue)
+            {
+                await using var cmd = new NpgsqlCommand("""
+                    INSERT INTO public.doctor_invoice_preferences
+                        (id, clinic_group_id, dentist_id, doctor_name, init_mode, enable_note_keyword_engine, treatment_rules_json, updated_at)
+                    VALUES
+                        (@id, @groupId, @did, @name, @mode, @noteEngine, @rules, NOW())
+                    ON CONFLICT (clinic_group_id, dentist_id) WHERE dentist_id IS NOT NULL DO UPDATE SET
+                        doctor_name = EXCLUDED.doctor_name,
+                        init_mode = EXCLUDED.init_mode,
+                        enable_note_keyword_engine = EXCLUDED.enable_note_keyword_engine,
+                        treatment_rules_json = EXCLUDED.treatment_rules_json,
+                        updated_at = NOW();
+                    """, conn, tx);
+                cmd.Parameters.AddWithValue("id", Guid.NewGuid());
+                cmd.Parameters.AddWithValue("groupId", _claimsContext.ClinicGroupId);
+                cmd.Parameters.AddWithValue("did", request.DentistId.Value);
+                cmd.Parameters.AddWithValue("name", docName);
+                cmd.Parameters.AddWithValue("mode", request.InitMode.ToString());
+                cmd.Parameters.AddWithValue("noteEngine", request.EnableNoteKeywordEngine);
+                cmd.Parameters.Add(new NpgsqlParameter("rules", NpgsqlDbType.Jsonb) { Value = rulesJson });
+                await cmd.ExecuteNonQueryAsync(ct);
+            }
+            else
+            {
+                await using var cmd = new NpgsqlCommand("""
+                    INSERT INTO public.doctor_invoice_preferences
+                        (id, clinic_group_id, dentist_id, doctor_name, init_mode, enable_note_keyword_engine, treatment_rules_json, updated_at)
+                    VALUES
+                        (@id, @groupId, NULL, @name, @mode, @noteEngine, @rules, NOW())
+                    ON CONFLICT (clinic_group_id) WHERE dentist_id IS NULL DO UPDATE SET
+                        doctor_name = EXCLUDED.doctor_name,
+                        init_mode = EXCLUDED.init_mode,
+                        enable_note_keyword_engine = EXCLUDED.enable_note_keyword_engine,
+                        treatment_rules_json = EXCLUDED.treatment_rules_json,
+                        updated_at = NOW();
+                    """, conn, tx);
+                cmd.Parameters.AddWithValue("id", Guid.NewGuid());
+                cmd.Parameters.AddWithValue("groupId", _claimsContext.ClinicGroupId);
+                cmd.Parameters.AddWithValue("name", docName);
+                cmd.Parameters.AddWithValue("mode", request.InitMode.ToString());
+                cmd.Parameters.AddWithValue("noteEngine", request.EnableNoteKeywordEngine);
+                cmd.Parameters.Add(new NpgsqlParameter("rules", NpgsqlDbType.Jsonb) { Value = rulesJson });
+                await cmd.ExecuteNonQueryAsync(ct);
+            }
+
+            await tx.CommitAsync(ct);
+            return (new DoctorInvoicePreferenceDto
+            {
+                DentistId = request.DentistId,
+                DoctorName = docName,
+                InitMode = request.InitMode,
+                EnableNoteKeywordEngine = request.EnableNoteKeywordEngine,
+                TreatmentRules = rules
+            }, null);
+        }
+    }
+
+    private async Task PersistPatientCreditMutationInternalAsync(
+        NpgsqlConnection conn,
+        NpgsqlTransaction tx,
+        Guid patientId,
+        string branchId,
+        Guid? invoiceId,
+        string invoiceNumber,
+        decimal amountDelta,
+        decimal balanceAfter,
+        string entryType,
+        string notes,
+        string recordedBy,
+        CancellationToken ct)
+    {
+        await using (var updPat = new NpgsqlCommand(
+            "UPDATE public.patients SET credit_balance = @bal, updated_at = NOW() WHERE id = @pid;",
+            conn, tx))
+        {
+            updPat.Parameters.AddWithValue("bal", balanceAfter);
+            updPat.Parameters.AddWithValue("pid", patientId);
+            await updPat.ExecuteNonQueryAsync(ct);
+        }
+
+        await using (var insLedger = new NpgsqlCommand("""
+            INSERT INTO public.patient_credit_ledger
+                (id, clinic_group_id, branch_id, patient_id, invoice_id, invoice_number, amount_delta, balance_after, entry_type, notes, recorded_by)
+            VALUES
+                (@id, @groupId, @branchId, @pid, @invId, @invNo, @delta, @bal, @type, @notes, @by);
+            """, conn, tx))
+        {
+            insLedger.Parameters.AddWithValue("id", Guid.NewGuid());
+            insLedger.Parameters.AddWithValue("groupId", _claimsContext.ClinicGroupId);
+            insLedger.Parameters.AddWithValue("branchId", branchId);
+            insLedger.Parameters.AddWithValue("pid", patientId);
+            insLedger.Parameters.Add(new NpgsqlParameter("invId", NpgsqlDbType.Uuid) { Value = (object?)invoiceId ?? DBNull.Value });
+            insLedger.Parameters.AddWithValue("invNo", invoiceNumber);
+            insLedger.Parameters.AddWithValue("delta", amountDelta);
+            insLedger.Parameters.AddWithValue("bal", balanceAfter);
+            insLedger.Parameters.AddWithValue("type", entryType);
+            insLedger.Parameters.AddWithValue("notes", notes);
+            insLedger.Parameters.AddWithValue("by", recordedBy);
+            await insLedger.ExecuteNonQueryAsync(ct);
         }
     }
 
@@ -2093,7 +2659,8 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
                    COALESCE(m.allergies, ''), COALESCE(m.on_anticoagulants, FALSE),
                    COALESCE(m.has_diabetes, FALSE), COALESCE(m.is_pregnant, FALSE), COALESCE(m.notes, ''),
                    (SELECT COUNT(*)::INT FROM public.patient_visits pv WHERE pv.patient_id = p.id AND pv.is_deleted = FALSE),
-                   (SELECT MAX(pv.visit_date) FROM public.patient_visits pv WHERE pv.patient_id = p.id AND pv.is_deleted = FALSE)
+                   (SELECT MAX(pv.visit_date) FROM public.patient_visits pv WHERE pv.patient_id = p.id AND pv.is_deleted = FALSE),
+                   COALESCE(p.credit_balance, 0.00)
             FROM public.patients p
             LEFT JOIN public.medical_alerts m ON m.patient_id = p.id
             WHERE p.id = @id AND p.is_deleted = FALSE;
@@ -2517,139 +3084,7 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
             UpdatedAt = now
         };
 
-        InvoiceDto? updatedInvoice = null;
-        if (_claimsContext.CanAccessBranch(branchId))
-        {
-            Guid? linkedInvId = null;
-            await using (var findInv = new NpgsqlCommand("""
-                SELECT id FROM public.invoices
-                WHERE is_voided = FALSE
-                  AND (visit_id = @vid OR (@apptId IS NOT NULL AND appointment_id = @apptId))
-                ORDER BY created_at DESC LIMIT 1;
-                """, conn, tx))
-            {
-                findInv.Parameters.AddWithValue("vid", visit.Id);
-                findInv.Parameters.Add(new NpgsqlParameter("apptId", NpgsqlDbType.Uuid)
-                {
-                    Value = (object?)visit.AppointmentId ?? DBNull.Value
-                });
-                if (await findInv.ExecuteScalarAsync(ct) is Guid g)
-                {
-                    linkedInvId = g;
-                }
-            }
-
-            InvoiceDto? linkedInv = linkedInvId.HasValue
-                ? (await QueryInvoicesInternalAsync(conn, tx, null, linkedInvId.Value, ct)).FirstOrDefault()
-                : null;
-
-            bool settledHistorical = linkedInv is not null && linkedInv.Payments.Count > 0;
-            if (!settledHistorical
-                && request.Stage == TreatmentStage.Completed
-                && !string.IsNullOrWhiteSpace(updatedTooth.ProcedureName)
-                && (fee > 0m || linkedInv is not null))
-            {
-                if (linkedInv is null)
-                {
-                    var code = branchId.StartsWith("PJ", StringComparison.OrdinalIgnoreCase) ? "PJ" : "KL";
-                    linkedInv = new InvoiceDto
-                    {
-                        Id = Guid.NewGuid(),
-                        InvoiceNumber = $"INV-{code}-{DateTime.UtcNow:yyyyMMdd}-{Random.Shared.Next(1000, 9999)}",
-                        BranchId = branchId,
-                        PatientId = patient.Id,
-                        PatientName = patient.FullName,
-                        DoctorName = doctorName,
-                        AppointmentId = visit.AppointmentId,
-                        VisitId = visit.Id,
-                        CreatedAt = now
-                    };
-
-                    await using var insInv = new NpgsqlCommand("""
-                        INSERT INTO public.invoices
-                            (id, invoice_number, branch_id, patient_id, patient_name, doctor_name, appointment_id, visit_id, created_at)
-                        VALUES
-                            (@id, @invNo, @branchId, @pid, @pname, @doctor, @apptId, @vid, @createdAt);
-                        """, conn, tx);
-                    insInv.Parameters.AddWithValue("id", linkedInv.Id);
-                    insInv.Parameters.AddWithValue("invNo", linkedInv.InvoiceNumber);
-                    insInv.Parameters.AddWithValue("branchId", linkedInv.BranchId);
-                    insInv.Parameters.AddWithValue("pid", linkedInv.PatientId);
-                    insInv.Parameters.AddWithValue("pname", linkedInv.PatientName);
-                    insInv.Parameters.AddWithValue("doctor", linkedInv.DoctorName);
-                    insInv.Parameters.AddWithValue("apptId", (object?)linkedInv.AppointmentId ?? DBNull.Value);
-                    insInv.Parameters.AddWithValue("vid", visit.Id);
-                    insInv.Parameters.AddWithValue("createdAt", linkedInv.CreatedAt);
-                    await insInv.ExecuteNonQueryAsync(ct);
-                }
-
-                var label = ClinicDomainHelpers.BuildCompletedToothProcedureLabel(new UpdateOdontogramRequest
-                {
-                    ToothNumber = request.ToothNumber,
-                    Condition = request.Condition,
-                    Surfaces = surfaces,
-                    ProcedureName = updatedTooth.ProcedureName,
-                    Fee = fee,
-                    Stage = request.Stage,
-                    DoctorName = doctorName,
-                    BranchId = branchId
-                });
-
-                var existingLine = linkedInv.Lines.FirstOrDefault(l =>
-                    l.ToothNumber == request.ToothNumber && l.SourceStage == TreatmentStage.Completed);
-
-                if (existingLine is not null)
-                {
-                    existingLine.ProcedureName = label;
-                    existingLine.UnitPrice = fee;
-                    existingLine.Quantity = 1;
-                    existingLine.LineTotal = BillingCalculator.ComputeLineTotal(fee, 1);
-
-                    await using var updLine = new NpgsqlCommand(
-                        "UPDATE public.invoice_lines SET procedure_name = @proc, unit_price = @price, quantity = 1, line_total = @total WHERE id = @id;",
-                        conn, tx);
-                    updLine.Parameters.AddWithValue("proc", existingLine.ProcedureName);
-                    updLine.Parameters.AddWithValue("price", existingLine.UnitPrice);
-                    updLine.Parameters.AddWithValue("total", existingLine.LineTotal);
-                    updLine.Parameters.AddWithValue("id", existingLine.Id);
-                    await updLine.ExecuteNonQueryAsync(ct);
-                }
-                else
-                {
-                    var newLine = new InvoiceLineDto
-                    {
-                        Id = Guid.NewGuid(),
-                        ToothNumber = request.ToothNumber,
-                        ProcedureName = label,
-                        UnitPrice = fee,
-                        Quantity = 1,
-                        LineTotal = BillingCalculator.ComputeLineTotal(fee, 1),
-                        SourceStage = TreatmentStage.Completed
-                    };
-                    linkedInv.Lines.Add(newLine);
-
-                    await using var insLine = new NpgsqlCommand("""
-                        INSERT INTO public.invoice_lines
-                            (id, invoice_id, branch_id, tooth_number, procedure_name, unit_price, quantity, line_total, source_stage)
-                        VALUES
-                            (@id, @invId, @branchId, @tooth, @proc, @price, 1, @total, 'Completed');
-                        """, conn, tx);
-                    insLine.Parameters.AddWithValue("id", newLine.Id);
-                    insLine.Parameters.AddWithValue("invId", linkedInv.Id);
-                    insLine.Parameters.AddWithValue("branchId", branchId);
-                    insLine.Parameters.AddWithValue("tooth", request.ToothNumber);
-                    insLine.Parameters.AddWithValue("proc", newLine.ProcedureName);
-                    insLine.Parameters.AddWithValue("price", newLine.UnitPrice);
-                    insLine.Parameters.AddWithValue("total", newLine.LineTotal);
-                    await insLine.ExecuteNonQueryAsync(ct);
-                }
-
-                BillingCalculator.RecalculateInvoice(linkedInv, _clinicOptions.CommissionRate);
-                await PersistInvoiceTotalsInternalAsync(conn, tx, linkedInv, ct);
-                updatedInvoice = linkedInv;
-            }
-        }
-
+        // Clinical visit records and odontograms are strictly decoupled from invoicing.
         await InsertAuditLogInternalAsync(
             conn,
             tx,
@@ -2658,11 +3093,11 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
             "VisitOdontogramTooth",
             $"{visit.Id}:{request.ToothNumber}",
             oldSummary,
-            $"{updatedTooth.Condition}({updatedTooth.Surfaces}) | {updatedTooth.ProcedureName} | {updatedTooth.Stage} | RM{updatedTooth.Fee:F2}",
+            $"{updatedTooth.Condition}({updatedTooth.Surfaces}) | {updatedTooth.ProcedureName} | {updatedTooth.Stage}",
             ct,
             actor);
 
-        return (updatedTooth, updatedInvoice, null);
+        return (updatedTooth, null, null);
     }
 
     private static async Task<List<PatientVisitDto>> QueryVisitsInternalAsync(
@@ -2871,6 +3306,7 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
                 panel_name = @panelName,
                 patient_payable_amount = @payable,
                 paid_amount = @paid,
+                credited_overpayment_amount = @credited,
                 doctor_commission_amount = @commission
             WHERE id = @id;
             """;
@@ -2882,6 +3318,7 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
         cmd.Parameters.AddWithValue("panelName", (object?)invoice.PanelName ?? DBNull.Value);
         cmd.Parameters.AddWithValue("payable", invoice.PatientPayableAmount);
         cmd.Parameters.AddWithValue("paid", invoice.PaidAmount);
+        cmd.Parameters.AddWithValue("credited", invoice.CreditedOverpaymentAmount);
         cmd.Parameters.AddWithValue("commission", invoice.DoctorCommissionAmount);
         cmd.Parameters.AddWithValue("id", invoice.Id);
         await cmd.ExecuteNonQueryAsync(ct);
@@ -2897,7 +3334,8 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
         const string sql = """
             SELECT id, invoice_number, branch_id, patient_id, patient_name, doctor_name, appointment_id,
                    subtotal, discount_amount, panel_covered_amount, panel_name, patient_payable_amount,
-                   paid_amount, doctor_commission_amount, is_voided, void_reason, created_at, visit_id
+                   paid_amount, doctor_commission_amount, is_voided, void_reason, created_at, visit_id,
+                   COALESCE(is_walk_in_retail, FALSE), COALESCE(credited_overpayment_amount, 0.00)
             FROM public.invoices
             WHERE (@branchId IS NULL OR branch_id = @branchId)
               AND (@invoiceId IS NULL OR id = @invoiceId)
@@ -2920,7 +3358,7 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
                     Id = reader.GetGuid(0),
                     InvoiceNumber = reader.GetString(1),
                     BranchId = reader.GetString(2),
-                    PatientId = reader.GetGuid(3),
+                    PatientId = reader.IsDBNull(3) ? Guid.Empty : reader.GetGuid(3),
                     PatientName = reader.GetString(4),
                     DoctorName = reader.GetString(5),
                     AppointmentId = reader.IsDBNull(6) ? null : reader.GetGuid(6),
@@ -2934,7 +3372,9 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
                     IsVoided = reader.GetBoolean(14),
                     VoidReason = reader.IsDBNull(15) ? null : reader.GetString(15),
                     CreatedAt = reader.GetFieldValue<DateTimeOffset>(16),
-                    VisitId = reader.IsDBNull(17) ? null : reader.GetGuid(17)
+                    VisitId = reader.IsDBNull(17) ? null : reader.GetGuid(17),
+                    IsWalkInRetail = reader.GetBoolean(18),
+                    CreditedOverpaymentAmount = reader.GetDecimal(19)
                 };
                 list.Add(inv);
                 map[inv.Id] = inv;
@@ -2949,9 +3389,10 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
         var ids = list.Select(i => i.Id).ToArray();
 
         const string linesSql = """
-            SELECT id, invoice_id, tooth_number, procedure_name, unit_price, quantity, line_total, source_stage
+            SELECT id, invoice_id, tooth_number, procedure_name, unit_price, quantity, line_total, source_stage,
+                   catalog_item_id, COALESCE(category, 'Procedure'), COALESCE(is_commissionable, TRUE)
             FROM public.invoice_lines
-            WHERE invoice_id = ANY(@ids)
+            WHERE invoice_id = ANY(@ids) AND quantity > 0
             ORDER BY created_at ASC;
             """;
 
@@ -2964,6 +3405,7 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
                 var invId = reader.GetGuid(1);
                 if (map.TryGetValue(invId, out var inv))
                 {
+                    var cat = Enum.Parse<BillingCatalogCategory>(reader.GetString(9));
                     inv.Lines.Add(new InvoiceLineDto
                     {
                         Id = reader.GetGuid(0),
@@ -2972,7 +3414,10 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
                         UnitPrice = reader.GetDecimal(4),
                         Quantity = reader.GetInt32(5),
                         LineTotal = reader.GetDecimal(6),
-                        SourceStage = reader.IsDBNull(7) ? null : Enum.Parse<TreatmentStage>(reader.GetString(7))
+                        SourceStage = reader.IsDBNull(7) ? null : Enum.Parse<TreatmentStage>(reader.GetString(7)),
+                        CatalogItemId = reader.IsDBNull(8) ? null : reader.GetGuid(8),
+                        Category = cat,
+                        IsCommissionable = cat != BillingCatalogCategory.OtcProduct && reader.GetBoolean(10)
                     });
                 }
             }
@@ -3140,7 +3585,8 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
             Notes = reader.GetString(14)
         },
         VisitCount = reader.FieldCount > 15 && !reader.IsDBNull(15) ? reader.GetInt32(15) : 0,
-        LastVisitAt = reader.FieldCount > 16 && !reader.IsDBNull(16) ? reader.GetFieldValue<DateTimeOffset>(16) : null
+        LastVisitAt = reader.FieldCount > 16 && !reader.IsDBNull(16) ? reader.GetFieldValue<DateTimeOffset>(16) : null,
+        CreditBalance = reader.FieldCount > 17 && !reader.IsDBNull(17) ? reader.GetDecimal(17) : 0m
     };
 
     private static AppointmentQueueItemDto ReadAppointment(NpgsqlDataReader reader)

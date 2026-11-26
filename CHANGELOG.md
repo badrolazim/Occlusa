@@ -6,6 +6,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.5.0] - 2026-11-26
+### Added
+- **Unified Master Catalogue (6th Workspace Tab):** Single source of truth (`BillingCatalogItemDto`, `BillingSettingsController`, `BillingSettingsViewModel`, `BillingCatalogItemModal`) powering **Appointments & Walk-In scheduling** (`IsBookableAppointment`, `DefaultDurationMinutes`), **Visit Odontogram Quick Presets** (`ShowInOdontogramPresets`, `DefaultToothCondition`), **Doctor Suggestion Rules**, **Invoice Checkout**, **Walk-In OTC Retail Sales**, and live **WhatsApp AI** routine fee quotes—with instant propagation across every workspace when items are edited or added.
+- **Strictly Decoupled Clinical Notes & Dentist-Initiated Draft Invoicing:** Removed all monetary `Fee (RM)` fields from `VisitRecordModal` and `SoapMacroDto` so receptionists can edit unpaid Draft Invoice items freely without ever mutating a doctor's medico-legal clinical record; added **`Save & Create Invoice →`** inside `VisitRecordModal`, **`Checkout / Invoice`** on Live Queue, **`Send Draft to Counter →`**, and **`No-Charge Visit`** workflows.
+- **Deterministic Smart Invoice Suggestion Engine (`InvoiceSuggestionEngine`):** Reads completed visit odontogram procedures, scans clinical SOAP notes against Master Catalogue keywords (`NoteKeywords`), applies per-doctor **Checkout Modes** (`AutoPopulateWithSuggestions`, `BlankWithSuggestions`, `BlankManualOnly`) and per-treatment companion rules (`TreatmentSuggestionRuleModal`, inheriting Clinic Default unless overridden), and flags **Medical Alert Safety Warnings** (`[⚠]`) for allergies, NSAIDs, anticoagulants, or pregnancy.
+- **Walk-In Counter OTC Retail Sales & 0% Commission Guard:** Added standalone **`+ Walk-In OTC Sale`** billing (e.g., toothbrushes, toothpaste, mouthwash) requiring no patient NRIC or clinical visit, with `BillingCalculator` strictly enforcing **`0%` doctor commission** on `OtcProduct` lines and pro-rata commission on mixed clinical + OTC invoices.
+- **Shared Cross-Branch Patient Credit Wallet & Overpayment Handling:** Added clinic-group shared `PatientDto.CreditBalance` and append-only `PatientCreditEntryDto` ledger (`POST /api/invoices/{id}/pay`, `GET /api/patients/{id}/credits`) supporting **`Cash Change`** vs. **`Save to Credit`** on overpayment, credit redemption (`PaymentMethod.PatientCredit`) at any branch (`HQ-KL` / `PJ-SS2`), credit reversals on audited invoice soft-voids, balanced End-of-Day reconciliation, and automatic Live Queue transition to `Completed` upon full settlement.
+- Supabase PostgreSQL migration `supabase/migrations/006_decoupled_billing_credits_and_settings.sql` (`billing_catalog_items`, `doctor_invoice_preferences`, `patient_credit_ledger`, walk-in invoice & OTC line columns, immutability triggers, and RLS) mirrored across `NpgsqlSupabaseRepository` and `InMemoryOcclusaRepository`.
+- Dedicated step-by-step user guide `docs/NOTES_AND_INVOICING_WALKTHROUGH.md` covering clinical notes, Master Catalogue configuration, dentist draft checkout, receptionist edits, credit wallet, and walk-in OTC retail sales.
+- 5 new xUnit tests (`94` total tests in `Occlusa.Tests`) in `DecoupledBillingAndSuggestionsTests.cs` plus XAML contract regression guards in `PatientVisitsAndOdontogramTests.cs`.
+
+### Changed
+- Projected `GetTreatmentsAsync()` directly from active bookable Master Catalogue items and removed separate `treatments` seed duplication and `LinkedTreatmentId` mapping; `WhatsAppAiReceptionistService` now quotes live Master Catalogue prices and `InvoiceCheckoutViewModel` loads corporate panels from `BillingSettingsSnapshotDto.CorporatePanels`.
+- Replaced hardcoded Odontogram procedure presets in `VisitRecordViewModel` with pure-clinical dynamic chips (`OdontogramProcedurePresetVm`) sourced from Master Catalogue items marked `ShowInOdontogramPresets`.
+- Updated `InvoiceCheckoutModal` to support line-item editing (`+ Add`, `Update`, `Remove`, `Clear Blank`, `Scan Dr Notes`), 1-click suggestion chips, customer mode switching (Registered Patient vs. Walk-In Retail), shared credit wallet redemption, and overpayment handling.
+- Updated `README.md` and `docs/UI_UNIFORMITY_RULES.md` to document the 6-workspace layout, unified Master Catalogue, migration `006`, and WPF `DataContext` visibility guardrails.
+
+### Fixed
+- Fixed WPF `DataContext` shadowing in `MainWindow.xaml` where placing `Visibility="{Binding IsSettingsWorkspace, ...}"` and `DataContext="{Binding BillingSettings}"` on the same element caused the **Master Catalogue** toolbar and table to remain visible over other workspace tabs; split the Master Catalogue toolbar into two compact rows for clean layout at `1280px+` widths and added an automated XAML regression check.
+
+### Removed
+- Removed `SoapMacroDto.DefaultFee`, `BillingCatalogItemDto.LinkedTreatmentId`, and duplicate hardcoded treatment/preset/fee tables across API and Desktop projects.
+
 ## [0.4.0] - 2026-11-25
 ### Added
 - First-class **Patient Visit Records (`0..N` visits per patient)** with **independent per-visit odontograms** aligned with Malaysia Dental Association (MDA / MDC) and KKM dental record-keeping requirements (`PatientVisitDto`, `CreatePatientVisitRequest`, `UpdatePatientVisitRequest`, `ResetVisitOdontogramRequest`, `VisitsController`, and `OcclusaApiClient` visit endpoints).

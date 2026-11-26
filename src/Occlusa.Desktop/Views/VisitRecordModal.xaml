@@ -405,18 +405,16 @@
                                                Style="{StaticResource UniformSectionTitleTextStyle}"
                                                VerticalAlignment="Center" />
                                     <TextBlock DockPanel.Dock="Right"
-                                               Text="Baseline (RM 0)  ·  Proposed → Accepted → Completed (Visit Billing)"
+                                               Text="Pure Clinical Chart (No Prices)  ·  Baseline · Proposed → Accepted → Completed"
                                                Style="{StaticResource UniformMutedTextStyle}"
                                                VerticalAlignment="Center" />
                                 </DockPanel>
 
                                 <Grid Grid.Row="1" Margin="0,0,0,8">
                                     <Grid.ColumnDefinitions>
-                                        <ColumnDefinition Width="195" />
-                                        <ColumnDefinition Width="10" />
+                                        <ColumnDefinition Width="220" />
+                                        <ColumnDefinition Width="12" />
                                         <ColumnDefinition Width="*" />
-                                        <ColumnDefinition Width="10" />
-                                        <ColumnDefinition Width="135" />
                                     </Grid.ColumnDefinitions>
 
                                     <StackPanel Grid.Column="0">
@@ -427,14 +425,8 @@
                                     </StackPanel>
 
                                     <StackPanel Grid.Column="2">
-                                        <TextBlock Text="Treatment Procedure (Leave blank for Baseline)" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,3" />
+                                        <TextBlock Text="Clinical Procedure Performed / Planned (Leave blank for Baseline)" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,3" />
                                         <TextBox Text="{Binding ProcedureName, UpdateSourceTrigger=PropertyChanged}"
-                                                 Style="{StaticResource UniformInputTextBoxStyle}" />
-                                    </StackPanel>
-
-                                    <StackPanel Grid.Column="4">
-                                        <TextBlock Text="Fee (RM)" Style="{StaticResource UniformLabelTextStyle}" Margin="0,0,0,3" />
-                                        <TextBox Text="{Binding FeeInput, UpdateSourceTrigger=PropertyChanged}"
                                                  Style="{StaticResource UniformInputTextBoxStyle}" />
                                     </StackPanel>
                                 </Grid>
@@ -449,7 +441,7 @@
                                         <ItemsControl.ItemsPanel><ItemsPanelTemplate><WrapPanel Orientation="Horizontal" /></ItemsPanelTemplate></ItemsControl.ItemsPanel>
                                         <ItemsControl.ItemTemplate>
                                             <DataTemplate>
-                                                <Button Content="{Binding}"
+                                                <Button Content="{Binding Name}"
                                                         Command="{Binding DataContext.ApplyProcedurePresetCommand, RelativeSource={RelativeSource AncestorType=Window}}"
                                                         CommandParameter="{Binding}"
                                                         Style="{StaticResource UniformChipButtonStyle}"
@@ -463,7 +455,7 @@
                                             Orientation="Horizontal"
                                             HorizontalAlignment="Right"
                                             VerticalAlignment="Bottom">
-                                    <Button Content="0. Record Baseline (RM 0)"
+                                    <Button Content="0. Record Baseline"
                                             Command="{Binding RecordBaselineToothCommand}"
                                             Style="{StaticResource UniformSecondaryButtonStyle}"
                                             Margin="0,0,8,0" />
@@ -477,7 +469,7 @@
                                             CommandParameter="Accepted"
                                             Style="{StaticResource UniformSecondaryButtonStyle}"
                                             Margin="0,0,8,0" />
-                                    <Button Content="3. Mark Completed (Push to Billing)"
+                                    <Button Content="3. Mark Completed"
                                             Command="{Binding StageAndSaveToothCommand}"
                                             CommandParameter="Completed"
                                             Style="{StaticResource UniformPrimaryButtonStyle}" />
@@ -656,6 +648,10 @@
                         Margin="0,0,8,0" />
                 <Button Content="Save Visit Record"
                         Command="{Binding SaveAllVisitChangesCommand}"
+                        Style="{StaticResource UniformSecondaryButtonStyle}"
+                        Margin="0,0,8,0" />
+                <Button Content="Save &amp; Create Invoice →"
+                        Command="{Binding SaveAndOpenInvoiceCommand}"
                         Style="{StaticResource UniformPrimaryButtonStyle}" />
             </StackPanel>
         </controls:ModalDialogShell.FooterContent>

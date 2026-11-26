@@ -6,7 +6,7 @@ namespace Occlusa.Desktop.Views;
 
 /// <summary>
 /// True modal dialog hosting a single Patient Visit's Kreloses-style Anatomical + 5-Surface
-/// Odontogram (Permanent 11-48 &amp; Primary 51-85) and Clinical SOAP Notes.
+/// Odontogram (Permanent 11-48 &amp; Primary 51-85) and Clinical SOAP Notes (100% free of monetary fields).
 /// </summary>
 public partial class VisitRecordModal : Window
 {
@@ -18,6 +18,7 @@ public partial class VisitRecordModal : Window
         _viewModel = viewModel;
         DataContext = _viewModel;
 
+        _viewModel.CheckoutInvoiceRequested += (_, _) => DialogShell.ForceCloseWithoutPrompt();
         Loaded += async (_, _) => await _viewModel.RefreshVisitFromServerAsync();
     }
 
@@ -36,4 +37,3 @@ public partial class VisitRecordModal : Window
     private void SurfaceCenter_MouseDown(object sender, MouseButtonEventArgs e) =>
         _viewModel.TogglePositionSurfaceCommand.Execute("Center");
 }
-

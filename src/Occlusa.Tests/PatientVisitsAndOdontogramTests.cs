@@ -341,7 +341,7 @@ public class PatientVisitsAndOdontogramTests
     }
 
     [Fact]
-    public async Task VisitScopedInvoiceSync_IncludesSurfaces_AndProtectsSettledHistoricalInvoices()
+    public async Task VisitOdontogramIsStrictlyDecoupledFromInvoices_AndDraftEditsNeverMutateVisitReport()
     {
         var repo = CreateRepository();
         var patient = await RegisterPatientAsync(repo, "Amina binti Razak", "870619-14-5110", "+6019-2211300");
@@ -355,34 +355,73 @@ public class PatientVisitsAndOdontogramTests
         });
         Assert.NotNull(visit1);
 
-        var (_, invoice, chartErr) = await repo.UpdateVisitOdontogramAsync(visit1!.Id, new UpdateOdontogramRequest
+        // 1. Charting Completed procedures on Visit #1 never auto-creates or mutates an invoice
+        var (_, autoInvoice, chartErr) = await repo.UpdateVisitOdontogramAsync(visit1!.Id, new UpdateOdontogramRequest
         {
             BranchId = "HQ-KL",
             ToothNumber = 16,
             Condition = ToothCondition.Filling,
             Surfaces = "do",
-            ProcedureName = "Composite Filling",
-            Fee = 180m,
+            ProcedureName = "Posterior Composite Filling",
+            Fee = 0m,
             Stage = TreatmentStage.Completed,
             DoctorName = "Dr. Aina Rahman"
         });
         Assert.Null(chartErr);
-        Assert.NotNull(invoice);
-        Assert.Equal(visit1.Id, invoice!.VisitId);
-        Assert.Single(invoice.Lines);
-        Assert.Equal("Tooth #16 (OD) - Composite Filling", invoice.Lines[0].ProcedureName);
-        Assert.Equal(180m, invoice.Subtotal);
+        Assert.Null(autoInvoice);
+        Assert.DoesNotContain(await repo.GetInvoicesAsync("HQ-KL"), i => i.PatientId == patient.Id);
 
-        // Settle Visit #1's invoice
-        var (settled, _, payErr) = await repo.ApplyInvoicePaymentAsync(invoice.Id, new ApplyPaymentRequest
+        // 2. Dentist initiates Draft Invoice via Suggestion Engine + SaveInvoiceDraftAsync
+        var hydratedVisit = await repo.GetVisitByIdAsync(visit1.Id);
+        var settings = await repo.GetBillingSettingsAsync();
+        var suggestions = InvoiceSuggestionEngine.BuildSuggestions(hydratedVisit, null, patient, settings);
+        Assert.Single(suggestions.AutoPopulatedLines);
+        Assert.Equal("Tooth #16 (OD) - Posterior Composite Filling", suggestions.AutoPopulatedLines[0].ProcedureName);
+        Assert.Equal(200m, suggestions.AutoPopulatedLines[0].UnitPrice);
+
+        var (draft, _, draftErr) = await repo.SaveInvoiceDraftAsync(new SaveInvoiceDraftRequest
         {
-            Payments = [new PaymentSplitDto { Method = PaymentMethod.QrTransfer, Amount = 180m, ReferenceNo = "DN-9001" }],
+            BranchId = "HQ-KL",
+            PatientId = patient.Id,
+            PatientName = patient.FullName,
+            DoctorName = "Dr. Aina Rahman",
+            VisitId = visit1.Id,
+            Lines = suggestions.AutoPopulatedLines,
+            UpdatedBy = "Dr. Aina Rahman"
+        });
+        Assert.Null(draftErr);
+        Assert.NotNull(draft);
+        Assert.Equal(200m, draft!.Subtotal);
+
+        // 3. Receptionist changes invoice price from RM 200 -> RM 175 at counter; Visit Report stays untouched
+        draft.Lines[0].UnitPrice = 175m;
+        var (editedDraft, _, editErr) = await repo.SaveInvoiceDraftAsync(new SaveInvoiceDraftRequest
+        {
+            InvoiceId = draft.Id,
+            BranchId = "HQ-KL",
+            PatientId = patient.Id,
+            PatientName = patient.FullName,
+            DoctorName = "Dr. Aina Rahman",
+            VisitId = visit1.Id,
+            Lines = draft.Lines,
+            UpdatedBy = "Siti (Reception)"
+        });
+        Assert.Null(editErr);
+        Assert.Equal(175m, editedDraft!.Subtotal);
+
+        var visitAfterCounterEdit = await repo.GetVisitByIdAsync(visit1.Id);
+        Assert.Equal(0m, visitAfterCounterEdit!.Odontogram.Single(t => t.ToothNumber == 16).Fee);
+        Assert.Equal("Posterior Composite Filling", visitAfterCounterEdit.Odontogram.Single(t => t.ToothNumber == 16).ProcedureName);
+
+        // 4. Settle Visit #1's invoice and verify historical edits to Visit #1 never alter settled invoice
+        var (settled, _, payErr) = await repo.ApplyInvoicePaymentAsync(editedDraft.Id, new ApplyPaymentRequest
+        {
+            Payments = [new PaymentSplitDto { Method = PaymentMethod.QrTransfer, Amount = 175m, ReferenceNo = "DN-9001" }],
             CollectedBy = "Siti (Reception)"
         });
         Assert.Null(payErr);
         Assert.Single(settled!.Payments);
 
-        // Edit historical Visit #1 SOAP notes & odontogram after settlement
         var (updatedV1, soapErr) = await repo.UpdatePatientVisitAsync(visit1.Id, new UpdatePatientVisitRequest
         {
             DoctorName = "Dr. Aina Rahman",
@@ -395,26 +434,9 @@ public class PatientVisitsAndOdontogramTests
         Assert.Null(soapErr);
         Assert.Contains("Amended clinical note", updatedV1!.Subjective);
 
-        var (_, lateInvoice, lateErr) = await repo.UpdateVisitOdontogramAsync(visit1.Id, new UpdateOdontogramRequest
-        {
-            BranchId = "HQ-KL",
-            ToothNumber = 15,
-            Condition = ToothCondition.Filling,
-            Surfaces = "o",
-            ProcedureName = "Late Charting Correction",
-            Fee = 150m,
-            Stage = TreatmentStage.Completed,
-            DoctorName = "Dr. Aina Rahman",
-            UpdatedBy = "Dr. Aina Rahman"
-        });
-        Assert.Null(lateErr);
-        Assert.Null(lateInvoice);
-
-        // Settled historical invoice untouched; no duplicate invoice spawned
         var patientInvoices = (await repo.GetInvoicesAsync("HQ-KL")).Where(i => i.PatientId == patient.Id).ToList();
         Assert.Single(patientInvoices);
-        Assert.Equal(180m, patientInvoices[0].Subtotal);
-        Assert.Single(patientInvoices[0].Lines);
+        Assert.Equal(175m, patientInvoices[0].Subtotal);
 
         var audits = await repo.GetAuditLogsAsync("HQ-KL");
         Assert.Contains(audits, a => a.Action == "PATIENT_VISIT_UPDATED" && a.EntityId == visit1.Id.ToString());
@@ -640,6 +662,14 @@ public class PatientVisitsAndOdontogramTests
             {
                 Assert.Contains("ModalDialogShell", content, StringComparison.Ordinal);
             }
+
+            // Guard against WPF DataContext-shadowing bug where Visibility and DataContext sit on the same element
+            Assert.DoesNotMatch(
+                new Regex(@"<[^>]*Visibility=""\{Binding\s+Is\w+Workspace[^>]*DataContext=""\{Binding", RegexOptions.Singleline),
+                content);
+            Assert.DoesNotMatch(
+                new Regex(@"<[^>]*DataContext=""\{Binding[^>]*Visibility=""\{Binding\s+Is\w+Workspace", RegexOptions.Singleline),
+                content);
         }
 
         // Obsolete patient-wide OdontogramModal stays removed
@@ -665,12 +695,22 @@ public class PatientVisitsAndOdontogramTests
         }
         Assert.Contains("React-Advanced-Odontogram", catalogSource, StringComparison.Ordinal);
 
-        // SQL migration 005 includes visit tables, immutability triggers, and RLS
+        // VisitRecordModal must remain 100% free of monetary Fee inputs
+        var visitModalXaml = File.ReadAllText(Path.Combine(desktopRoot, "Views", "VisitRecordModal.xaml"));
+        Assert.DoesNotContain("FeeInput", visitModalXaml, StringComparison.Ordinal);
+        Assert.DoesNotContain("Fee (RM)", visitModalXaml, StringComparison.Ordinal);
+
+        // SQL migration 005 & 006 include visit tables, decoupled billing, credit ledger, settings, immutability triggers, and RLS
         var migrationSql = File.ReadAllText(Path.Combine(repoRoot, "supabase", "migrations", "005_patient_visits_and_visit_odontograms.sql"));
         Assert.Contains("CREATE TABLE IF NOT EXISTS public.patient_visits", migrationSql, StringComparison.Ordinal);
         Assert.Contains("CREATE TABLE IF NOT EXISTS public.visit_odontogram_entries", migrationSql, StringComparison.Ordinal);
         Assert.Contains("prevent_hard_delete()", migrationSql, StringComparison.Ordinal);
         Assert.Contains("ALTER TABLE public.patient_visits ENABLE ROW LEVEL SECURITY", migrationSql, StringComparison.Ordinal);
         Assert.Contains("ALTER TABLE public.visit_odontogram_entries ENABLE ROW LEVEL SECURITY", migrationSql, StringComparison.Ordinal);
+
+        var migration006 = File.ReadAllText(Path.Combine(repoRoot, "supabase", "migrations", "006_decoupled_billing_credits_and_settings.sql"));
+        Assert.Contains("CREATE TABLE IF NOT EXISTS public.patient_credit_ledger", migration006, StringComparison.Ordinal);
+        Assert.Contains("CREATE TABLE IF NOT EXISTS public.billing_catalog_items", migration006, StringComparison.Ordinal);
+        Assert.Contains("CREATE TABLE IF NOT EXISTS public.doctor_invoice_preferences", migration006, StringComparison.Ordinal);
     }
 }

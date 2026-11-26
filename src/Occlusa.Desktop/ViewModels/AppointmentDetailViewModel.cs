@@ -226,6 +226,15 @@ public partial class AppointmentDetailViewModel : ObservableObject
     [ObservableProperty]
     private bool _canActivityNext;
 
+    [ObservableProperty]
+    private string _reminderBadgeText = "Not Reminded";
+
+    [ObservableProperty]
+    private string _reminderSummaryText = "Not Reminded yet";
+
+    [ObservableProperty]
+    private bool _canConfirmReminderQuickly;
+
     public AppointmentDetailViewModel(
         string branchId,
         IReadOnlyList<PatientDto> allPatients,
@@ -284,6 +293,7 @@ public partial class AppointmentDetailViewModel : ObservableObject
         if (existingAppointment != null)
         {
             InitializeFromExisting(existingAppointment);
+            RefreshReminderState(existingAppointment);
         }
         else
         {
@@ -317,6 +327,11 @@ public partial class AppointmentDetailViewModel : ObservableObject
 
     public bool IsEditMode => _existing != null;
     public bool IsWalkInMode => _isWalkInMode;
+    public AppointmentQueueItemDto? ExistingAppointment => _existing;
+    public bool ShowReminderControls =>
+        _existing != null
+        && _existing.VisitType != VisitType.WalkIn
+        && !AppointmentCalendarHelper.IsFinishedQueueStatus(Status);
     public bool HasActivityLog => IsEditMode && _allActivityEntries.Count > 0;
     public bool ShowActivityPaging => IsEditMode && _allActivityEntries.Count > ActivityPageSize;
     public bool CanShowQuickRegisterButton => !IsEditMode && !IsRegisterNewPatientMode && SelectedPatient == null;
@@ -877,6 +892,71 @@ public partial class AppointmentDetailViewModel : ObservableObject
             IsStatusError = true;
             StatusMessage = $"Approval failed: {ex.Message}";
         }
+    }
+
+    public void ApplyReminderUpdated(AppointmentQueueItemDto updated)
+    {
+        if (_existing is null || _existing.Id != updated.Id)
+        {
+            return;
+        }
+
+        _existing.ReminderStatus = updated.ReminderStatus;
+        _existing.ReminderChannel = updated.ReminderChannel;
+        _existing.RemindedAt = updated.RemindedAt;
+        _existing.RemindedBy = updated.RemindedBy;
+        _existing.ReminderConfirmedAt = updated.ReminderConfirmedAt;
+        _existing.ActivityLog = updated.ActivityLog;
+        RefreshReminderState(_existing);
+        _allActivityEntries.Clear();
+        foreach (var entry in _existing.ActivityLog.OrderByDescending(e => e.Timestamp))
+        {
+            _allActivityEntries.Add(new VisitActivityRowVm(entry));
+        }
+        ActivityPage = 1;
+        RefreshPagedActivity();
+        OnPropertyChanged(nameof(HasActivityLog));
+        OnPropertyChanged(nameof(ShowActivityPaging));
+        StatusMessage = $"Reminder updated: {ReminderSummaryText}";
+        IsStatusError = false;
+        _onSaved?.Invoke(updated);
+    }
+
+    [RelayCommand]
+    private async Task QuickConfirmReminderAsync()
+    {
+        if (_existing is null || !CanConfirmReminderQuickly)
+        {
+            return;
+        }
+
+        IsStatusError = false;
+        try
+        {
+            var resp = await _apiClient.UpdateAppointmentReminderAsync(_existing.Id, new UpdateAppointmentReminderRequest
+            {
+                Status = ReminderStatus.Confirmed,
+                Channel = _existing.ReminderChannel == ReminderChannel.None ? ReminderChannel.PhoneCall : _existing.ReminderChannel,
+                SendWhatsAppMessage = false,
+                UpdatedBy = _activeStaffName
+            });
+            ApplyReminderUpdated(resp.Appointment);
+        }
+        catch (Exception ex)
+        {
+            IsStatusError = true;
+            StatusMessage = $"Could not confirm reminder: {ex.Message}";
+        }
+    }
+
+    private void RefreshReminderState(AppointmentQueueItemDto appt)
+    {
+        ReminderBadgeText = AppointmentCalendarHelper.FormatReminderBadgeLabel(appt);
+        ReminderSummaryText = AppointmentCalendarHelper.FormatReminderDetailSummary(appt);
+        CanConfirmReminderQuickly =
+            AppointmentCalendarHelper.IsUpcomingRemindableAppointment(appt)
+            && appt.ReminderStatus != ReminderStatus.Confirmed;
+        OnPropertyChanged(nameof(ShowReminderControls));
     }
 
     [RelayCommand]

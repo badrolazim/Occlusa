@@ -675,12 +675,17 @@ public class PatientVisitsAndOdontogramTests
         // Obsolete patient-wide OdontogramModal stays removed
         Assert.False(File.Exists(Path.Combine(desktopRoot, "Views", "OdontogramModal.xaml")));
 
-        // Clinical surfaces pin MedicalAlertsBanner
+        // Clinical/patient modals pin MedicalAlertsBanner; list workspaces in MainWindow omit it for visual calm
+        Assert.DoesNotContain(
+            "MedicalAlertsBanner",
+            File.ReadAllText(Path.Combine(desktopRoot, "MainWindow.xaml")),
+            StringComparison.Ordinal);
+
         foreach (var clinicalSurface in new[]
         {
-            Path.Combine(desktopRoot, "MainWindow.xaml"),
             Path.Combine(desktopRoot, "Views", "PatientDetailModal.xaml"),
-            Path.Combine(desktopRoot, "Views", "VisitRecordModal.xaml")
+            Path.Combine(desktopRoot, "Views", "VisitRecordModal.xaml"),
+            Path.Combine(desktopRoot, "Views", "AppointmentDetailModal.xaml")
         })
         {
             Assert.True(File.Exists(clinicalSurface), clinicalSurface);
@@ -712,5 +717,10 @@ public class PatientVisitsAndOdontogramTests
         Assert.Contains("CREATE TABLE IF NOT EXISTS public.patient_credit_ledger", migration006, StringComparison.Ordinal);
         Assert.Contains("CREATE TABLE IF NOT EXISTS public.billing_catalog_items", migration006, StringComparison.Ordinal);
         Assert.Contains("CREATE TABLE IF NOT EXISTS public.doctor_invoice_preferences", migration006, StringComparison.Ordinal);
+
+        var migration007 = File.ReadAllText(Path.Combine(repoRoot, "supabase", "migrations", "007_reminders_and_user_preferences.sql"));
+        Assert.Contains("reminder_status", migration007, StringComparison.Ordinal);
+        Assert.Contains("CREATE TABLE IF NOT EXISTS public.user_workspace_preferences", migration007, StringComparison.Ordinal);
+        Assert.Contains("ALTER TABLE public.user_workspace_preferences ENABLE ROW LEVEL SECURITY", migration007, StringComparison.Ordinal);
     }
 }

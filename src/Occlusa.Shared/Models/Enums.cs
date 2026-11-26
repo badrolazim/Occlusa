@@ -169,3 +169,47 @@ public enum OdontogramInitMode
     CarryForward,
     Blank
 }
+
+/// <summary>
+/// Patient appointment reminder outreach and confirmation state.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ReminderStatus
+{
+    NotReminded,
+    Reminded,
+    Confirmed,
+    NoReply
+}
+
+/// <summary>
+/// Communication channel used to remind a patient about an upcoming appointment.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum ReminderChannel
+{
+    None,
+    WhatsApp,
+    PhoneCall,
+    Sms
+}
+
+/// <summary>
+/// Per-user visual density preset for the Live Queue workspace.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum LiveQueueViewMode
+{
+    Simple,
+    Detailed
+}
+
+/// <summary>
+/// Default patient roster scope shown on the Live Queue workspace.
+/// </summary>
+[JsonConverter(typeof(JsonStringEnumConverter))]
+public enum LiveQueueScopeMode
+{
+    MyQueue,
+    AllClinic
+}

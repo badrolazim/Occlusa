@@ -37,6 +37,16 @@ public interface IOcclusaRepository
         RegisterPatientAndAppointmentRequest request,
         CancellationToken ct = default);
     Task<(AppointmentQueueItemDto? Item, string? Error)> UpdateQueueStatusAsync(Guid appointmentId, UpdateQueueStatusRequest request, CancellationToken ct = default);
+    Task<(AppointmentQueueItemDto? Item, string? Error)> UpdateAppointmentReminderAsync(
+        Guid appointmentId,
+        ReminderStatus status,
+        ReminderChannel channel,
+        string actor,
+        CancellationToken ct = default);
+    Task<AppointmentQueueItemDto?> FindUpcomingAppointmentForReminderConfirmationAsync(
+        string? phone,
+        string? name,
+        CancellationToken ct = default);
 
     Task<IReadOnlyList<PatientVisitDto>> GetPatientVisitsAsync(Guid patientId, CancellationToken ct = default);
     Task<PatientVisitDto?> GetVisitByIdAsync(Guid visitId, CancellationToken ct = default);
@@ -84,6 +94,11 @@ public interface IOcclusaRepository
         CancellationToken ct = default);
     Task<(DoctorInvoicePreferenceDto? Preference, string? Error)> SaveDoctorInvoicePreferenceAsync(
         SaveDoctorInvoicePreferenceRequest request,
+        CancellationToken ct = default);
+
+    Task<IReadOnlyList<UserWorkspacePreferencesDto>> GetUserWorkspacePreferencesAsync(CancellationToken ct = default);
+    Task<(UserWorkspacePreferencesDto? Preferences, string? Error)> SaveUserWorkspacePreferencesAsync(
+        SaveUserWorkspacePreferencesRequest request,
         CancellationToken ct = default);
 
     Task<DailySalesReconciliationDto> GetDailySalesSummaryAsync(string branchId, DateOnly date, CancellationToken ct = default);

@@ -26,6 +26,13 @@ public interface IWhatsAppAiReceptionistService
         string messageText,
         string staffName,
         CancellationToken ct = default);
+
+    Task<WhatsAppThreadDto> SendAppointmentReminderAsync(
+        AppointmentQueueItemDto appointment,
+        string patientPhone,
+        string messageText,
+        string staffName,
+        CancellationToken ct = default);
 }
 
 /// <summary>
@@ -117,6 +124,60 @@ public sealed class WhatsAppAiReceptionistService : IWhatsAppAiReceptionistServi
             // GUARDRAIL 2: Complex/surgical procedure blocked from AI auto-booking.
             replyText =
                 "Thank you for reaching out to Occlusa Dental. Surgical, implant, wisdom tooth surgery, braces, sedation, and full-mouth rehabilitation cases require personalized dentist review and cannot be booked automatically here. I have flagged this for our front-desk coordinator to call you back during clinic hours (Mon–Sat, 9:00am–6:00pm).";
+        }
+        else if (AppointmentCalendarHelper.IsReminderConfirmationReply(messageText))
+        {
+            var upcoming = await _repository.FindUpcomingAppointmentForReminderConfirmationAsync(cleanPhone, cleanName, ct);
+            if (upcoming is not null)
+            {
+                var (confirmed, _) = await _repository.UpdateAppointmentReminderAsync(
+                    upcoming.Id,
+                    ReminderStatus.Confirmed,
+                    ReminderChannel.WhatsApp,
+                    "WhatsApp Patient Reply",
+                    ct);
+
+                var targetAppt = confirmed ?? upcoming;
+                await _notifier.NotifyQueueUpdatedAsync(targetAppt, ct);
+                var localSlot = targetAppt.ScheduledAt.ToOffset(MalaysiaOffset);
+                var branchLabel = targetAppt.BranchId == "PJ-SS2" ? "PJ SS2" : "KL Sentral HQ";
+                replyText =
+                    $"Thank you! Your appointment for {targetAppt.ProcedureSummary} with {targetAppt.DoctorName} at {branchLabel} on {localSlot:ddd dd MMM, hh:mm tt} is now Confirmed. Terima kasih, temujanji anda telah disahkan!";
+            }
+            else if (!string.IsNullOrWhiteSpace(_geminiOptions.ApiKey))
+            {
+                var geminiOutcome = await TryProcessWithGeminiAsync(
+                    thread,
+                    targetBranch,
+                    cleanPhone,
+                    cleanName,
+                    messageText ?? string.Empty,
+                    ct);
+                if (geminiOutcome.Success)
+                {
+                    replyText = geminiOutcome.ReplyText;
+                    createdBookingId = geminiOutcome.CreatedBookingId;
+                    if (geminiOutcome.Escalated)
+                    {
+                        setEscalated = true;
+                        emergencyReason = geminiOutcome.EscalationReason;
+                    }
+                }
+                else
+                {
+                    var local = await RunLocalReceptionistEngineAsync(
+                        triage, targetBranch, cleanPhone, cleanName, messageText ?? string.Empty, ct);
+                    replyText = local.ReplyText;
+                    createdBookingId = local.CreatedBookingId;
+                }
+            }
+            else
+            {
+                var local = await RunLocalReceptionistEngineAsync(
+                    triage, targetBranch, cleanPhone, cleanName, messageText ?? string.Empty, ct);
+                replyText = local.ReplyText;
+                createdBookingId = local.CreatedBookingId;
+            }
         }
         else if (!string.IsNullOrWhiteSpace(_geminiOptions.ApiKey))
         {
@@ -221,6 +282,46 @@ public sealed class WhatsAppAiReceptionistService : IWhatsAppAiReceptionistServi
 
         await _notifier.NotifyWhatsAppUpdatedAsync(updated, ct);
         await TrySendMetaCloudMessageAsync(existing.PatientPhone, msg.Text, ct);
+        return updated;
+    }
+
+    public async Task<WhatsAppThreadDto> SendAppointmentReminderAsync(
+        AppointmentQueueItemDto appointment,
+        string patientPhone,
+        string messageText,
+        string staffName,
+        CancellationToken ct = default)
+    {
+        var cleanPhone = string.IsNullOrWhiteSpace(patientPhone) ? "+6012-0000000" : patientPhone.Trim();
+        var cleanName = string.IsNullOrWhiteSpace(appointment.PatientName) ? cleanPhone : appointment.PatientName.Trim();
+        var digits = NormalizeDigits(cleanPhone);
+        var threadId = string.IsNullOrEmpty(digits) ? $"wa-{appointment.PatientId:N}"[..15] : $"wa-{digits}";
+        var senderLabel = string.IsNullOrWhiteSpace(staffName)
+            ? "Staff (Reminder)"
+            : $"Reminder ({staffName.Trim()})";
+
+        var body = string.IsNullOrWhiteSpace(messageText)
+            ? AppointmentCalendarHelper.BuildBilingualReminderMessage(appointment, appointment.BranchId, MalaysiaOffset)
+            : CollapseToSingleBubble(messageText);
+
+        var msg = new WhatsAppMessageDto
+        {
+            Id = Guid.NewGuid(),
+            Sender = senderLabel,
+            Text = body,
+            Timestamp = DateTimeOffset.UtcNow
+        };
+
+        var updated = await _repository.AppendWhatsAppMessageAsync(
+            threadId,
+            appointment.BranchId,
+            cleanPhone,
+            cleanName,
+            msg,
+            ct: ct);
+
+        await _notifier.NotifyWhatsAppUpdatedAsync(updated, ct);
+        await TrySendMetaCloudMessageAsync(cleanPhone, body, ct);
         return updated;
     }
 

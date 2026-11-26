@@ -1,8 +1,10 @@
 using System.Windows;
+using System.Windows.Controls;
 using Occlusa.Desktop.Services;
 using Occlusa.Desktop.ViewModels;
 using Occlusa.Desktop.Views;
 using Occlusa.Shared.Models;
+using Occlusa.Shared.Services;
 
 namespace Occlusa.Desktop;
 
@@ -43,11 +45,12 @@ public partial class MainWindow : Window
             return;
         }
 
-        if (row.Source.Status == QueueStatus.AwaitingCheckout)
+        var normalized = AppointmentCalendarHelper.NormalizeQueueStatus(row.Source.Status);
+        if (normalized == QueueStatus.AwaitingCheckout)
         {
             await OpenCheckoutForQueueItemAsync(row.Source);
         }
-        else if (row.Source.Status == QueueStatus.InChair || row.Source.VisitId.HasValue)
+        else if (normalized is QueueStatus.Waiting or QueueStatus.InChair)
         {
             await OpenVisitForQueueItemAsync(row.Source, this);
         }
@@ -116,6 +119,114 @@ public partial class MainWindow : Window
     private void NewWalkInButton_Click(object sender, RoutedEventArgs e)
     {
         OpenWalkInModal(preselectedPatient: null);
+    }
+
+    private void OpenUserPreferencesButton_Click(object sender, RoutedEventArgs e)
+    {
+        var vm = new UserPreferencesViewModel(
+            _viewModel.SelectedStaffName,
+            _viewModel.ActiveUserPreferences,
+            _viewModel.Dentists,
+            _apiClient,
+            saved => _viewModel.ApplySavedUserPreferences(saved));
+
+        var modal = new UserPreferencesModal(vm)
+        {
+            Owner = this
+        };
+        modal.ShowDialog();
+    }
+
+    private void OpenSelectedQueueReminderButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel.SelectedQueueRow is { } row)
+        {
+            OpenReminderModal(row.Source, owner: this, onUpdated: null);
+        }
+    }
+
+    private async void SmartNextActionButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (_viewModel.SelectedQueueRow is not { } row)
+        {
+            return;
+        }
+
+        var normalized = AppointmentCalendarHelper.NormalizeQueueStatus(row.Source.Status);
+        switch (normalized)
+        {
+            case QueueStatus.AiBookedPending:
+                await _viewModel.ApproveSelectedAiBookingCommand.ExecuteAsync(null);
+                break;
+
+            case QueueStatus.Scheduled:
+                await _viewModel.AdvanceQueueStatusCommand.ExecuteAsync("Waiting");
+                break;
+
+            case QueueStatus.Waiting:
+                await _viewModel.AdvanceQueueStatusCommand.ExecuteAsync("InChair");
+                break;
+
+            case QueueStatus.InChair:
+            case QueueStatus.AwaitingCheckout:
+                await OpenCheckoutForQueueItemAsync(row.Source);
+                break;
+        }
+    }
+
+    private void CompactMyKadButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not Button btn)
+        {
+            return;
+        }
+
+        var menu = new ContextMenu();
+        var readUsb = new MenuItem { Header = "Read Physical USB MyKad" };
+        readUsb.Click += async (_, _) => await _viewModel.ReadPhysicalMyKadCommand.ExecuteAsync(null);
+        menu.Items.Add(readUsb);
+        menu.Items.Add(new Separator());
+
+        for (int i = 0; i < _viewModel.SimulatedProfileNames.Count; i++)
+        {
+            int idx = i;
+            var simItem = new MenuItem { Header = $"Simulate: {_viewModel.SimulatedProfileNames[i]}" };
+            simItem.Click += async (_, _) => await _viewModel.SimulateMyKadByIndexAsync(idx);
+            menu.Items.Add(simItem);
+        }
+
+        menu.PlacementTarget = btn;
+        menu.IsOpen = true;
+    }
+
+    private void OpenReminderModal(
+        AppointmentQueueItemDto appointment,
+        Window? owner,
+        Action<AppointmentQueueItemDto>? onUpdated)
+    {
+        var patient = _viewModel.FindPatient(appointment.PatientId);
+        var vm = new AppointmentReminderViewModel(
+            appointment,
+            patient?.Phone,
+            _apiClient,
+            _viewModel.SelectedStaffName,
+            response =>
+            {
+                _viewModel.MergeAppointment(response.Appointment);
+                if (response.WhatsAppThread is not null)
+                {
+                    _viewModel.MergeWhatsAppThread(response.WhatsAppThread);
+                }
+
+                onUpdated?.Invoke(response.Appointment);
+                _ = _viewModel.RefreshSnapshotAsync();
+            });
+
+        var modal = new AppointmentReminderModal(vm)
+        {
+            Owner = owner ?? this
+        };
+        modal.ShowDialog();
     }
 
     private void OpenSelectedQueuePatientButton_Click(object sender, RoutedEventArgs e)
@@ -279,7 +390,8 @@ public partial class MainWindow : Window
                 {
                     await OpenLatestOrCreateVisitForPatientAsync(patient, modal);
                 }
-            })
+            },
+            (appt, onReminderUpdated) => OpenReminderModal(appt, modal, onReminderUpdated))
         {
             Owner = this
         };

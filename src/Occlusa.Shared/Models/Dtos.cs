@@ -169,6 +169,11 @@ public class AppointmentQueueItemDto
     public bool HasCriticalMedicalAlert { get; set; }
     public string AlertSummary { get; set; } = string.Empty;
     public Guid? VisitId { get; set; }
+    public ReminderStatus ReminderStatus { get; set; } = ReminderStatus.NotReminded;
+    public ReminderChannel ReminderChannel { get; set; } = ReminderChannel.None;
+    public DateTimeOffset? RemindedAt { get; set; }
+    public string RemindedBy { get; set; } = string.Empty;
+    public DateTimeOffset? ReminderConfirmedAt { get; set; }
 
     [JsonIgnore]
     public DateTimeOffset EndsAt => ScheduledAt.AddMinutes(Math.Max(15, DurationMinutes));
@@ -447,6 +452,23 @@ public class ClinicDashboardSnapshotDto
     public List<WhatsAppThreadDto> WhatsAppThreads { get; set; } = new();
     public DailySalesReconciliationDto DailySummary { get; set; } = new();
     public BillingSettingsSnapshotDto BillingSettings { get; set; } = new();
+    public List<UserWorkspacePreferencesDto> UserPreferences { get; set; } = new();
+}
+
+/// <summary>
+/// Per-staff Live Queue and workspace view preferences persisted across clinic workstations.
+/// </summary>
+public class UserWorkspacePreferencesDto
+{
+    public string StaffKey { get; set; } = string.Empty;
+    public string StaffDisplayName { get; set; } = string.Empty;
+    public LiveQueueViewMode QueueViewMode { get; set; } = LiveQueueViewMode.Simple;
+    public LiveQueueScopeMode DefaultQueueScope { get; set; } = LiveQueueScopeMode.AllClinic;
+    public bool HideFinishedQueueRows { get; set; } = true;
+    public bool ShowWaitTimers { get; set; }
+    public bool ShowInlineReceptionNotes { get; set; }
+    public bool ShowMyKadQuickBar { get; set; }
+    public DateTimeOffset UpdatedAt { get; set; } = DateTimeOffset.UtcNow;
 }
 
 /// <summary>
@@ -785,4 +807,33 @@ public class WhatsAppTakeoverReplyRequest
 {
     public string MessageText { get; set; } = string.Empty;
     public string StaffName { get; set; } = string.Empty;
+}
+
+public class UpdateAppointmentReminderRequest
+{
+    public ReminderStatus Status { get; set; } = ReminderStatus.Reminded;
+    public ReminderChannel Channel { get; set; } = ReminderChannel.WhatsApp;
+    public bool SendWhatsAppMessage { get; set; }
+    public string? CustomMessageText { get; set; }
+    public string? UpdatedBy { get; set; }
+}
+
+public class UpdateAppointmentReminderResponse
+{
+    public AppointmentQueueItemDto Appointment { get; set; } = new();
+    public WhatsAppThreadDto? WhatsAppThread { get; set; }
+    public bool WhatsAppMessageSent { get; set; }
+    public string Message { get; set; } = string.Empty;
+}
+
+public class SaveUserWorkspacePreferencesRequest
+{
+    public string StaffKey { get; set; } = string.Empty;
+    public string StaffDisplayName { get; set; } = string.Empty;
+    public LiveQueueViewMode QueueViewMode { get; set; } = LiveQueueViewMode.Simple;
+    public LiveQueueScopeMode DefaultQueueScope { get; set; } = LiveQueueScopeMode.AllClinic;
+    public bool HideFinishedQueueRows { get; set; } = true;
+    public bool ShowWaitTimers { get; set; }
+    public bool ShowInlineReceptionNotes { get; set; }
+    public bool ShowMyKadQuickBar { get; set; }
 }

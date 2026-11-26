@@ -29,7 +29,8 @@
    - Row height (`36px`), header height (`36px`), and footer height (`42px`) fit cleanly within both 1080p and 1440p viewports without overflow.
 
 5. **Clinical Safety & Desktop Modal Discipline**
-   - **Pinned `MedicalAlertsBanner`:** Must stay pinned at the top of the workspace and inside patient/clinical modals whenever a patient record is active, visibly highlighting Allergies, Anticoagulants, Diabetes, Pregnancy, and MyKad IC verification status.
+   - **Pinned `MedicalAlertsBanner`:** Must stay pinned at the top of `PatientDetailModal`, `VisitRecordModal`, and `AppointmentDetailModal` whenever a patient record is open, visibly highlighting Allergies, Anticoagulants, Diabetes, Pregnancy, and MyKad IC verification status. List workspaces (`MainWindow` Live Queue, Patients, Billing, WhatsApp) omit the 62px top banner to prevent row-selection flicker and instead display compact red `[ALERT]` badges with full hover details.
+   - **Simple-by-Default Live Queue + Per-User Detailed View:** Live Queue defaults to a calm 4-column `Simple View` (`EnforceColumnLimit="True"`: `Time`, `Patient`, `Reminder`, `Status`), with an opt-in 5-column `Detailed Operations View` configurable per staff member via `UserPreferencesModal`.
    - **No Browser-Style Back Navigation:** Main navigation uses top-level workspace tabs (`RadioButton` styled with `UniformNavTabRadioStyle`). Detail workflows open in `ShowDialog()` modals wrapped in `ModalDialogShell`—never browser-style Back/Forward page stacks.
    - **`ModalDialogShell` Unsaved-Changes Guard:** Every editable modal binds `HasUnsavedChanges` on `ModalDialogShell`. Attempting to close via `Esc`, `✕`, `Cancel`, or `Alt+F4` prompts `"Save changes?"` (`Yes` / `No` / `Cancel`) before discarding dirty clinical notes or billing edits.
 
@@ -150,8 +151,8 @@ Every `.xaml` file under `src\Occlusa.Desktop\` MUST pass all checks:
 - [ ] Zero occurrences of `HorizontalScrollBarVisibility="Auto"` or `"Visible"`.
 - [ ] Zero occurrences of `<ScrollViewer` without `VerticalScrollBarVisibility="Disabled"` and `HorizontalScrollBarVisibility="Disabled"` (and zero scrollable containers wrapping views/modals).
 - [ ] Zero occurrences of `CharacterEllipsis` or `WordEllipsis`.
-- [ ] Every list/table view uses `UniformPagedGrid` with **3 or 4 columns** and double-click modal opening.
-- [ ] `MedicalAlertsBanner` pinned on top of `MainWindow`, `PatientDetailModal`, and `VisitRecordModal`.
-- [ ] Every modal (`Views\*Modal.xaml`) uses `ModalDialogShell` (`ShowDialog()`), has NO back-navigation buttons, and sets `HasUnsavedChanges` on editable clinical/billing modals (`PatientDetailModal`, `VisitRecordModal`, `AppointmentDetailModal`, `InvoiceCheckoutModal`, `BillingCatalogItemModal`, `TreatmentSuggestionRuleModal`).
+- [ ] Every list/table view uses `UniformPagedGrid` with **3 or 4 columns** (Live Queue defaults to 4-column Simple View; opt-in Detailed View uses 5 compact columns) and double-click modal opening.
+- [ ] `MedicalAlertsBanner` pinned on top of `PatientDetailModal`, `VisitRecordModal`, and `AppointmentDetailModal` (and omitted from `MainWindow` list tabs, which use compact `[ALERT]` row badges).
+- [ ] Every modal (`Views\*Modal.xaml`) uses `ModalDialogShell` (`ShowDialog()`), has NO back-navigation buttons, and sets `HasUnsavedChanges` on editable clinical/billing/preference modals (`PatientDetailModal`, `VisitRecordModal`, `AppointmentDetailModal`, `AppointmentReminderModal`, `UserPreferencesModal`, `InvoiceCheckoutModal`, `BillingCatalogItemModal`, `TreatmentSuggestionRuleModal`).
 - [ ] `VisitRecordModal.xaml` contains zero monetary fee inputs (`FeeInput`, `Fee (RM)`)—clinical charting stays strictly decoupled from invoicing.
 - [ ] Workspace tab containers never combine `Visibility="{Binding Is*Workspace, ...}"` and `DataContext="{Binding ...}"` on the same XAML tag (wrap child `DataContext` containers inside an outer `<Grid Visibility="...">` bound to `MainViewModel`).

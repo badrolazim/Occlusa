@@ -26,6 +26,7 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
     private readonly Dictionary<Guid, InvoiceDto> _invoices = new();
     private readonly Dictionary<Guid, List<PatientCreditEntryDto>> _creditLedger = new();
     private BillingSettingsSnapshotDto _billingSettings = new();
+    private readonly Dictionary<string, UserWorkspacePreferencesDto> _userPreferences = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<(string BranchId, DateOnly Date), DailySalesReconciliationDto> _reconciliations = new();
     private readonly Dictionary<string, (string BranchId, WhatsAppThreadDto Thread)> _whatsAppThreads = new(StringComparer.OrdinalIgnoreCase);
     private readonly List<AuditLogDto> _auditLogs = new();
@@ -116,7 +117,11 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
                 SoapMacros = _soapMacros.Select(CloneMacro).ToList(),
                 WhatsAppThreads = threads,
                 DailySummary = dailySummary,
-                BillingSettings = ClinicDomainHelpers.Clone(_billingSettings)
+                BillingSettings = ClinicDomainHelpers.Clone(_billingSettings),
+                UserPreferences = _userPreferences.Values
+                    .OrderBy(p => p.StaffDisplayName, StringComparer.OrdinalIgnoreCase)
+                    .Select(ClinicDomainHelpers.Clone)
+                    .ToList()
             });
         }
     }
@@ -744,6 +749,80 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
                 item.Status.ToString());
 
             return Task.FromResult<(AppointmentQueueItemDto?, string?)>((ClinicDomainHelpers.Clone(item), null));
+        }
+    }
+
+    public Task<(AppointmentQueueItemDto? Item, string? Error)> UpdateAppointmentReminderAsync(
+        Guid appointmentId,
+        ReminderStatus status,
+        ReminderChannel channel,
+        string actor,
+        CancellationToken ct = default)
+    {
+        var claims = CurrentClaims;
+        lock (_sync)
+        {
+            if (!_appointments.TryGetValue(appointmentId, out var item) || !claims.CanAccessBranch(item.BranchId))
+            {
+                return Task.FromResult<(AppointmentQueueItemDto?, string?)>((null, "Appointment not found."));
+            }
+
+            if (AppointmentCalendarHelper.IsFinishedQueueStatus(item.Status))
+            {
+                return Task.FromResult<(AppointmentQueueItemDto?, string?)>(
+                    (null, "Cannot update reminders for a completed or cancelled appointment."));
+            }
+
+            var oldSummary = $"{item.ReminderStatus} ({item.ReminderChannel})";
+            var effectiveActor = string.IsNullOrWhiteSpace(actor) ? claims.UserId : actor.Trim();
+            ClinicDomainHelpers.ApplyReminderUpdate(item, status, channel, effectiveActor, DateTimeOffset.UtcNow);
+
+            AppendAudit(
+                item.BranchId,
+                effectiveActor,
+                "APPOINTMENT_REMINDER_UPDATED",
+                "Appointment",
+                item.Id.ToString(),
+                oldSummary,
+                $"{item.ReminderStatus} ({item.ReminderChannel})");
+
+            return Task.FromResult<(AppointmentQueueItemDto?, string?)>((ClinicDomainHelpers.Clone(item), null));
+        }
+    }
+
+    public Task<AppointmentQueueItemDto?> FindUpcomingAppointmentForReminderConfirmationAsync(
+        string? phone,
+        string? name,
+        CancellationToken ct = default)
+    {
+        lock (_sync)
+        {
+            var normalizedPhone = NormalizeDigits(phone);
+            var matchedPatientIds = _patients.Values
+                .Where(p =>
+                    (!string.IsNullOrEmpty(normalizedPhone) && NormalizeDigits(p.Phone) == normalizedPhone) ||
+                    (!string.IsNullOrWhiteSpace(name) && string.Equals(p.FullName.Trim(), name.Trim(), StringComparison.OrdinalIgnoreCase)))
+                .Select(p => p.Id)
+                .ToHashSet();
+
+            var now = DateTimeOffset.UtcNow;
+            var windowStart = now.AddHours(-2);
+            var windowEnd = now.AddDays(14);
+
+            var candidates = _appointments.Values
+                .Where(a =>
+                    AppointmentCalendarHelper.IsUpcomingRemindableAppointment(a)
+                    && a.ReminderStatus != ReminderStatus.Confirmed
+                    && a.ScheduledAt >= windowStart
+                    && a.ScheduledAt <= windowEnd
+                    && (matchedPatientIds.Contains(a.PatientId)
+                        || (!string.IsNullOrWhiteSpace(name) && string.Equals(a.PatientName.Trim(), name.Trim(), StringComparison.OrdinalIgnoreCase))))
+                .OrderBy(a => a.ReminderStatus == ReminderStatus.Reminded ? 0 : 1)
+                .ThenBy(a => a.ScheduledAt)
+                .ToList();
+
+            var match = candidates.FirstOrDefault();
+            return Task.FromResult(match is null ? null : ClinicDomainHelpers.Clone(match));
         }
     }
 
@@ -1893,6 +1972,63 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
         }
     }
 
+    public Task<IReadOnlyList<UserWorkspacePreferencesDto>> GetUserWorkspacePreferencesAsync(CancellationToken ct = default)
+    {
+        lock (_sync)
+        {
+            return Task.FromResult<IReadOnlyList<UserWorkspacePreferencesDto>>(
+                _userPreferences.Values
+                    .OrderBy(p => p.StaffDisplayName, StringComparer.OrdinalIgnoreCase)
+                    .Select(ClinicDomainHelpers.Clone)
+                    .ToList());
+        }
+    }
+
+    public Task<(UserWorkspacePreferencesDto? Preferences, string? Error)> SaveUserWorkspacePreferencesAsync(
+        SaveUserWorkspacePreferencesRequest request,
+        CancellationToken ct = default)
+    {
+        var claims = CurrentClaims;
+        lock (_sync)
+        {
+            var displayName = string.IsNullOrWhiteSpace(request.StaffDisplayName)
+                ? request.StaffKey?.Trim() ?? string.Empty
+                : request.StaffDisplayName.Trim();
+            var staffKey = AppointmentCalendarHelper.NormalizeStaffKey(
+                string.IsNullOrWhiteSpace(request.StaffKey) ? displayName : request.StaffKey);
+
+            if (string.IsNullOrWhiteSpace(displayName))
+            {
+                return Task.FromResult<(UserWorkspacePreferencesDto?, string?)>((null, "Staff identity is required."));
+            }
+
+            var saved = new UserWorkspacePreferencesDto
+            {
+                StaffKey = staffKey,
+                StaffDisplayName = displayName,
+                QueueViewMode = request.QueueViewMode,
+                DefaultQueueScope = request.DefaultQueueScope,
+                HideFinishedQueueRows = request.HideFinishedQueueRows,
+                ShowWaitTimers = request.ShowWaitTimers,
+                ShowInlineReceptionNotes = request.ShowInlineReceptionNotes,
+                ShowMyKadQuickBar = request.ShowMyKadQuickBar,
+                UpdatedAt = DateTimeOffset.UtcNow
+            };
+
+            _userPreferences[staffKey] = saved;
+            AppendAudit(
+                _clinicOptions.DefaultBranchId,
+                displayName,
+                "USER_PREFERENCES_SAVED",
+                "UserWorkspacePreferences",
+                staffKey,
+                null,
+                $"Mode={saved.QueueViewMode}; Scope={saved.DefaultQueueScope}; HideDone={saved.HideFinishedQueueRows}; Timers={saved.ShowWaitTimers}");
+
+            return Task.FromResult<(UserWorkspacePreferencesDto?, string?)>((ClinicDomainHelpers.Clone(saved), null));
+        }
+    }
+
     private void RecordCreditEntryLocked(
         Guid patientId,
         string branchId,
@@ -2527,6 +2663,11 @@ public sealed class InMemoryOcclusaRepository : IOcclusaRepository
             visitType: VisitType.Booked, createdBy: "Siti (Reception)");
         var a10 = SeedAppt("30000000-0000-0000-0000-000000000010", "HQ-KL", p10, d1, "Suite 1", LocalSlot(localToday, 14, 0, localOffset), t1, "Routine Checkup", QueueStatus.Scheduled, 30, "On low-dose Aspirin 100mg",
             visitType: VisitType.Booked, createdBy: "Aisyah (Reception)");
+        // Seed varied realistic reminder states across today's upcoming appointments
+        ClinicDomainHelpers.ApplyReminderUpdate(a4, ReminderStatus.Confirmed, ReminderChannel.WhatsApp, "WhatsApp Patient Reply", now.AddHours(-2));
+        ClinicDomainHelpers.ApplyReminderUpdate(a8, ReminderStatus.Reminded, ReminderChannel.WhatsApp, "Siti (Reception)", now.AddHours(-1));
+        ClinicDomainHelpers.ApplyReminderUpdate(a9, ReminderStatus.NoReply, ReminderChannel.PhoneCall, "Aisyah (Reception)", now.AddMinutes(-40));
+        // a6 (AI Pending) & a10 (Scheduled Dr. Aina) remain NotReminded so staff can test 1-click Remind right away.
         var a11 = SeedAppt("30000000-0000-0000-0000-000000000011", "HQ-KL", p11, d3, "Suite 3", LocalSlot(localToday, 15, 0, localOffset), t3, "Simple Filling Review", QueueStatus.Waiting, 30,
             visitType: VisitType.WalkIn, arrivedAt: now.AddMinutes(-35), createdBy: "Siti (Reception)", checkedInBy: "Siti (Reception)");
         var a12 = SeedAppt("30000000-0000-0000-0000-000000000012", "HQ-KL", p1, d1, "Suite 1", LocalSlot(localToday, 16, 0, localOffset), t3, "Posterior Composite Filling (#16)", QueueStatus.Completed, 45,

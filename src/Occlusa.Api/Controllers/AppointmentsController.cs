@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Mvc;
 using Occlusa.Api.Repositories;
 using Occlusa.Api.Services;
 using Occlusa.Shared.Models;
+using Occlusa.Shared.Services;
 
 namespace Occlusa.Api.Controllers;
 
@@ -11,11 +12,16 @@ public sealed class AppointmentsController : ControllerBase
 {
     private readonly IOcclusaRepository _repository;
     private readonly IRealtimeNotifier _notifier;
+    private readonly IWhatsAppAiReceptionistService? _whatsAppService;
 
-    public AppointmentsController(IOcclusaRepository repository, IRealtimeNotifier notifier)
+    public AppointmentsController(
+        IOcclusaRepository repository,
+        IRealtimeNotifier notifier,
+        IWhatsAppAiReceptionistService? whatsAppService = null)
     {
         _repository = repository;
         _notifier = notifier;
+        _whatsAppService = whatsAppService;
     }
 
     [HttpGet("appointments")]
@@ -112,5 +118,68 @@ public sealed class AppointmentsController : ControllerBase
 
         await _notifier.NotifyQueueUpdatedAsync(item!, ct);
         return Ok(item);
+    }
+
+    [HttpPost("appointments/{id:guid}/reminder")]
+    public async Task<ActionResult<UpdateAppointmentReminderResponse>> UpdateAppointmentReminder(
+        Guid id,
+        [FromBody] UpdateAppointmentReminderRequest request,
+        CancellationToken ct = default)
+    {
+        var existing = await _repository.GetAppointmentByIdAsync(id, ct);
+        if (existing is null)
+        {
+            return NotFound("Appointment not found.");
+        }
+
+        if (AppointmentCalendarHelper.IsFinishedQueueStatus(existing.Status))
+        {
+            return BadRequest("Cannot send or update reminders for a completed or cancelled appointment.");
+        }
+
+        var actor = string.IsNullOrWhiteSpace(request.UpdatedBy) ? "Desktop Staff" : request.UpdatedBy.Trim();
+        var effectiveStatus = request.SendWhatsAppMessage ? ReminderStatus.Reminded : request.Status;
+        var effectiveChannel = request.SendWhatsAppMessage ? ReminderChannel.WhatsApp : request.Channel;
+
+        WhatsAppThreadDto? thread = null;
+        bool waSent = false;
+        if (request.SendWhatsAppMessage)
+        {
+            if (_whatsAppService is null)
+            {
+                return BadRequest("WhatsApp reminder service is not configured.");
+            }
+
+            var patient = await _repository.GetPatientByIdAsync(existing.PatientId, ct);
+            var phone = patient?.Phone?.Trim();
+            if (string.IsNullOrWhiteSpace(phone))
+            {
+                return BadRequest("Patient phone number is required to send a WhatsApp reminder.");
+            }
+
+            var messageBody = string.IsNullOrWhiteSpace(request.CustomMessageText)
+                ? AppointmentCalendarHelper.BuildBilingualReminderMessage(existing, existing.BranchId, TimeSpan.FromHours(8))
+                : request.CustomMessageText.Trim();
+
+            thread = await _whatsAppService.SendAppointmentReminderAsync(existing, phone, messageBody, actor, ct);
+            waSent = true;
+        }
+
+        var (updated, error) = await _repository.UpdateAppointmentReminderAsync(id, effectiveStatus, effectiveChannel, actor, ct);
+        if (error is not null || updated is null)
+        {
+            return BadRequest(error ?? "Failed to update appointment reminder.");
+        }
+
+        await _notifier.NotifyQueueUpdatedAsync(updated, ct);
+        return Ok(new UpdateAppointmentReminderResponse
+        {
+            Appointment = updated,
+            WhatsAppThread = thread,
+            WhatsAppMessageSent = waSent,
+            Message = waSent
+                ? $"WhatsApp reminder sent to {updated.PatientName}."
+                : $"Reminder updated to {updated.ReminderStatus} ({updated.ReminderChannel})."
+        });
     }
 }

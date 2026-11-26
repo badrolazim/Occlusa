@@ -864,5 +864,328 @@ public static class AppointmentCalendarHelper
             UpdatedBy = updatedBy
         };
     }
+
+    /// <summary>
+    /// Normalizes a staff name into a stable case-insensitive preference key.
+    /// </summary>
+    public static string NormalizeStaffKey(string? staffName) =>
+        string.IsNullOrWhiteSpace(staffName)
+            ? "default-staff"
+            : string.Join(' ', staffName.Trim().Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries)).ToLowerInvariant();
+
+    /// <summary>
+    /// Returns true if the active staff name matches a practicing dentist profile.
+    /// </summary>
+    public static bool IsDentistStaff(string? staffName, IReadOnlyList<DentistDto>? dentists)
+    {
+        if (string.IsNullOrWhiteSpace(staffName))
+        {
+            return false;
+        }
+
+        var trimmed = staffName.Trim();
+        if (dentists is not null && dentists.Any(d =>
+            string.Equals(d.FullName.Trim(), trimmed, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        return trimmed.StartsWith("Dr.", StringComparison.OrdinalIgnoreCase)
+            || trimmed.StartsWith("Dr ", StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Returns true when an appointment belongs to the specified active dentist staff member.
+    /// </summary>
+    public static bool MatchesDentistStaff(
+        AppointmentQueueItemDto appointment,
+        string? staffName,
+        IReadOnlyList<DentistDto>? dentists)
+    {
+        if (string.IsNullOrWhiteSpace(staffName))
+        {
+            return false;
+        }
+
+        var trimmed = staffName.Trim();
+        var matchedDentist = dentists?.FirstOrDefault(d =>
+            string.Equals(d.FullName.Trim(), trimmed, StringComparison.OrdinalIgnoreCase));
+
+        if (matchedDentist is not null && appointment.DentistId.HasValue)
+        {
+            return appointment.DentistId.Value == matchedDentist.Id;
+        }
+
+        return !string.IsNullOrWhiteSpace(appointment.DoctorName)
+            && string.Equals(appointment.DoctorName.Trim(), trimmed, StringComparison.OrdinalIgnoreCase);
+    }
+
+    /// <summary>
+    /// Builds role-smart default Live Queue preferences for a staff member (Simple View by default).
+    /// </summary>
+    public static UserWorkspacePreferencesDto BuildDefaultUserPreferences(
+        string? staffName,
+        IReadOnlyList<DentistDto>? dentists = null)
+    {
+        var displayName = string.IsNullOrWhiteSpace(staffName) ? "Siti (Reception)" : staffName.Trim();
+        bool isDentist = IsDentistStaff(displayName, dentists);
+        return new UserWorkspacePreferencesDto
+        {
+            StaffKey = NormalizeStaffKey(displayName),
+            StaffDisplayName = displayName,
+            QueueViewMode = LiveQueueViewMode.Simple,
+            DefaultQueueScope = isDentist ? LiveQueueScopeMode.MyQueue : LiveQueueScopeMode.AllClinic,
+            HideFinishedQueueRows = true,
+            ShowWaitTimers = false,
+            ShowInlineReceptionNotes = false,
+            ShowMyKadQuickBar = false,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+    }
+
+    /// <summary>
+    /// Applies a 1-click Simple or Detailed view preset onto a user preferences object.
+    /// </summary>
+    public static void ApplyViewModePreset(
+        UserWorkspacePreferencesDto preferences,
+        LiveQueueViewMode mode,
+        bool isDentist)
+    {
+        preferences.QueueViewMode = mode;
+        if (mode == LiveQueueViewMode.Simple)
+        {
+            preferences.DefaultQueueScope = isDentist ? LiveQueueScopeMode.MyQueue : LiveQueueScopeMode.AllClinic;
+            preferences.HideFinishedQueueRows = true;
+            preferences.ShowWaitTimers = false;
+            preferences.ShowInlineReceptionNotes = false;
+            preferences.ShowMyKadQuickBar = false;
+        }
+        else
+        {
+            preferences.DefaultQueueScope = LiveQueueScopeMode.AllClinic;
+            preferences.HideFinishedQueueRows = false;
+            preferences.ShowWaitTimers = true;
+            preferences.ShowInlineReceptionNotes = true;
+            preferences.ShowMyKadQuickBar = !isDentist;
+        }
+    }
+
+    /// <summary>
+    /// Returns true when an appointment is an upcoming booked/AI slot that can receive reminders.
+    /// </summary>
+    public static bool IsUpcomingRemindableAppointment(AppointmentQueueItemDto appointment)
+    {
+        if (appointment.VisitType == VisitType.WalkIn)
+        {
+            return false;
+        }
+
+        var normalized = NormalizeQueueStatus(appointment.Status);
+        return normalized is QueueStatus.Scheduled or QueueStatus.AiBookedPending;
+    }
+
+    /// <summary>
+    /// Formats the concise Reminder column badge label without text truncation.
+    /// </summary>
+    public static string FormatReminderBadgeLabel(AppointmentQueueItemDto appointment)
+    {
+        if (appointment.VisitType == VisitType.WalkIn)
+        {
+            return "Walk-In";
+        }
+
+        var normalized = NormalizeQueueStatus(appointment.Status);
+        if (normalized is QueueStatus.Waiting or QueueStatus.InChair or QueueStatus.AwaitingCheckout or QueueStatus.Completed)
+        {
+            return "Arrived";
+        }
+
+        if (normalized == QueueStatus.Cancelled)
+        {
+            return "—";
+        }
+
+        return appointment.ReminderStatus switch
+        {
+            ReminderStatus.Confirmed => "✓ Confirmed",
+            ReminderStatus.Reminded => appointment.ReminderChannel switch
+            {
+                ReminderChannel.WhatsApp => "Reminded · WA",
+                ReminderChannel.PhoneCall => "Reminded · Call",
+                ReminderChannel.Sms => "Reminded · SMS",
+                _ => "Reminded"
+            },
+            ReminderStatus.NoReply => "No Reply",
+            _ => "Not Reminded"
+        };
+    }
+
+    /// <summary>
+    /// Formats a clean human-readable reminder description for tooltips and AppointmentDetailModal.
+    /// </summary>
+    public static string FormatReminderDetailSummary(AppointmentQueueItemDto appointment)
+    {
+        if (appointment.VisitType == VisitType.WalkIn)
+        {
+            return "Walk-In (no reminder needed)";
+        }
+
+        var channelLabel = appointment.ReminderChannel switch
+        {
+            ReminderChannel.WhatsApp => "WhatsApp",
+            ReminderChannel.PhoneCall => "Phone Call",
+            ReminderChannel.Sms => "SMS",
+            _ => string.Empty
+        };
+
+        return appointment.ReminderStatus switch
+        {
+            ReminderStatus.Confirmed => appointment.ReminderConfirmedAt.HasValue
+                ? $"Confirmed{(string.IsNullOrEmpty(channelLabel) ? string.Empty : $" via {channelLabel}")} ({appointment.ReminderConfirmedAt.Value.ToLocalTime():dd MMM HH:mm})"
+                : $"Confirmed{(string.IsNullOrEmpty(channelLabel) ? string.Empty : $" via {channelLabel}")}",
+            ReminderStatus.Reminded => appointment.RemindedAt.HasValue
+                ? $"Reminded{(string.IsNullOrEmpty(channelLabel) ? string.Empty : $" via {channelLabel}")} ({appointment.RemindedAt.Value.ToLocalTime():dd MMM HH:mm}{(string.IsNullOrWhiteSpace(appointment.RemindedBy) ? string.Empty : $" by {appointment.RemindedBy}")})"
+                : $"Reminded{(string.IsNullOrEmpty(channelLabel) ? string.Empty : $" via {channelLabel}")}",
+            ReminderStatus.NoReply => appointment.RemindedAt.HasValue
+                ? $"No Reply ({appointment.RemindedAt.Value.ToLocalTime():dd MMM HH:mm})"
+                : "No Reply",
+            _ => "Not Reminded yet"
+        };
+    }
+
+    /// <summary>
+    /// Filters and sorts today's Live Queue rows according to Simple/Detailed scope, doctor filter, status chip, and finished-row visibility.
+    /// </summary>
+    public static IReadOnlyList<AppointmentQueueItemDto> FilterLiveQueue(
+        IEnumerable<AppointmentQueueItemDto> todayItems,
+        LiveQueueScopeMode scope,
+        string? activeStaffName,
+        IReadOnlyList<DentistDto>? dentists,
+        Guid? detailedDoctorId = null,
+        string? detailedDoctorName = null,
+        string? statusChip = null,
+        bool includeFinished = false)
+    {
+        IEnumerable<AppointmentQueueItemDto> query = todayItems;
+
+        if (scope == LiveQueueScopeMode.MyQueue && IsDentistStaff(activeStaffName, dentists))
+        {
+            query = query.Where(a => MatchesDentistStaff(a, activeStaffName, dentists));
+        }
+        else if (detailedDoctorId.HasValue || !string.IsNullOrWhiteSpace(detailedDoctorName))
+        {
+            query = query.Where(a =>
+            {
+                if (detailedDoctorId.HasValue && a.DentistId.HasValue)
+                {
+                    return a.DentistId.Value == detailedDoctorId.Value;
+                }
+
+                return !string.IsNullOrWhiteSpace(detailedDoctorName)
+                    && string.Equals(a.DoctorName.Trim(), detailedDoctorName.Trim(), StringComparison.OrdinalIgnoreCase);
+            });
+        }
+
+        if (!string.IsNullOrWhiteSpace(statusChip) && !string.Equals(statusChip, "All", StringComparison.OrdinalIgnoreCase))
+        {
+            query = statusChip.Trim().ToLowerInvariant() switch
+            {
+                "waiting" => query.Where(a => NormalizeQueueStatus(a.Status) == QueueStatus.Waiting),
+                "inchair" => query.Where(a => a.Status == QueueStatus.InChair),
+                "checkout" => query.Where(a => a.Status == QueueStatus.AwaitingCheckout),
+                "unreminded" => query.Where(a => IsUpcomingRemindableAppointment(a) && a.ReminderStatus is ReminderStatus.NotReminded or ReminderStatus.NoReply),
+                _ => query
+            };
+        }
+
+        if (!includeFinished)
+        {
+            query = query.Where(a => !IsFinishedQueueStatus(a.Status));
+        }
+
+        return SortLiveQueue(query);
+    }
+
+    /// <summary>
+    /// Builds a customizable bilingual (EN/BM) WhatsApp appointment reminder message for Malaysian clinics.
+    /// </summary>
+    public static string BuildBilingualReminderMessage(
+        AppointmentQueueItemDto appointment,
+        string? branchId,
+        TimeSpan localOffset)
+    {
+        var branchLabel = string.Equals(branchId, "PJ-SS2", StringComparison.OrdinalIgnoreCase)
+            ? "Occlusa Dental (PJ SS2)"
+            : "Occlusa Dental (KL Sentral HQ)";
+        var localTime = appointment.ScheduledAt.ToOffset(localOffset);
+        var patientFirst = FormatCompactPatientName(appointment.PatientName);
+        var proc = string.IsNullOrWhiteSpace(appointment.ProcedureSummary)
+            ? "Dental Appointment"
+            : appointment.ProcedureSummary.Trim();
+
+        return $"Hi {patientFirst}, reminder of your {proc} with {appointment.DoctorName} at {branchLabel} on {localTime:ddd dd MMM, hh:mm tt}. Reply YES to confirm. / Peringatan temujanji anda pada {localTime:dd MMM, hh:mm tt}. Balas YA untuk sahkan.";
+    }
+
+    private static readonly string[] ConfirmationRejectTokens =
+    [
+        "no", "not", "cannot", "can't", "cant", "won't", "wont", "cancel", "reschedule",
+        "postpone", "change", "delay", "sorry", "tak", "tidak", "batal", "tukar", "tunda", "maaf"
+    ];
+
+    private static readonly string[] ConfirmationAcceptTokens =
+    [
+        "yes", "ya", "yep", "yeah", "yup", "confirm", "confirmed", "ok", "okay", "oke",
+        "coming", "datang", "hadir", "sahkan", "sah", "baik", "noted", "roger", "sure", "will be there", "see you"
+    ];
+
+    /// <summary>
+    /// Detects concise patient confirmation replies in English or Bahasa Malaysia while rejecting negations/reschedules.
+    /// </summary>
+    public static bool IsReminderConfirmationReply(string? messageText)
+    {
+        if (string.IsNullOrWhiteSpace(messageText))
+        {
+            return false;
+        }
+
+        var normalized = messageText.Trim().ToLowerInvariant();
+        if (normalized.Length > 80)
+        {
+            return false;
+        }
+
+        var words = normalized
+            .Split([' ', '\t', '\r', '\n', ',', '.', '!', '?', ';', ':', '-', '/'], StringSplitOptions.RemoveEmptyEntries);
+
+        if (words.Length == 0)
+        {
+            return false;
+        }
+
+        foreach (var reject in ConfirmationRejectTokens)
+        {
+            if (words.Contains(reject, StringComparer.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
+
+        foreach (var accept in ConfirmationAcceptTokens)
+        {
+            if (accept.Contains(' '))
+            {
+                if (normalized.Contains(accept, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+            else if (words.Contains(accept, StringComparer.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }
 

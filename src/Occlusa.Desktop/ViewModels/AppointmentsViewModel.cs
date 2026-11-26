@@ -1369,7 +1369,8 @@ public partial class AppointmentsViewModel : ObservableObject
             $"{localStart:ddd dd MMM yyyy, HH:mm} – {localEnd:HH:mm} ({appt.DurationMinutes} min)",
             $"Dentist: {appt.DoctorName} · {appt.RoomName}",
             $"Treatment: {appt.ProcedureSummary}",
-            $"Status: {AppointmentCalendarHelper.FormatStatusLabel(appt.Status)}"
+            $"Status: {AppointmentCalendarHelper.FormatStatusLabel(appt.Status)}",
+            $"Reminder: {AppointmentCalendarHelper.FormatReminderDetailSummary(appt)}"
         };
 
         if (appt.ArrivedAt.HasValue)

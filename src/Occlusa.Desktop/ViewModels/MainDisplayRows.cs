@@ -7,8 +7,8 @@ using Occlusa.Shared.Services;
 namespace Occlusa.Desktop.ViewModels;
 
 /// <summary>
-/// Presentation row for the unified Live Queue UniformPagedGrid with separated appointment vs. arrival
-/// times, live wait/chair timers, and status-pill-only color styling.
+/// Presentation row for the Live Queue UniformPagedGrid supporting both Simple (4-column)
+/// and Detailed (5-column) views with reminder badges, optional live wait timers, and explicit tooltips.
 /// </summary>
 public sealed partial class QueueRowItem : ObservableObject
 {
@@ -20,6 +20,14 @@ public sealed partial class QueueRowItem : ObservableObject
     private static readonly StatusPillPalette ScheduledPalette = CreatePalette("#F1F5F9", "#CBD5E1", "#64748B", "#334155");
     private static readonly StatusPillPalette CompletedPalette = CreatePalette("#F0FDF4", "#BBF7D0", "#16A34A", "#166534");
     private static readonly StatusPillPalette CancelledPalette = CreatePalette("#F8FAFC", "#E2E8F0", "#94A3B8", "#64748B");
+
+    private static readonly StatusPillPalette ReminderConfirmedPalette = CreatePalette("#F0FDF4", "#BBF7D0", "#16A34A", "#166534");
+    private static readonly StatusPillPalette ReminderSentPalette = CreatePalette("#EFF6FF", "#BFDBFE", "#2563EB", "#1E40AF");
+    private static readonly StatusPillPalette ReminderNotSentPalette = CreatePalette("#FFFBEB", "#FDE68A", "#D97706", "#92400E");
+    private static readonly StatusPillPalette ReminderNoReplyPalette = CreatePalette("#FEF2F2", "#FECACA", "#DC2626", "#991B1B");
+    private static readonly StatusPillPalette ReminderQuietPalette = CreatePalette("#F8FAFC", "#E2E8F0", "#94A3B8", "#64748B");
+
+    private readonly bool _showWaitTimers;
 
     [ObservableProperty]
     private string _statusDisplay = string.Empty;
@@ -39,36 +47,58 @@ public sealed partial class QueueRowItem : ObservableObject
     [ObservableProperty]
     private string _toolTipText = string.Empty;
 
-    public QueueRowItem(AppointmentQueueItemDto source)
+    public QueueRowItem(
+        AppointmentQueueItemDto source,
+        bool showDoctorInSubline = false,
+        bool showWaitTimers = false,
+        bool showInlineReceptionNotes = false)
     {
         Source = source;
+        _showWaitTimers = showWaitTimers;
         IsWalkIn = source.VisitType == VisitType.WalkIn;
         IsNoAppointment = IsWalkIn;
         ApptTimeDisplay = IsWalkIn
             ? "No Appointment"
             : source.ScheduledAt.ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture);
+        SimpleTimeDisplay = IsWalkIn ? "Walk-In" : ApptTimeDisplay;
 
         if (IsWalkIn)
         {
             var arrived = (source.ArrivedAt ?? source.ScheduledAt).ToLocalTime();
             ArrivalTimeDisplay = $"{arrived:HH:mm} · Walk-In";
+            StackedTimePrimaryDisplay = "Walk-In";
+            StackedTimeSecondaryDisplay = $"Arr {arrived:HH:mm}";
             HasArrivalTime = true;
         }
         else if (source.ArrivedAt.HasValue)
         {
-            ArrivalTimeDisplay = source.ArrivedAt.Value.ToLocalTime().ToString("HH:mm", CultureInfo.InvariantCulture);
+            var arrivedLocal = source.ArrivedAt.Value.ToLocalTime();
+            ArrivalTimeDisplay = arrivedLocal.ToString("HH:mm", CultureInfo.InvariantCulture);
+            StackedTimePrimaryDisplay = ApptTimeDisplay;
+            StackedTimeSecondaryDisplay = $"Arr {arrivedLocal:HH:mm}";
             HasArrivalTime = true;
         }
         else
         {
             ArrivalTimeDisplay = "—";
+            StackedTimePrimaryDisplay = ApptTimeDisplay;
+            StackedTimeSecondaryDisplay = "Upcoming";
             HasArrivalTime = false;
         }
 
         TimeDisplay = IsWalkIn ? ArrivalTimeDisplay : ApptTimeDisplay;
         PatientNameDisplay = source.PatientName;
         ReceptionNoteDisplay = AppointmentCalendarHelper.FormatCompactReceptionNote(source.Notes);
-        HasReceptionNote = !string.IsNullOrWhiteSpace(ReceptionNoteDisplay);
+        HasReceptionNote = showInlineReceptionNotes && !string.IsNullOrWhiteSpace(ReceptionNoteDisplay);
+
+        var compactProc = AppointmentCalendarHelper.FormatCompactTreatment(source.ProcedureSummary, 28);
+        var compactDoc = AppointmentCalendarHelper.FormatCompactDentistName(source.DoctorName);
+        SimplePatientSubline = showDoctorInSubline
+            ? $"{compactDoc} · {compactProc}"
+            : compactProc;
+        DetailedPatientSubline = HasReceptionNote ? ReceptionNoteDisplay : compactProc;
+        HasDetailedPatientSubline = !string.IsNullOrWhiteSpace(DetailedPatientSubline);
+
         HasCriticalAlert = source.HasCriticalMedicalAlert;
         PatientDisplay = HasCriticalAlert
             ? $"{source.PatientName} [ALERT]"
@@ -79,22 +109,51 @@ public sealed partial class QueueRowItem : ObservableObject
         IsFinished = AppointmentCalendarHelper.IsFinishedQueueStatus(source.Status);
         RowContentOpacity = IsFinished ? 0.58 : 1.0;
 
+        // Reminder presentation (prominent for upcoming bookings; calm for arrived/walk-in)
+        ReminderDisplay = AppointmentCalendarHelper.FormatReminderBadgeLabel(source);
+        IsReminderQuiet = !AppointmentCalendarHelper.IsUpcomingRemindableAppointment(source);
+        var reminderPalette = IsReminderQuiet
+            ? ReminderQuietPalette
+            : source.ReminderStatus switch
+            {
+                ReminderStatus.Confirmed => ReminderConfirmedPalette,
+                ReminderStatus.Reminded => ReminderSentPalette,
+                ReminderStatus.NoReply => ReminderNoReplyPalette,
+                _ => ReminderNotSentPalette
+            };
+        ReminderBadgeBackground = reminderPalette.Background;
+        ReminderBadgeBorder = reminderPalette.Border;
+        ReminderDotBrush = reminderPalette.Dot;
+        ReminderBadgeForeground = reminderPalette.Foreground;
+
         RefreshElapsed(DateTimeOffset.Now);
     }
 
     public AppointmentQueueItemDto Source { get; }
     public string TimeDisplay { get; }
+    public string SimpleTimeDisplay { get; }
+    public string StackedTimePrimaryDisplay { get; }
+    public string StackedTimeSecondaryDisplay { get; }
     public string ApptTimeDisplay { get; }
     public bool IsNoAppointment { get; }
     public bool IsWalkIn { get; }
     public string ArrivalTimeDisplay { get; }
     public bool HasArrivalTime { get; }
     public string PatientNameDisplay { get; }
+    public string SimplePatientSubline { get; }
+    public string DetailedPatientSubline { get; }
+    public bool HasDetailedPatientSubline { get; }
     public string ReceptionNoteDisplay { get; }
     public bool HasReceptionNote { get; }
     public bool HasCriticalAlert { get; }
     public string PatientDisplay { get; }
     public string DoctorRoomDisplay { get; }
+    public string ReminderDisplay { get; }
+    public bool IsReminderQuiet { get; }
+    public Brush ReminderBadgeBackground { get; }
+    public Brush ReminderBadgeBorder { get; }
+    public Brush ReminderDotBrush { get; }
+    public Brush ReminderBadgeForeground { get; }
     public bool IsFinished { get; }
     public double RowContentOpacity { get; }
 
@@ -104,19 +163,19 @@ public sealed partial class QueueRowItem : ObservableObject
 
         StatusDisplay = normalized switch
         {
-            QueueStatus.Waiting => FormatWaitingStatus(now),
-            QueueStatus.InChair => FormatInChairStatus(now),
+            QueueStatus.Waiting => _showWaitTimers ? FormatWaitingStatus(now) : "Waiting",
+            QueueStatus.InChair => _showWaitTimers ? FormatInChairStatus(now) : "In Chair",
             QueueStatus.AwaitingCheckout => "Checkout",
             QueueStatus.AiBookedPending => "AI Pending",
             QueueStatus.Scheduled => "Scheduled",
-            QueueStatus.Completed => "Completed",
+            QueueStatus.Completed => "Done",
             QueueStatus.Cancelled => "Cancelled",
             _ => normalized.ToString()
         };
 
         var palette = normalized switch
         {
-            QueueStatus.Waiting => AppointmentCalendarHelper.IsLongWait(Source, now) ? LongWaitPalette : WaitingPalette,
+            QueueStatus.Waiting => (_showWaitTimers && AppointmentCalendarHelper.IsLongWait(Source, now)) ? LongWaitPalette : WaitingPalette,
             QueueStatus.InChair => InChairPalette,
             QueueStatus.AwaitingCheckout => CheckoutPalette,
             QueueStatus.AiBookedPending => AiPendingPalette,
@@ -152,7 +211,8 @@ public sealed partial class QueueRowItem : ObservableObject
             $"Visit: {(IsWalkIn ? "Walk-In (No Appointment)" : Source.VisitType == VisitType.AiBooked ? "WhatsApp AI Booking" : "Scheduled Appointment")}",
             $"Treatment: {Source.ProcedureSummary} ({Source.DurationMinutes} min)",
             $"Clinician: {DoctorRoomDisplay}",
-            $"Status: {StatusDisplay}"
+            $"Status: {StatusDisplay}",
+            $"Reminder: {AppointmentCalendarHelper.FormatReminderDetailSummary(Source)}"
         };
 
         if (!IsWalkIn)
@@ -206,7 +266,13 @@ public sealed partial class QueueRowItem : ObservableObject
             lines.Add($"Staff Trail: {string.Join(" → ", attribution)}");
         }
 
-        lines.Add("Double-click to open Visit Details (or Odontogram if In Chair)");
+        string doubleClickTarget = normalized switch
+        {
+            QueueStatus.AwaitingCheckout => "Double-click to open Invoice Checkout",
+            QueueStatus.Waiting or QueueStatus.InChair => "Double-click to open Clinical Chart",
+            _ => "Double-click to open Appointment Info"
+        };
+        lines.Add(doubleClickTarget);
         return string.Join(Environment.NewLine, lines);
     }
 

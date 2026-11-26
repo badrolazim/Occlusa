@@ -438,6 +438,33 @@ public sealed class OcclusaApiClient : IAsyncDisposable
             return await ReadRequiredAsync<AppointmentQueueItemDto>(resp, token);
         }, ct);
 
+    public Task<UpdateAppointmentReminderResponse> UpdateAppointmentReminderAsync(
+        Guid appointmentId,
+        UpdateAppointmentReminderRequest request,
+        CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(async (http, token) =>
+        {
+            var resp = await http.PostAsJsonAsync($"/api/appointments/{appointmentId}/reminder", request, JsonOptions, token);
+            return await ReadRequiredAsync<UpdateAppointmentReminderResponse>(resp, token);
+        }, ct);
+
+    public Task<List<UserWorkspacePreferencesDto>> GetUserWorkspacePreferencesAsync(CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(
+            async (http, token) => await http.GetFromJsonAsync<List<UserWorkspacePreferencesDto>>(
+                "/api/user-preferences",
+                JsonOptions,
+                token) ?? new(),
+            ct);
+
+    public Task<UserWorkspacePreferencesDto> SaveUserWorkspacePreferencesAsync(
+        SaveUserWorkspacePreferencesRequest request,
+        CancellationToken ct = default) =>
+        ExecuteWithRecoveryAsync(async (http, token) =>
+        {
+            var resp = await http.PutAsJsonAsync("/api/user-preferences", request, JsonOptions, token);
+            return await ReadRequiredAsync<UserWorkspacePreferencesDto>(resp, token);
+        }, ct);
+
     public Task<List<PatientVisitDto>> GetPatientVisitsAsync(Guid patientId, CancellationToken ct = default) =>
         ExecuteWithRecoveryAsync(
             async (http, token) => await http.GetFromJsonAsync<List<PatientVisitDto>>(

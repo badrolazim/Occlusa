@@ -489,15 +489,61 @@
                                 </StackPanel>
                             </StackPanel>
 
-                            <!-- Appointment Status -->
-                            <StackPanel Grid.Row="2" Margin="0,0,0,10">
-                                <TextBlock Text="Appointment Status"
-                                           Style="{StaticResource UniformLabelTextStyle}"
-                                           Margin="0,0,0,3" />
-                                <ComboBox ItemsSource="{Binding AvailableStatuses}"
-                                          SelectedItem="{Binding Status, Mode=TwoWay}"
-                                          Style="{StaticResource UniformComboBoxStyle}" />
-                            </StackPanel>
+                            <!-- Appointment Status & Inline Reminder Controls (Zero Extra Height) -->
+                            <Grid Grid.Row="2" Margin="0,0,0,10">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
+                                <StackPanel Grid.Column="0">
+                                    <TextBlock Text="Appointment Status"
+                                               Style="{StaticResource UniformLabelTextStyle}"
+                                               Margin="0,0,0,3" />
+                                    <ComboBox ItemsSource="{Binding AvailableStatuses}"
+                                              SelectedItem="{Binding Status, Mode=TwoWay}"
+                                              Style="{StaticResource UniformComboBoxStyle}" />
+                                </StackPanel>
+
+                                <StackPanel Grid.Column="1"
+                                            Margin="10,0,0,0"
+                                            Visibility="{Binding ShowReminderControls, Converter={StaticResource BoolToVisibilityConverter}}">
+                                    <TextBlock Text="Appointment Reminder"
+                                               Style="{StaticResource UniformLabelTextStyle}"
+                                               Margin="0,0,0,3" />
+                                    <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                        <Border Background="{StaticResource SurfaceSubtleBrush}"
+                                                BorderBrush="{StaticResource BorderStrongBrush}"
+                                                BorderThickness="1"
+                                                CornerRadius="5"
+                                                Height="32"
+                                                Padding="9,0"
+                                                Margin="0,0,6,0"
+                                                ToolTip="{Binding ReminderSummaryText}">
+                                            <TextBlock Text="{Binding ReminderBadgeText}"
+                                                       FontSize="11.5"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{StaticResource TextPrimaryBrush}"
+                                                       VerticalAlignment="Center"
+                                                       TextTrimming="None" />
+                                        </Border>
+                                        <Button Content="Remind..."
+                                                Click="OpenReminderButton_Click"
+                                                Style="{StaticResource UniformSecondaryButtonStyle}"
+                                                Height="32"
+                                                Padding="10,0"
+                                                FontSize="11.5"
+                                                Margin="0,0,6,0" />
+                                        <Button Content="✓ Confirm"
+                                                Command="{Binding QuickConfirmReminderCommand}"
+                                                Visibility="{Binding CanConfirmReminderQuickly, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                Style="{StaticResource UniformPrimaryButtonStyle}"
+                                                Height="32"
+                                                Padding="10,0"
+                                                FontSize="11.5" />
+                                    </StackPanel>
+                                </StackPanel>
+                            </Grid>
 
                             <!-- Reception Note -->
                             <Grid Grid.Row="3">
@@ -614,12 +660,12 @@
 
         <controls:ModalDialogShell.FooterContent>
             <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                <Button Content="Patient Chart"
+                <Button Content="Patient Profile"
                         Click="OpenPatientChartButton_Click"
                         Visibility="{Binding IsEditMode, Converter={StaticResource BoolToVisibilityConverter}}"
                         Style="{StaticResource UniformSecondaryButtonStyle}"
                         Margin="0,0,8,0" />
-                <Button Content="Odontogram"
+                <Button Content="Clinical Chart"
                         Click="OpenOdontogramButton_Click"
                         Visibility="{Binding IsEditMode, Converter={StaticResource BoolToVisibilityConverter}}"
                         Style="{StaticResource UniformSecondaryButtonStyle}"

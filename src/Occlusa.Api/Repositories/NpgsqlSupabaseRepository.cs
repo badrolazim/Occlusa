@@ -73,6 +73,7 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
         var macros = await GetSoapMacrosAsync(ct);
         var threads = await GetWhatsAppThreadsAsync(branch, ct);
         var billingSettings = await GetBillingSettingsAsync(ct);
+        var userPreferences = await GetUserWorkspacePreferencesAsync(ct);
         var summary = BillingCalculator.CalculateDailySalesReconciliation(branch, today, invoices, _claimsContext.UserId);
 
         return new ClinicDashboardSnapshotDto
@@ -88,7 +89,8 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
             SoapMacros = macros.ToList(),
             WhatsAppThreads = threads.ToList(),
             DailySummary = summary,
-            BillingSettings = billingSettings
+            BillingSettings = billingSettings,
+            UserPreferences = userPreferences.ToList()
         };
     }
 
@@ -448,7 +450,9 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
                        notes, status, has_critical_medical_alert, alert_summary,
                        visit_type, arrived_at, seated_at, checkout_at, completed_at,
                        created_by, checked_in_by, seated_by, checkout_by, completed_by,
-                       last_updated_by, updated_at, activity_log, visit_id
+                       last_updated_by, updated_at, activity_log, visit_id,
+                       COALESCE(reminder_status, 'NotReminded'), COALESCE(reminder_channel, 'None'),
+                       reminded_at, COALESCE(reminded_by, ''), reminder_confirmed_at
                 FROM public.appointments
                 WHERE is_deleted = FALSE
                   AND (@branchId IS NULL OR branch_id = @branchId)
@@ -865,6 +869,258 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
             var updated = (await GetAppointmentInternalAsync(conn, tx, appointmentId, ct))!;
             await tx.CommitAsync(ct);
             return (updated, null);
+        }
+    }
+
+    public async Task<(AppointmentQueueItemDto? Item, string? Error)> UpdateAppointmentReminderAsync(
+        Guid appointmentId,
+        ReminderStatus status,
+        ReminderChannel channel,
+        string actor,
+        CancellationToken ct = default)
+    {
+        var (conn, tx) = await OpenScopedTransactionAsync(ct);
+        await using (conn)
+        await using (tx)
+        {
+            var existing = await GetAppointmentInternalAsync(conn, tx, appointmentId, ct);
+            if (existing is null)
+            {
+                return (null, "Appointment not found.");
+            }
+
+            if (AppointmentCalendarHelper.IsFinishedQueueStatus(existing.Status))
+            {
+                return (null, "Cannot update reminders for a completed or cancelled appointment.");
+            }
+
+            var oldSummary = $"{existing.ReminderStatus} ({existing.ReminderChannel})";
+            var effectiveActor = string.IsNullOrWhiteSpace(actor) ? _claimsContext.UserId : actor.Trim();
+            var now = DateTimeOffset.UtcNow;
+            ClinicDomainHelpers.ApplyReminderUpdate(existing, status, channel, effectiveActor, now);
+
+            const string sql = """
+                UPDATE public.appointments
+                SET reminder_status = @reminderStatus,
+                    reminder_channel = @reminderChannel,
+                    reminded_at = @remindedAt,
+                    reminded_by = @remindedBy,
+                    reminder_confirmed_at = @reminderConfirmedAt,
+                    last_updated_by = @lastUpdatedBy,
+                    activity_log = @activityLog,
+                    updated_at = @updatedAt
+                WHERE id = @id;
+                """;
+
+            await using (var cmd = new NpgsqlCommand(sql, conn, tx))
+            {
+                cmd.Parameters.AddWithValue("reminderStatus", existing.ReminderStatus.ToString());
+                cmd.Parameters.AddWithValue("reminderChannel", existing.ReminderChannel.ToString());
+                cmd.Parameters.AddWithValue("remindedAt", (object?)existing.RemindedAt ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("remindedBy", existing.RemindedBy);
+                cmd.Parameters.AddWithValue("reminderConfirmedAt", (object?)existing.ReminderConfirmedAt ?? DBNull.Value);
+                cmd.Parameters.AddWithValue("lastUpdatedBy", existing.LastUpdatedBy);
+                cmd.Parameters.Add(new NpgsqlParameter("activityLog", NpgsqlDbType.Jsonb)
+                {
+                    Value = JsonSerializer.Serialize(existing.ActivityLog, ActivityJsonOptions)
+                });
+                cmd.Parameters.AddWithValue("updatedAt", now);
+                cmd.Parameters.AddWithValue("id", appointmentId);
+                await cmd.ExecuteNonQueryAsync(ct);
+            }
+
+            await InsertAuditLogInternalAsync(
+                conn,
+                tx,
+                existing.BranchId,
+                "APPOINTMENT_REMINDER_UPDATED",
+                "Appointment",
+                appointmentId.ToString(),
+                oldSummary,
+                $"{existing.ReminderStatus} ({existing.ReminderChannel})",
+                ct,
+                effectiveActor);
+
+            var updated = (await GetAppointmentInternalAsync(conn, tx, appointmentId, ct))!;
+            await tx.CommitAsync(ct);
+            return (updated, null);
+        }
+    }
+
+    public async Task<AppointmentQueueItemDto?> FindUpcomingAppointmentForReminderConfirmationAsync(
+        string? phone,
+        string? name,
+        CancellationToken ct = default)
+    {
+        var (conn, tx) = await OpenScopedTransactionAsync(ct);
+        await using (conn)
+        await using (tx)
+        {
+            var digits = string.IsNullOrWhiteSpace(phone) ? null : new string(phone.Where(char.IsAsciiDigit).ToArray());
+            var now = DateTimeOffset.UtcNow;
+
+            const string sql = """
+                SELECT a.id, a.branch_id, a.patient_id, a.patient_name, a.patient_ic, a.dentist_id, a.doctor_name,
+                       a.treatment_id, a.room_name, a.scheduled_at, a.duration_minutes, a.procedure_summary,
+                       a.notes, a.status, a.has_critical_medical_alert, a.alert_summary,
+                       a.visit_type, a.arrived_at, a.seated_at, a.checkout_at, a.completed_at,
+                       a.created_by, a.checked_in_by, a.seated_by, a.checkout_by, a.completed_by,
+                       a.last_updated_by, a.updated_at, a.activity_log, a.visit_id,
+                       COALESCE(a.reminder_status, 'NotReminded'), COALESCE(a.reminder_channel, 'None'),
+                       a.reminded_at, COALESCE(a.reminded_by, ''), a.reminder_confirmed_at
+                FROM public.appointments a
+                LEFT JOIN public.patients p ON p.id = a.patient_id
+                WHERE a.is_deleted = FALSE
+                  AND a.visit_type <> 'WalkIn'
+                  AND a.status IN ('Scheduled', 'AiBookedPending')
+                  AND COALESCE(a.reminder_status, 'NotReminded') <> 'Confirmed'
+                  AND a.scheduled_at BETWEEN @windowStart AND @windowEnd
+                  AND (
+                    (@phone IS NOT NULL AND regexp_replace(COALESCE(p.phone, ''), '\D', '', 'g') = @phone)
+                    OR (@name IS NOT NULL AND LOWER(a.patient_name) = LOWER(@name))
+                  )
+                ORDER BY CASE WHEN COALESCE(a.reminder_status, 'NotReminded') = 'Reminded' THEN 0 ELSE 1 END,
+                         a.scheduled_at ASC
+                LIMIT 1;
+                """;
+
+            await using var cmd = new NpgsqlCommand(sql, conn, tx);
+            cmd.Parameters.AddWithValue("windowStart", now.AddHours(-2));
+            cmd.Parameters.AddWithValue("windowEnd", now.AddDays(14));
+            cmd.Parameters.AddWithValue("phone", string.IsNullOrEmpty(digits) ? DBNull.Value : digits);
+            cmd.Parameters.AddWithValue("name", string.IsNullOrWhiteSpace(name) ? DBNull.Value : name.Trim());
+
+            AppointmentQueueItemDto? result = null;
+            await using (var reader = await cmd.ExecuteReaderAsync(ct))
+            {
+                if (await reader.ReadAsync(ct))
+                {
+                    result = ReadAppointment(reader);
+                }
+            }
+
+            await tx.CommitAsync(ct);
+            return result;
+        }
+    }
+
+    public async Task<IReadOnlyList<UserWorkspacePreferencesDto>> GetUserWorkspacePreferencesAsync(CancellationToken ct = default)
+    {
+        var (conn, tx) = await OpenScopedTransactionAsync(ct);
+        await using (conn)
+        await using (tx)
+        {
+            const string sql = """
+                SELECT staff_key, staff_display_name, queue_view_mode, default_queue_scope,
+                       hide_finished_queue_rows, show_wait_timers, show_inline_reception_notes,
+                       show_mykad_quick_bar, updated_at
+                FROM public.user_workspace_preferences
+                ORDER BY staff_display_name ASC;
+                """;
+
+            var list = new List<UserWorkspacePreferencesDto>();
+            await using var cmd = new NpgsqlCommand(sql, conn, tx);
+            await using var reader = await cmd.ExecuteReaderAsync(ct);
+            while (await reader.ReadAsync(ct))
+            {
+                list.Add(new UserWorkspacePreferencesDto
+                {
+                    StaffKey = reader.GetString(0),
+                    StaffDisplayName = reader.GetString(1),
+                    QueueViewMode = Enum.TryParse<LiveQueueViewMode>(reader.GetString(2), out var vm) ? vm : LiveQueueViewMode.Simple,
+                    DefaultQueueScope = Enum.TryParse<LiveQueueScopeMode>(reader.GetString(3), out var sc) ? sc : LiveQueueScopeMode.AllClinic,
+                    HideFinishedQueueRows = reader.GetBoolean(4),
+                    ShowWaitTimers = reader.GetBoolean(5),
+                    ShowInlineReceptionNotes = reader.GetBoolean(6),
+                    ShowMyKadQuickBar = reader.GetBoolean(7),
+                    UpdatedAt = reader.GetFieldValue<DateTimeOffset>(8)
+                });
+            }
+
+            await tx.CommitAsync(ct);
+            return list;
+        }
+    }
+
+    public async Task<(UserWorkspacePreferencesDto? Preferences, string? Error)> SaveUserWorkspacePreferencesAsync(
+        SaveUserWorkspacePreferencesRequest request,
+        CancellationToken ct = default)
+    {
+        var displayName = string.IsNullOrWhiteSpace(request.StaffDisplayName)
+            ? request.StaffKey?.Trim() ?? string.Empty
+            : request.StaffDisplayName.Trim();
+        var staffKey = AppointmentCalendarHelper.NormalizeStaffKey(
+            string.IsNullOrWhiteSpace(request.StaffKey) ? displayName : request.StaffKey);
+
+        if (string.IsNullOrWhiteSpace(displayName))
+        {
+            return (null, "Staff identity is required.");
+        }
+
+        var (conn, tx) = await OpenScopedTransactionAsync(ct);
+        await using (conn)
+        await using (tx)
+        {
+            var now = DateTimeOffset.UtcNow;
+            const string sql = """
+                INSERT INTO public.user_workspace_preferences
+                    (clinic_group_id, staff_key, staff_display_name, queue_view_mode, default_queue_scope,
+                     hide_finished_queue_rows, show_wait_timers, show_inline_reception_notes,
+                     show_mykad_quick_bar, updated_at)
+                VALUES
+                    (@groupId, @staffKey, @displayName, @viewMode, @scope,
+                     @hideDone, @waitTimers, @inlineNotes, @myKadBar, @updatedAt)
+                ON CONFLICT (clinic_group_id, LOWER(staff_key)) DO UPDATE SET
+                    staff_display_name = EXCLUDED.staff_display_name,
+                    queue_view_mode = EXCLUDED.queue_view_mode,
+                    default_queue_scope = EXCLUDED.default_queue_scope,
+                    hide_finished_queue_rows = EXCLUDED.hide_finished_queue_rows,
+                    show_wait_timers = EXCLUDED.show_wait_timers,
+                    show_inline_reception_notes = EXCLUDED.show_inline_reception_notes,
+                    show_mykad_quick_bar = EXCLUDED.show_mykad_quick_bar,
+                    updated_at = EXCLUDED.updated_at;
+                """;
+
+            await using (var cmd = new NpgsqlCommand(sql, conn, tx))
+            {
+                cmd.Parameters.AddWithValue("groupId", _claimsContext.ClinicGroupId);
+                cmd.Parameters.AddWithValue("staffKey", staffKey);
+                cmd.Parameters.AddWithValue("displayName", displayName);
+                cmd.Parameters.AddWithValue("viewMode", request.QueueViewMode.ToString());
+                cmd.Parameters.AddWithValue("scope", request.DefaultQueueScope.ToString());
+                cmd.Parameters.AddWithValue("hideDone", request.HideFinishedQueueRows);
+                cmd.Parameters.AddWithValue("waitTimers", request.ShowWaitTimers);
+                cmd.Parameters.AddWithValue("inlineNotes", request.ShowInlineReceptionNotes);
+                cmd.Parameters.AddWithValue("myKadBar", request.ShowMyKadQuickBar);
+                cmd.Parameters.AddWithValue("updatedAt", now);
+                await cmd.ExecuteNonQueryAsync(ct);
+            }
+
+            await InsertAuditLogInternalAsync(
+                conn,
+                tx,
+                _clinicOptions.DefaultBranchId,
+                "USER_PREFERENCES_SAVED",
+                "UserWorkspacePreferences",
+                staffKey,
+                null,
+                $"Mode={request.QueueViewMode}; Scope={request.DefaultQueueScope}; HideDone={request.HideFinishedQueueRows}",
+                ct,
+                displayName);
+
+            await tx.CommitAsync(ct);
+            return (new UserWorkspacePreferencesDto
+            {
+                StaffKey = staffKey,
+                StaffDisplayName = displayName,
+                QueueViewMode = request.QueueViewMode,
+                DefaultQueueScope = request.DefaultQueueScope,
+                HideFinishedQueueRows = request.HideFinishedQueueRows,
+                ShowWaitTimers = request.ShowWaitTimers,
+                ShowInlineReceptionNotes = request.ShowInlineReceptionNotes,
+                ShowMyKadQuickBar = request.ShowMyKadQuickBar,
+                UpdatedAt = now
+            }, null);
         }
     }
 
@@ -2774,7 +3030,9 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
                    notes, status, has_critical_medical_alert, alert_summary,
                    visit_type, arrived_at, seated_at, checkout_at, completed_at,
                    created_by, checked_in_by, seated_by, checkout_by, completed_by,
-                   last_updated_by, updated_at, activity_log, visit_id
+                   last_updated_by, updated_at, activity_log, visit_id,
+                   COALESCE(reminder_status, 'NotReminded'), COALESCE(reminder_channel, 'None'),
+                   reminded_at, COALESCE(reminded_by, ''), reminder_confirmed_at
             FROM public.appointments
             WHERE id = @id AND is_deleted = FALSE;
             """;
@@ -3636,7 +3894,16 @@ public sealed class NpgsqlSupabaseRepository : IOcclusaRepository
             LastUpdatedBy = reader.IsDBNull(26) ? string.Empty : reader.GetString(26),
             LastUpdatedAt = reader.IsDBNull(27) ? null : reader.GetFieldValue<DateTimeOffset>(27),
             ActivityLog = activity,
-            VisitId = reader.FieldCount > 29 && !reader.IsDBNull(29) ? reader.GetGuid(29) : null
+            VisitId = reader.FieldCount > 29 && !reader.IsDBNull(29) ? reader.GetGuid(29) : null,
+            ReminderStatus = reader.FieldCount > 30 && !reader.IsDBNull(30) && Enum.TryParse<ReminderStatus>(reader.GetString(30), out var remStatus)
+                ? remStatus
+                : ReminderStatus.NotReminded,
+            ReminderChannel = reader.FieldCount > 31 && !reader.IsDBNull(31) && Enum.TryParse<ReminderChannel>(reader.GetString(31), out var remChannel)
+                ? remChannel
+                : ReminderChannel.None,
+            RemindedAt = reader.FieldCount > 32 && !reader.IsDBNull(32) ? reader.GetFieldValue<DateTimeOffset>(32) : null,
+            RemindedBy = reader.FieldCount > 33 && !reader.IsDBNull(33) ? reader.GetString(33) : string.Empty,
+            ReminderConfirmedAt = reader.FieldCount > 34 && !reader.IsDBNull(34) ? reader.GetFieldValue<DateTimeOffset>(34) : null
         };
     }
 }

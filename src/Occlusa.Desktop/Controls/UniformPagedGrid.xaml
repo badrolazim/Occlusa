@@ -56,6 +56,12 @@
             <Setter Property="MinHeight" Value="36" />
         </Style>
 
+        <Style x:Key="UniformSpacedAutoHeightDataGridRowStyle" TargetType="DataGridRow" BasedOn="{StaticResource UniformAutoHeightDataGridRowStyle}">
+            <Setter Property="Margin" Value="0,2,0,2" />
+            <Setter Property="BorderBrush" Value="#E2E8F0" />
+            <Setter Property="BorderThickness" Value="0,1,0,1" />
+        </Style>
+
         <Style x:Key="UniformDataGridCellStyle" TargetType="DataGridCell">
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="FocusVisualStyle" Value="{x:Null}" />
@@ -90,23 +96,44 @@
                     BorderThickness="0,0,0,1"
                     CornerRadius="8,8,0,0"
                     Padding="14,9">
-                <DockPanel LastChildFill="False">
-                    <TextBlock DockPanel.Dock="Left"
-                               Text="{Binding Title, ElementName=RootGridControl}"
-                               FontFamily="Segoe UI"
-                               FontSize="13.5"
-                               FontWeight="SemiBold"
-                               Foreground="#0F172A"
-                               VerticalAlignment="Center"
-                               TextTrimming="None" />
-                    <TextBlock DockPanel.Dock="Right"
-                               Text="{Binding Subtitle, ElementName=RootGridControl}"
-                               FontFamily="Segoe UI"
-                               FontSize="11.5"
-                               Foreground="#64748B"
-                               VerticalAlignment="Center"
-                               TextTrimming="None" />
-                </DockPanel>
+                <Grid>
+                    <!-- Single-line header for full-width stretched tables -->
+                    <DockPanel LastChildFill="False"
+                               Visibility="{Binding IsHeaderHorizontal, ElementName=RootGridControl, Converter={StaticResource BoolToVis}}">
+                        <TextBlock DockPanel.Dock="Left"
+                                   Text="{Binding Title, ElementName=RootGridControl}"
+                                   FontFamily="Segoe UI"
+                                   FontSize="13.5"
+                                   FontWeight="SemiBold"
+                                   Foreground="#0F172A"
+                                   VerticalAlignment="Center"
+                                   TextTrimming="None" />
+                        <TextBlock DockPanel.Dock="Right"
+                                   Text="{Binding Subtitle, ElementName=RootGridControl}"
+                                   FontFamily="Segoe UI"
+                                   FontSize="11.5"
+                                   Foreground="#64748B"
+                                   VerticalAlignment="Center"
+                                   TextTrimming="None" />
+                    </DockPanel>
+
+                    <!-- Stacked header for content-fitted left-docked tables (never widens columns) -->
+                    <StackPanel Visibility="{Binding FitColumnsToContent, ElementName=RootGridControl, Converter={StaticResource BoolToVis}}">
+                        <TextBlock Text="{Binding Title, ElementName=RootGridControl}"
+                                   FontFamily="Segoe UI"
+                                   FontSize="13.5"
+                                   FontWeight="SemiBold"
+                                   Foreground="#0F172A"
+                                   TextTrimming="None" />
+                        <TextBlock Text="{Binding Subtitle, ElementName=RootGridControl}"
+                                   FontFamily="Segoe UI"
+                                   FontSize="11.5"
+                                   Foreground="#64748B"
+                                   Margin="0,2,0,0"
+                                   TextWrapping="Wrap"
+                                   TextTrimming="None" />
+                    </StackPanel>
+                </Grid>
             </Border>
 
             <!-- Main 3-4 Column Paged DataGrid (Zero Scrollbars, Zero TextTrimming) -->

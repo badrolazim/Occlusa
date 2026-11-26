@@ -120,6 +120,24 @@ public partial class UniformPagedGrid : UserControl
         typeof(UniformPagedGrid),
         new PropertyMetadata(false, OnAllowAutoRowHeightChanged));
 
+    public static readonly DependencyProperty FitColumnsToContentProperty = DependencyProperty.Register(
+        nameof(FitColumnsToContent),
+        typeof(bool),
+        typeof(UniformPagedGrid),
+        new PropertyMetadata(false, OnFitColumnsToContentChanged));
+
+    public static readonly DependencyProperty IsHeaderHorizontalProperty = DependencyProperty.Register(
+        nameof(IsHeaderHorizontal),
+        typeof(bool),
+        typeof(UniformPagedGrid),
+        new PropertyMetadata(true));
+
+    public static readonly DependencyProperty RowSpacingProperty = DependencyProperty.Register(
+        nameof(RowSpacing),
+        typeof(double),
+        typeof(UniformPagedGrid),
+        new PropertyMetadata(0.0, OnRowSpacingChanged));
+
     public static readonly DependencyProperty EnforceColumnLimitProperty = DependencyProperty.Register(
         nameof(EnforceColumnLimit),
         typeof(bool),
@@ -212,6 +230,14 @@ public partial class UniformPagedGrid : UserControl
         Loaded += UniformPagedGrid_Loaded;
         Unloaded += UniformPagedGrid_Unloaded;
         SizeChanged += UniformPagedGrid_SizeChanged;
+        IsVisibleChanged += (_, _) =>
+        {
+            if (IsVisible)
+            {
+                RecalculateAutoPageSize();
+                RefreshAutoColumnWidths();
+            }
+        };
     }
 
     public IEnumerable? ItemsSource
@@ -260,6 +286,24 @@ public partial class UniformPagedGrid : UserControl
     {
         get => (bool)GetValue(AllowAutoRowHeightProperty);
         set => SetValue(AllowAutoRowHeightProperty, value);
+    }
+
+    public bool FitColumnsToContent
+    {
+        get => (bool)GetValue(FitColumnsToContentProperty);
+        set => SetValue(FitColumnsToContentProperty, value);
+    }
+
+    public bool IsHeaderHorizontal
+    {
+        get => (bool)GetValue(IsHeaderHorizontalProperty);
+        private set => SetValue(IsHeaderHorizontalProperty, value);
+    }
+
+    public double RowSpacing
+    {
+        get => (double)GetValue(RowSpacingProperty);
+        set => SetValue(RowSpacingProperty, value);
     }
 
     public bool EnforceColumnLimit
@@ -366,13 +410,15 @@ public partial class UniformPagedGrid : UserControl
         }
 
         int targetSize = referenceHeight > ResolutionHeightThreshold ? PageSize1440p : PageSize1080p;
-        if (AllowAutoRowHeight && ActualHeight > 0)
+        if ((AllowAutoRowHeight || RowSpacing > 0) && ActualHeight > 0)
         {
-            double overhead = (HasHeaderText ? 37.0 : 0.0) + 36.0 + 44.0 + 2.0;
+            double headerOverhead = HasHeaderText ? (FitColumnsToContent ? 56.0 : 37.0) : 0.0;
+            double overhead = headerOverhead + 36.0 + 44.0 + 6.0;
             double available = ActualHeight - overhead;
-            if (available > AutoRowEstimatedHeight)
+            double estimatedRowHeight = (AllowAutoRowHeight ? AutoRowEstimatedHeight : 36.0) + Math.Max(0.0, RowSpacing) + (RowSpacing > 0 ? 4.0 : 0.0);
+            if (available > estimatedRowHeight)
             {
-                int maxFit = Math.Max(4, (int)Math.Floor(available / AutoRowEstimatedHeight));
+                int maxFit = Math.Max(4, (int)Math.Floor(available / estimatedRowHeight));
                 targetSize = Math.Min(targetSize, maxFit);
             }
         }
@@ -505,12 +551,49 @@ public partial class UniformPagedGrid : UserControl
         grid.RecalculateAutoPageSize();
     }
 
+    private static void OnFitColumnsToContentChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        var grid = (UniformPagedGrid)d;
+        grid.IsHeaderHorizontal = !grid.FitColumnsToContent;
+        grid.RebuildColumns();
+        grid.RecalculateAutoPageSize();
+        grid.RefreshAutoColumnWidths();
+    }
+
+    private static void OnRowSpacingChanged(DependencyObject d, DependencyPropertyChangedEventArgs e)
+    {
+        var grid = (UniformPagedGrid)d;
+        grid.ApplyRowHeightMode();
+        grid.RecalculateAutoPageSize();
+    }
+
     private void ApplyRowHeightMode()
     {
         if (InternalDataGrid == null)
         {
             return;
         }
+
+        if (RowSpacing > 0)
+        {
+            InternalDataGrid.GridLinesVisibility = DataGridGridLinesVisibility.None;
+            InternalDataGrid.Background = new SolidColorBrush(Color.FromRgb(248, 250, 252));
+            InternalDataGrid.RowHeight = AllowAutoRowHeight ? double.NaN : 36;
+            InternalDataGrid.MinRowHeight = AllowAutoRowHeight ? 38 : 0;
+
+            var baseKey = AllowAutoRowHeight ? "UniformSpacedAutoHeightDataGridRowStyle" : "UniformDataGridRowStyle";
+            if (Resources[baseKey] is Style baseStyle)
+            {
+                var spaced = new Style(typeof(DataGridRow), baseStyle);
+                double halfGap = Math.Max(1.0, RowSpacing / 2.0);
+                spaced.Setters.Add(new Setter(MarginProperty, new Thickness(0, halfGap, 0, halfGap)));
+                InternalDataGrid.RowStyle = spaced;
+            }
+            return;
+        }
+
+        InternalDataGrid.GridLinesVisibility = DataGridGridLinesVisibility.Horizontal;
+        InternalDataGrid.Background = Brushes.White;
 
         if (AllowAutoRowHeight)
         {
@@ -619,6 +702,31 @@ public partial class UniformPagedGrid : UserControl
         CanGoPrev = currentPage > 1;
         CanGoNext = currentPage < TotalPages;
         PaginationSummary = $"Page {currentPage} of {TotalPages} ({TotalItems} total)";
+        RefreshAutoColumnWidths();
+    }
+
+    private void RefreshAutoColumnWidths()
+    {
+        if (!FitColumnsToContent || InternalDataGrid == null || InternalDataGrid.Columns.Count == 0)
+        {
+            return;
+        }
+
+        Dispatcher.BeginInvoke(System.Windows.Threading.DispatcherPriority.Loaded, new Action(() =>
+        {
+            if (!FitColumnsToContent || InternalDataGrid == null)
+            {
+                return;
+            }
+
+            foreach (var col in InternalDataGrid.Columns)
+            {
+                col.Width = 0;
+                col.Width = DataGridLength.Auto;
+            }
+
+            InternalDataGrid.UpdateLayout();
+        }));
     }
 
     private void RebuildColumns()
@@ -628,6 +736,9 @@ public partial class UniformPagedGrid : UserControl
             return;
         }
 
+        InternalDataGrid.HorizontalAlignment = FitColumnsToContent
+            ? HorizontalAlignment.Left
+            : HorizontalAlignment.Stretch;
         InternalDataGrid.Columns.Clear();
         if (Columns == null || Columns.Count == 0)
         {
@@ -641,14 +752,25 @@ public partial class UniformPagedGrid : UserControl
         foreach (var col in activeColumns)
         {
             Style? headerStyle = null;
-            if (col.HorizontalAlignment != HorizontalAlignment.Left)
+            if (col.HorizontalAlignment != HorizontalAlignment.Left || FitColumnsToContent)
             {
                 var baseHeaderStyle = Resources["UniformColumnHeaderStyle"] as Style;
                 headerStyle = baseHeaderStyle != null
                     ? new Style(typeof(DataGridColumnHeader), baseHeaderStyle)
                     : new Style(typeof(DataGridColumnHeader));
-                headerStyle.Setters.Add(new Setter(Control.HorizontalContentAlignmentProperty, col.HorizontalAlignment));
+                if (col.HorizontalAlignment != HorizontalAlignment.Left)
+                {
+                    headerStyle.Setters.Add(new Setter(Control.HorizontalContentAlignmentProperty, col.HorizontalAlignment));
+                }
+                if (FitColumnsToContent)
+                {
+                    headerStyle.Setters.Add(new Setter(Control.PaddingProperty, new Thickness(14, 0, 22, 0)));
+                }
             }
+
+            var columnWidth = FitColumnsToContent
+                ? DataGridLength.Auto
+                : new DataGridLength(Math.Max(0.2, col.StarWidth), DataGridLengthUnitType.Star);
 
             if (col.CellTemplate != null)
             {
@@ -656,7 +778,7 @@ public partial class UniformPagedGrid : UserControl
                 {
                     Header = col.Header,
                     CellTemplate = col.CellTemplate,
-                    Width = new DataGridLength(Math.Max(0.2, col.StarWidth), DataGridLengthUnitType.Star),
+                    Width = columnWidth,
                     MinWidth = Math.Max(40, col.MinWidth)
                 };
                 if (headerStyle != null)
@@ -678,7 +800,7 @@ public partial class UniformPagedGrid : UserControl
             elementStyle.Setters.Add(new Setter(TextBlock.TextWrappingProperty, TextWrapping.NoWrap));
             elementStyle.Setters.Add(new Setter(VerticalAlignmentProperty, VerticalAlignment.Center));
             elementStyle.Setters.Add(new Setter(HorizontalAlignmentProperty, col.HorizontalAlignment));
-            elementStyle.Setters.Add(new Setter(MarginProperty, new Thickness(10, 0, 10, 0)));
+            elementStyle.Setters.Add(new Setter(MarginProperty, FitColumnsToContent ? new Thickness(14, 0, 22, 0) : new Thickness(10, 0, 10, 0)));
             elementStyle.Setters.Add(new Setter(TextBlock.FontSizeProperty, 12.0));
             elementStyle.Setters.Add(new Setter(TextBlock.ForegroundProperty, new SolidColorBrush(Color.FromRgb(15, 23, 42))));
 
@@ -700,7 +822,7 @@ public partial class UniformPagedGrid : UserControl
             {
                 Header = col.Header,
                 Binding = binding,
-                Width = new DataGridLength(Math.Max(0.2, col.StarWidth), DataGridLengthUnitType.Star),
+                Width = columnWidth,
                 MinWidth = Math.Max(40, col.MinWidth),
                 ElementStyle = elementStyle
             };
@@ -711,6 +833,8 @@ public partial class UniformPagedGrid : UserControl
 
             InternalDataGrid.Columns.Add(dgCol);
         }
+
+        RefreshAutoColumnWidths();
     }
 
     private void PrevPageButton_Click(object sender, RoutedEventArgs e)

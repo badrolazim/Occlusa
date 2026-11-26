@@ -303,8 +303,101 @@ public static class ClinicDomainHelpers
         }).ToList(),
         HasCriticalMedicalAlert = a.HasCriticalMedicalAlert,
         AlertSummary = a.AlertSummary,
-        VisitId = a.VisitId
+        VisitId = a.VisitId,
+        ReminderStatus = a.ReminderStatus,
+        ReminderChannel = a.ReminderChannel,
+        RemindedAt = a.RemindedAt,
+        RemindedBy = a.RemindedBy,
+        ReminderConfirmedAt = a.ReminderConfirmedAt
     };
+
+    public static UserWorkspacePreferencesDto Clone(UserWorkspacePreferencesDto p) => new()
+    {
+        StaffKey = p.StaffKey,
+        StaffDisplayName = p.StaffDisplayName,
+        QueueViewMode = p.QueueViewMode,
+        DefaultQueueScope = p.DefaultQueueScope,
+        HideFinishedQueueRows = p.HideFinishedQueueRows,
+        ShowWaitTimers = p.ShowWaitTimers,
+        ShowInlineReceptionNotes = p.ShowInlineReceptionNotes,
+        ShowMyKadQuickBar = p.ShowMyKadQuickBar,
+        UpdatedAt = p.UpdatedAt
+    };
+
+    /// <summary>
+    /// Updates appointment reminder fields, timestamps, attribution, and activity trail uniformly.
+    /// </summary>
+    public static void ApplyReminderUpdate(
+        AppointmentQueueItemDto item,
+        ReminderStatus status,
+        ReminderChannel channel,
+        string actor,
+        DateTimeOffset now)
+    {
+        var staff = string.IsNullOrWhiteSpace(actor) ? "Desktop Staff" : actor.Trim();
+        var effectiveChannel = status == ReminderStatus.NotReminded
+            ? ReminderChannel.None
+            : (channel == ReminderChannel.None ? (item.ReminderChannel == ReminderChannel.None ? ReminderChannel.PhoneCall : item.ReminderChannel) : channel);
+
+        item.ReminderStatus = status;
+        item.ReminderChannel = effectiveChannel;
+        item.LastUpdatedBy = staff;
+        item.LastUpdatedAt = now;
+
+        switch (status)
+        {
+            case ReminderStatus.NotReminded:
+                item.RemindedAt = null;
+                item.RemindedBy = string.Empty;
+                item.ReminderConfirmedAt = null;
+                break;
+
+            case ReminderStatus.Reminded:
+                item.RemindedAt = now;
+                item.RemindedBy = staff;
+                item.ReminderConfirmedAt = null;
+                break;
+
+            case ReminderStatus.Confirmed:
+                item.RemindedAt ??= now;
+                if (string.IsNullOrWhiteSpace(item.RemindedBy))
+                {
+                    item.RemindedBy = staff;
+                }
+                item.ReminderConfirmedAt = now;
+                break;
+
+            case ReminderStatus.NoReply:
+                item.RemindedAt = now;
+                item.RemindedBy = staff;
+                item.ReminderConfirmedAt = null;
+                break;
+        }
+
+        string channelLabel = effectiveChannel switch
+        {
+            ReminderChannel.WhatsApp => "WhatsApp",
+            ReminderChannel.PhoneCall => "Phone Call",
+            ReminderChannel.Sms => "SMS",
+            _ => "None"
+        };
+
+        string action = status switch
+        {
+            ReminderStatus.Confirmed => "Reminder Confirmed",
+            ReminderStatus.Reminded => "Reminder Sent",
+            ReminderStatus.NoReply => "Reminder No Reply",
+            _ => "Reminder Cleared"
+        };
+
+        item.ActivityLog.Add(new VisitActivityEntryDto
+        {
+            Timestamp = now,
+            Action = action,
+            StaffName = staff,
+            Details = status == ReminderStatus.NotReminded ? "Reset to Not Reminded" : $"{status} via {channelLabel}"
+        });
+    }
 
     public static OdontogramToothDto Clone(OdontogramToothDto t) => new()
     {

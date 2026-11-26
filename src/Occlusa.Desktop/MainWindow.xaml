@@ -75,11 +75,26 @@
                               Style="{StaticResource UniformSidebarComboBoxStyle}"
                               Margin="0,0,0,10" />
 
-                    <TextBlock Text="ACTIVE STAFF"
-                               FontSize="10.5"
-                               FontWeight="Bold"
-                               Foreground="{StaticResource SidebarSectionLabelBrush}"
-                               Margin="4,0,0,5" />
+                    <DockPanel LastChildFill="False" Margin="4,0,0,5">
+                        <TextBlock DockPanel.Dock="Left"
+                                   Text="ACTIVE STAFF"
+                                   FontSize="10.5"
+                                   FontWeight="Bold"
+                                   Foreground="{StaticResource SidebarSectionLabelBrush}"
+                                   VerticalAlignment="Center" />
+                        <Button DockPanel.Dock="Right"
+                                Content="⚙ My View"
+                                Click="OpenUserPreferencesButton_Click"
+                                ToolTip="Configure your personal Simple / Detailed Live Queue view"
+                                Background="Transparent"
+                                BorderThickness="0"
+                                Foreground="{StaticResource SidebarTextSecondaryBrush}"
+                                FontSize="11"
+                                FontWeight="SemiBold"
+                                Padding="4,0"
+                                Cursor="Hand"
+                                VerticalAlignment="Center" />
+                    </DockPanel>
                     <ComboBox ItemsSource="{Binding StaffMembers}"
                               SelectedItem="{Binding SelectedStaffName}"
                               Style="{StaticResource UniformSidebarComboBoxStyle}" />
@@ -453,12 +468,11 @@
             <Grid.RowDefinitions>
                 <RowDefinition Height="Auto" />
                 <RowDefinition Height="Auto" />
-                <RowDefinition Height="Auto" />
                 <RowDefinition Height="*" />
                 <RowDefinition Height="Auto" />
             </Grid.RowDefinitions>
 
-            <!-- Row 0: Workspace Title & Quick MyKad Reader Bar -->
+            <!-- Row 0: Workspace Title, View Mode Pill & Optional MyKad Reader Controls -->
             <Border Grid.Row="0" Style="{StaticResource UniformCardBorderStyle}" Padding="16,10" Margin="0,0,0,10">
                 <Grid>
                     <Grid.ColumnDefinitions>
@@ -477,128 +491,295 @@
                     </StackPanel>
 
                     <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                        <TextBlock Text="MyKad IC:"
-                                   Style="{StaticResource UniformLabelTextStyle}"
-                                   VerticalAlignment="Center"
-                                   Margin="0,0,8,0" />
-                        <ComboBox ItemsSource="{Binding SimulatedProfileNames}"
-                                  SelectedIndex="{Binding SelectedSimulatedProfileIndex}"
-                                  Width="330"
-                                  FontSize="12"
-                                  Style="{StaticResource UniformComboBoxStyle}"
-                                  Margin="0,0,8,0" />
-                        <Button Content="Simulate Insert"
-                                Command="{Binding SimulateMyKadCommand}"
-                                Style="{StaticResource UniformPrimaryButtonStyle}"
+                        <!-- Clickable View Mode Pill (Live Queue only) -->
+                        <Button Content="{Binding QueueViewBadgeText}"
+                                Click="OpenUserPreferencesButton_Click"
+                                Visibility="{Binding IsQueueWorkspace, Converter={StaticResource BoolToVisibilityConverter}}"
+                                ToolTip="Click to switch between Simple and Detailed Live Queue views or customize your settings"
+                                Style="{StaticResource UniformSecondaryButtonStyle}"
+                                Height="32"
+                                Padding="11,0"
+                                FontSize="11.5"
                                 Margin="0,0,8,0" />
-                        <Button Content="Read USB"
-                                Command="{Binding ReadPhysicalMyKadCommand}"
-                                Style="{StaticResource UniformSecondaryButtonStyle}" />
+
+                        <!-- Compact MyKad Action (Default when full MyKad bar is hidden for Reception) -->
+                        <Button Content="MyKad ▾"
+                                Click="CompactMyKadButton_Click"
+                                Visibility="{Binding ShowCompactMyKadButton, Converter={StaticResource BoolToVisibilityConverter}}"
+                                ToolTip="Read physical USB MyKad or simulate patient MyKad insert"
+                                Style="{StaticResource UniformSecondaryButtonStyle}"
+                                Height="32"
+                                Padding="11,0"
+                                FontSize="12" />
+
+                        <!-- Full MyKad IC Bar (Opt-in via My View Settings) -->
+                        <StackPanel Orientation="Horizontal"
+                                    VerticalAlignment="Center"
+                                    Visibility="{Binding ShowFullMyKadBar, Converter={StaticResource BoolToVisibilityConverter}}">
+                            <TextBlock Text="MyKad IC:"
+                                       Style="{StaticResource UniformLabelTextStyle}"
+                                       VerticalAlignment="Center"
+                                       Margin="0,0,8,0" />
+                            <ComboBox ItemsSource="{Binding SimulatedProfileNames}"
+                                      SelectedIndex="{Binding SelectedSimulatedProfileIndex}"
+                                      Width="310"
+                                      FontSize="12"
+                                      Style="{StaticResource UniformComboBoxStyle}"
+                                      Margin="0,0,8,0" />
+                            <Button Content="Simulate Insert"
+                                    Command="{Binding SimulateMyKadCommand}"
+                                    Style="{StaticResource UniformPrimaryButtonStyle}"
+                                    Margin="0,0,8,0" />
+                            <Button Content="Read USB"
+                                    Command="{Binding ReadPhysicalMyKadCommand}"
+                                    Style="{StaticResource UniformSecondaryButtonStyle}" />
+                        </StackPanel>
                     </StackPanel>
                 </Grid>
             </Border>
 
-            <!-- Row 1: Pinned Clinical Safety Banner (Hidden on Appointments & Settings tabs) -->
-            <controls:MedicalAlertsBanner Grid.Row="1"
-                                          Margin="0,0,0,10"
-                                          Visibility="{Binding ShowMedicalBanner, Converter={StaticResource BoolToVisibilityConverter}}"
-                                          PatientName="{Binding BannerPatientName}"
-                                          IcNumber="{Binding BannerIcNumber}"
-                                          IsMyKadVerified="{Binding BannerIsMyKadVerified}"
-                                          Allergies="{Binding BannerAllergies}"
-                                          OnAnticoagulants="{Binding BannerOnAnticoagulants}"
-                                          HasDiabetes="{Binding BannerHasDiabetes}"
-                                          IsPregnant="{Binding BannerIsPregnant}"
-                                          AlertNotes="{Binding BannerAlertNotes}" />
-
-            <!-- Row 2: Contextual Workspace Action Toolbar (Exact 32px Baseline Alignment) -->
-            <Border Grid.Row="2" Style="{StaticResource UniformCardBorderStyle}" Padding="12,8" Margin="0,0,0,10">
+            <!-- Row 1: Contextual Workspace Action Toolbar (Exact 32px Baseline Alignment) -->
+            <Border Grid.Row="1" Style="{StaticResource UniformCardBorderStyle}" Padding="12,8" Margin="0,0,0,10">
                 <Grid>
-                    <!-- 1. Queue Tab Actions -->
-                    <DockPanel Visibility="{Binding IsQueueWorkspace, Converter={StaticResource BoolToVisibilityConverter}}" LastChildFill="False">
+                    <!-- 1A. Live Queue SIMPLE View Toolbar (Calm, Zero-Confusion Default) -->
+                    <DockPanel Visibility="{Binding IsSimpleQueueToolbarVisible, Converter={StaticResource BoolToVisibilityConverter}}" LastChildFill="False">
                         <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                            <StackPanel Orientation="Horizontal"
+                                        VerticalAlignment="Center"
+                                        Visibility="{Binding ShowDentistScopeToggle, Converter={StaticResource BoolToVisibilityConverter}}"
+                                        Margin="0,0,10,0">
+                                <RadioButton GroupName="SimpleQueueScope"
+                                             Content="My Queue"
+                                             IsChecked="{Binding IsMyQueueScope, Mode=OneWay}"
+                                             Command="{Binding SetQueueScopeCommand}"
+                                             CommandParameter="MyQueue"
+                                             Style="{StaticResource UniformSegmentedToggleRadioStyle}"
+                                             Margin="0,0,4,0" />
+                                <RadioButton GroupName="SimpleQueueScope"
+                                             Content="All Clinic"
+                                             IsChecked="{Binding IsAllClinicScope, Mode=OneWay}"
+                                             Command="{Binding SetQueueScopeCommand}"
+                                             CommandParameter="AllClinic"
+                                             Style="{StaticResource UniformSegmentedToggleRadioStyle}" />
+                            </StackPanel>
+
+                            <RadioButton GroupName="SimpleQueueFinishedFilter"
+                                         Content="Active Only"
+                                         IsChecked="{Binding IsActiveOnlyChecked, Mode=OneWay}"
+                                         Command="{Binding SetShowFinishedQueueRowsCommand}"
+                                         CommandParameter="False"
+                                         Style="{StaticResource UniformSegmentedToggleRadioStyle}"
+                                         Margin="0,0,4,0" />
+                            <RadioButton GroupName="SimpleQueueFinishedFilter"
+                                         Content="{Binding ShowDoneToggleLabel}"
+                                         IsChecked="{Binding IsShowDoneChecked, Mode=OneWay}"
+                                         Command="{Binding SetShowFinishedQueueRowsCommand}"
+                                         CommandParameter="True"
+                                         Style="{StaticResource UniformSegmentedToggleRadioStyle}" />
+                        </StackPanel>
+
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                             <Button Content="+ Walk-In"
                                     Click="NewWalkInButton_Click"
-                                    Style="{StaticResource UniformPrimaryButtonStyle}"
+                                    Style="{StaticResource UniformSecondaryButtonStyle}"
                                     Height="32"
                                     Padding="12,0"
                                     FontSize="12"
                                     Margin="0,0,8,0" />
 
-                            <Button Content="Approve AI"
-                                    Command="{Binding ApproveSelectedAiBookingCommand}"
-                                    Visibility="{Binding CanApproveSelectedAi, Converter={StaticResource BoolToVisibilityConverter}}"
+                            <Button Content="Remind"
+                                    Click="OpenSelectedQueueReminderButton_Click"
+                                    Visibility="{Binding CanRemindSelected, Converter={StaticResource BoolToVisibilityConverter}}"
                                     Style="{StaticResource UniformWarningButtonStyle}"
                                     Height="32"
-                                    Padding="11,0"
+                                    Padding="12,0"
                                     FontSize="12"
                                     Margin="0,0,8,0" />
 
-                            <Border Width="1"
-                                    Height="20"
-                                    Background="{StaticResource BorderHairlineBrush}"
-                                    VerticalAlignment="Center"
-                                    Margin="0,0,8,0" />
-
-                            <Button Content="Check In"
-                                    Command="{Binding AdvanceQueueStatusCommand}"
-                                    CommandParameter="Waiting"
-                                    IsEnabled="{Binding CanCheckInSelected}"
-                                    Style="{StaticResource UniformSegmentButtonStyle}"
-                                    Margin="0,0,5,0" />
-                            <Button Content="In Chair"
-                                    Command="{Binding AdvanceQueueStatusCommand}"
-                                    CommandParameter="InChair"
-                                    IsEnabled="{Binding CanCallToChairSelected}"
-                                    Style="{StaticResource UniformSegmentButtonStyle}"
-                                    Margin="0,0,5,0" />
-                            <Button Content="Checkout / Invoice"
-                                    Click="CheckoutSelectedQueuePatientButton_Click"
-                                    IsEnabled="{Binding CanSendToCheckoutSelected}"
-                                    Style="{StaticResource UniformSegmentButtonStyle}"
-                                    Margin="0,0,5,0" />
-                            <Button Content="Complete"
-                                    Command="{Binding AdvanceQueueStatusCommand}"
-                                    CommandParameter="Completed"
-                                    IsEnabled="{Binding CanCompleteSelected}"
-                                    Style="{StaticResource UniformSegmentButtonStyle}"
-                                    Margin="0,0,5,0" />
-                            <Button Content="Cancel"
-                                    Command="{Binding CancelSelectedQueueItemCommand}"
-                                    IsEnabled="{Binding CanCancelSelectedQueue}"
-                                    Foreground="{StaticResource DangerBrush}"
-                                    Style="{StaticResource UniformGhostButtonStyle}"
-                                    Height="32"
-                                    Padding="9,0"
-                                    FontSize="12" />
-                        </StackPanel>
-
-                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                            <Button Content="Visit Details"
-                                    Click="OpenSelectedQueueVisitButton_Click"
-                                    IsEnabled="{Binding HasSelectedQueueRow}"
-                                    Style="{StaticResource UniformSecondaryButtonStyle}"
-                                    Height="32"
-                                    Padding="11,0"
-                                    FontSize="12"
-                                    Margin="0,0,6,0" />
-                            <Button Content="Patient Chart"
-                                    Click="OpenSelectedQueuePatientButton_Click"
-                                    IsEnabled="{Binding HasSelectedQueueRow}"
-                                    Style="{StaticResource UniformSecondaryButtonStyle}"
-                                    Height="32"
-                                    Padding="11,0"
-                                    FontSize="12"
-                                    Margin="0,0,6,0" />
-                            <Button Content="Visit Chart"
-                                    Click="OpenSelectedQueueOdontogramButton_Click"
-                                    IsEnabled="{Binding HasSelectedQueueRow}"
+                            <Button Content="{Binding SmartNextActionLabel}"
+                                    Click="SmartNextActionButton_Click"
+                                    Visibility="{Binding HasSmartNextAction, Converter={StaticResource BoolToVisibilityConverter}}"
                                     Style="{StaticResource UniformPrimaryButtonStyle}"
                                     Height="32"
+                                    Padding="13,0"
+                                    FontSize="12"
+                                    Margin="0,0,8,0" />
+
+                            <Button Content="Clinical Chart"
+                                    Click="OpenSelectedQueueOdontogramButton_Click"
+                                    IsEnabled="{Binding HasSelectedQueueRow}"
+                                    Style="{StaticResource UniformSecondaryButtonStyle}"
+                                    Height="32"
                                     Padding="11,0"
+                                    FontSize="12"
+                                    Margin="0,0,6,0" />
+
+                            <Button Content="Details"
+                                    Click="OpenSelectedQueueVisitButton_Click"
+                                    IsEnabled="{Binding HasSelectedQueueRow}"
+                                    Style="{StaticResource UniformGhostButtonStyle}"
+                                    Height="32"
+                                    Padding="10,0"
                                     FontSize="12" />
                         </StackPanel>
                     </DockPanel>
+
+                    <!-- 1B. Live Queue DETAILED Operations Toolbar (Opt-In via My View Settings) -->
+                    <StackPanel Visibility="{Binding IsDetailedQueueToolbarVisible, Converter={StaticResource BoolToVisibilityConverter}}">
+                        <!-- Row A: Direct Stage Controls & Clinical Modals -->
+                        <DockPanel LastChildFill="False">
+                            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button Content="+ Walk-In"
+                                        Click="NewWalkInButton_Click"
+                                        Style="{StaticResource UniformPrimaryButtonStyle}"
+                                        Height="32"
+                                        Padding="12,0"
+                                        FontSize="12"
+                                        Margin="0,0,6,0" />
+
+                                <Button Content="Approve AI"
+                                        Command="{Binding ApproveSelectedAiBookingCommand}"
+                                        Visibility="{Binding CanApproveSelectedAi, Converter={StaticResource BoolToVisibilityConverter}}"
+                                        Style="{StaticResource UniformWarningButtonStyle}"
+                                        Height="32"
+                                        Padding="10,0"
+                                        FontSize="12"
+                                        Margin="0,0,6,0" />
+
+                                <Button Content="Remind"
+                                        Click="OpenSelectedQueueReminderButton_Click"
+                                        IsEnabled="{Binding CanRemindSelected}"
+                                        Style="{StaticResource UniformSecondaryButtonStyle}"
+                                        Height="32"
+                                        Padding="10,0"
+                                        FontSize="12"
+                                        Margin="0,0,8,0" />
+
+                                <Border Width="1"
+                                        Height="20"
+                                        Background="{StaticResource BorderHairlineBrush}"
+                                        VerticalAlignment="Center"
+                                        Margin="0,0,8,0" />
+
+                                <Button Content="Check In"
+                                        Command="{Binding AdvanceQueueStatusCommand}"
+                                        CommandParameter="Waiting"
+                                        IsEnabled="{Binding CanCheckInSelected}"
+                                        Style="{StaticResource UniformSegmentButtonStyle}"
+                                        Margin="0,0,4,0" />
+                                <Button Content="In Chair"
+                                        Command="{Binding AdvanceQueueStatusCommand}"
+                                        CommandParameter="InChair"
+                                        IsEnabled="{Binding CanCallToChairSelected}"
+                                        Style="{StaticResource UniformSegmentButtonStyle}"
+                                        Margin="0,0,4,0" />
+                                <Button Content="Checkout"
+                                        Click="CheckoutSelectedQueuePatientButton_Click"
+                                        IsEnabled="{Binding CanSendToCheckoutSelected}"
+                                        Style="{StaticResource UniformSegmentButtonStyle}"
+                                        Margin="0,0,4,0" />
+                                <Button Content="Complete"
+                                        Command="{Binding AdvanceQueueStatusCommand}"
+                                        CommandParameter="Completed"
+                                        IsEnabled="{Binding CanCompleteSelected}"
+                                        Style="{StaticResource UniformSegmentButtonStyle}"
+                                        Margin="0,0,4,0" />
+                                <Button Content="Cancel"
+                                        Command="{Binding CancelSelectedQueueItemCommand}"
+                                        IsEnabled="{Binding CanCancelSelectedQueue}"
+                                        Foreground="{StaticResource DangerBrush}"
+                                        Style="{StaticResource UniformGhostButtonStyle}"
+                                        Height="32"
+                                        Padding="8,0"
+                                        FontSize="12" />
+                            </StackPanel>
+
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button Content="Appointment"
+                                        Click="OpenSelectedQueueVisitButton_Click"
+                                        IsEnabled="{Binding HasSelectedQueueRow}"
+                                        Style="{StaticResource UniformSecondaryButtonStyle}"
+                                        Height="32"
+                                        Padding="10,0"
+                                        FontSize="12"
+                                        Margin="0,0,6,0" />
+                                <Button Content="Patient Profile"
+                                        Click="OpenSelectedQueuePatientButton_Click"
+                                        IsEnabled="{Binding HasSelectedQueueRow}"
+                                        Style="{StaticResource UniformSecondaryButtonStyle}"
+                                        Height="32"
+                                        Padding="10,0"
+                                        FontSize="12"
+                                        Margin="0,0,6,0" />
+                                <Button Content="Clinical Chart"
+                                        Click="OpenSelectedQueueOdontogramButton_Click"
+                                        IsEnabled="{Binding HasSelectedQueueRow}"
+                                        Style="{StaticResource UniformPrimaryButtonStyle}"
+                                        Height="32"
+                                        Padding="10,0"
+                                        FontSize="12" />
+                            </StackPanel>
+                        </DockPanel>
+
+                        <!-- Row B: Doctor Dropdown, Quick Status Filter Chips & Finished-Row Toggle -->
+                        <DockPanel LastChildFill="False" Margin="0,8,0,0">
+                            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="Doctor:"
+                                           Style="{StaticResource UniformLabelTextStyle}"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,6,0" />
+                                <ComboBox ItemsSource="{Binding QueueDoctorFilterOptions}"
+                                          SelectedItem="{Binding SelectedQueueDoctorFilter, Mode=TwoWay}"
+                                          DisplayMemberPath="Label"
+                                          Width="185"
+                                          Height="30"
+                                          FontSize="12"
+                                          Style="{StaticResource UniformComboBoxStyle}"
+                                          Margin="0,0,12,0" />
+
+                                <RadioButton GroupName="DetailedStatusChips"
+                                             Content="All"
+                                             IsChecked="{Binding IsStatusChipAll, Mode=OneWay}"
+                                             Command="{Binding SetQueueStatusChipCommand}"
+                                             CommandParameter="All"
+                                             Style="{StaticResource UniformSegmentedToggleRadioStyle}"
+                                             Margin="0,0,4,0" />
+                                <RadioButton GroupName="DetailedStatusChips"
+                                             Content="Waiting"
+                                             IsChecked="{Binding IsStatusChipWaiting, Mode=OneWay}"
+                                             Command="{Binding SetQueueStatusChipCommand}"
+                                             CommandParameter="Waiting"
+                                             Style="{StaticResource UniformSegmentedToggleRadioStyle}"
+                                             Margin="0,0,4,0" />
+                                <RadioButton GroupName="DetailedStatusChips"
+                                             Content="In Chair"
+                                             IsChecked="{Binding IsStatusChipInChair, Mode=OneWay}"
+                                             Command="{Binding SetQueueStatusChipCommand}"
+                                             CommandParameter="InChair"
+                                             Style="{StaticResource UniformSegmentedToggleRadioStyle}"
+                                             Margin="0,0,4,0" />
+                                <RadioButton GroupName="DetailedStatusChips"
+                                             Content="Checkout"
+                                             IsChecked="{Binding IsStatusChipCheckout, Mode=OneWay}"
+                                             Command="{Binding SetQueueStatusChipCommand}"
+                                             CommandParameter="Checkout"
+                                             Style="{StaticResource UniformSegmentedToggleRadioStyle}"
+                                             Margin="0,0,4,0" />
+                                <RadioButton GroupName="DetailedStatusChips"
+                                             Content="Unreminded"
+                                             IsChecked="{Binding IsStatusChipUnreminded, Mode=OneWay}"
+                                             Command="{Binding SetQueueStatusChipCommand}"
+                                             CommandParameter="Unreminded"
+                                             Style="{StaticResource UniformSegmentedToggleRadioStyle}" />
+                            </StackPanel>
+
+                            <CheckBox DockPanel.Dock="Right"
+                                      Content="{Binding ShowDoneToggleLabel}"
+                                      IsChecked="{Binding ShowFinishedQueueRows, Mode=TwoWay}"
+                                      VerticalAlignment="Center"
+                                      Style="{StaticResource UniformCheckBoxStyle}" />
+                        </DockPanel>
+                    </StackPanel>
 
                     <!-- 2. Appointments Tab Actions -->
                     <Grid Visibility="{Binding IsAppointmentsWorkspace, Converter={StaticResource BoolToVisibilityConverter}}">
@@ -1013,190 +1194,384 @@
                 </Grid>
             </Border>
 
-            <!-- Row 3: 4 Uniform 4-Column Paged Tables (Auto 11 rows @ 1080p, 17 rows @ 1440p) -->
-            <Grid Grid.Row="3">
-                <!-- 1. Live Queue & Schedule (Unified Today Roster, Status-Pill Color Only) -->
-                <controls:UniformPagedGrid x:Name="QueuePagedGrid"
-                                           Visibility="{Binding IsQueueWorkspace, Converter={StaticResource BoolToVisibilityConverter}}"
-                                           Title="Today's Live Queue"
-                                           Subtitle="{Binding QueuePulseSummary}"
-                                           EmptyMessage="No patients in today's queue yet — click + Walk-In or scan a MyKad."
-                                           EnforceColumnLimit="False"
-                                           AllowAutoRowHeight="True"
-                                           ItemsSource="{Binding QueueRows}"
-                                           SelectedItem="{Binding SelectedQueueRow, Mode=TwoWay}"
-                                           RowDoubleClicked="QueuePagedGrid_RowDoubleClicked">
-                    <controls:UniformColumnDef Header="Appt Time" WidthRatio="0.95" MinWidth="115">
-                        <controls:UniformColumnDef.CellTemplate>
-                            <DataTemplate>
-                                <Grid Margin="10,0"
-                                      Background="Transparent"
-                                      Opacity="{Binding RowContentOpacity}"
-                                      ToolTip="{Binding ToolTipText}">
-                                    <TextBlock Text="{Binding ApptTimeDisplay}"
-                                               VerticalAlignment="Center"
-                                               TextWrapping="NoWrap"
-                                               TextTrimming="None">
-                                        <TextBlock.Style>
-                                            <Style TargetType="TextBlock">
-                                                <Setter Property="FontFamily" Value="{StaticResource FontFamilyMono}" />
-                                                <Setter Property="FontSize" Value="12" />
-                                                <Setter Property="FontWeight" Value="SemiBold" />
-                                                <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding IsNoAppointment}" Value="True">
-                                                        <Setter Property="FontFamily" Value="{StaticResource FontFamilyPrimary}" />
-                                                        <Setter Property="FontSize" Value="11.5" />
-                                                        <Setter Property="FontWeight" Value="Normal" />
-                                                        <Setter Property="Foreground" Value="#94A3B8" />
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </TextBlock.Style>
-                                    </TextBlock>
-                                </Grid>
-                            </DataTemplate>
-                        </controls:UniformColumnDef.CellTemplate>
-                    </controls:UniformColumnDef>
+            <!-- Row 2: Workspace Content Tables & Calendar (Auto 11 rows @ 1080p, 17 rows @ 1440p) -->
+            <Grid Grid.Row="2">
+                <!-- 1. Live Queue Split Container: Left-Docked Content-Sized Table + Empty Right Panel -->
+                <Grid Visibility="{Binding IsQueueWorkspace, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
 
-                    <controls:UniformColumnDef Header="Arrived / Walk-In" WidthRatio="1.15" MinWidth="135">
-                        <controls:UniformColumnDef.CellTemplate>
-                            <DataTemplate>
-                                <Grid Margin="10,0"
-                                      Background="Transparent"
-                                      Opacity="{Binding RowContentOpacity}"
-                                      ToolTip="{Binding ToolTipText}">
-                                    <TextBlock Text="{Binding ArrivalTimeDisplay}"
-                                               VerticalAlignment="Center"
-                                               TextWrapping="NoWrap"
-                                               TextTrimming="None">
-                                        <TextBlock.Style>
-                                            <Style TargetType="TextBlock">
-                                                <Setter Property="FontFamily" Value="{StaticResource FontFamilyMono}" />
-                                                <Setter Property="FontSize" Value="12" />
-                                                <Setter Property="FontWeight" Value="Medium" />
-                                                <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
-                                                <Style.Triggers>
-                                                    <DataTrigger Binding="{Binding HasArrivalTime}" Value="False">
-                                                        <Setter Property="Foreground" Value="#94A3B8" />
-                                                    </DataTrigger>
-                                                    <DataTrigger Binding="{Binding IsWalkIn}" Value="True">
-                                                        <Setter Property="Foreground" Value="#B45309" />
+                    <!-- Left Panel: Compact Content-Fitted Live Queue Table -->
+                    <Grid Grid.Column="0" HorizontalAlignment="Left">
+                        <!-- 1A. Live Queue SIMPLE View (Default: Strictly 4 Columns — Time · Patient · Reminder · Status) -->
+                        <controls:UniformPagedGrid x:Name="SimpleQueuePagedGrid"
+                                                   Visibility="{Binding IsQueueSimpleGridVisible, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                   Title="{Binding QueueGridTitle}"
+                                                   Subtitle="{Binding QueuePulseSummary}"
+                                                   EmptyMessage="No active patients in queue — click + Walk-In or switch to Show Done."
+                                                   HorizontalAlignment="Left"
+                                                   MinWidth="480"
+                                                   EnforceColumnLimit="True"
+                                                   AllowAutoRowHeight="True"
+                                                   FitColumnsToContent="True"
+                                                   RowSpacing="4"
+                                                   ItemsSource="{Binding QueueRows}"
+                                                   SelectedItem="{Binding SelectedQueueRow, Mode=TwoWay}"
+                                                   RowDoubleClicked="QueuePagedGrid_RowDoubleClicked">
+                            <controls:UniformColumnDef Header="Time" MinWidth="72">
+                                <controls:UniformColumnDef.CellTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="14,5,22,5"
+                                              Background="Transparent"
+                                              Opacity="{Binding RowContentOpacity}"
+                                              ToolTip="{Binding ToolTipText}">
+                                            <TextBlock Text="{Binding SimpleTimeDisplay}"
+                                                       VerticalAlignment="Center"
+                                                       TextWrapping="NoWrap"
+                                                       TextTrimming="None">
+                                                <TextBlock.Style>
+                                                    <Style TargetType="TextBlock">
+                                                        <Setter Property="FontFamily" Value="{StaticResource FontFamilyMono}" />
+                                                        <Setter Property="FontSize" Value="12.5" />
                                                         <Setter Property="FontWeight" Value="SemiBold" />
-                                                    </DataTrigger>
-                                                </Style.Triggers>
-                                            </Style>
-                                        </TextBlock.Style>
-                                    </TextBlock>
-                                </Grid>
-                            </DataTemplate>
-                        </controls:UniformColumnDef.CellTemplate>
-                    </controls:UniformColumnDef>
+                                                        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                                                        <Style.Triggers>
+                                                            <DataTrigger Binding="{Binding IsWalkIn}" Value="True">
+                                                                <Setter Property="FontFamily" Value="{StaticResource FontFamilyPrimary}" />
+                                                                <Setter Property="FontSize" Value="11.5" />
+                                                                <Setter Property="Foreground" Value="#B45309" />
+                                                            </DataTrigger>
+                                                        </Style.Triggers>
+                                                    </Style>
+                                                </TextBlock.Style>
+                                            </TextBlock>
+                                        </Grid>
+                                    </DataTemplate>
+                                </controls:UniformColumnDef.CellTemplate>
+                            </controls:UniformColumnDef>
 
-                    <controls:UniformColumnDef Header="Status" WidthRatio="0.85" MinWidth="160" HorizontalAlignment="Right">
-                        <controls:UniformColumnDef.CellTemplate>
-                            <DataTemplate>
-                                <Grid Margin="10,0"
-                                      Background="Transparent"
-                                      ToolTip="{Binding ToolTipText}">
-                                    <Border Background="{Binding StatusBadgeBackground}"
-                                            BorderBrush="{Binding StatusBadgeBorder}"
-                                            BorderThickness="1"
-                                            CornerRadius="12"
-                                            Width="136"
-                                            Height="24"
-                                            Padding="8,0"
-                                            HorizontalAlignment="Right"
-                                            VerticalAlignment="Center">
-                                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
-                                            <Ellipse Width="6"
-                                                     Height="6"
-                                                     Fill="{Binding StatusDotBrush}"
-                                                     VerticalAlignment="Center"
-                                                     Margin="0,0,6,0" />
-                                            <TextBlock Text="{Binding StatusDisplay}"
-                                                       FontFamily="{StaticResource FontFamilyPrimary}"
-                                                       FontSize="11.5"
-                                                       FontWeight="SemiBold"
-                                                       Foreground="{Binding StatusBadgeForeground}"
-                                                       VerticalAlignment="Center"
-                                                       TextWrapping="NoWrap"
-                                                       TextTrimming="None" />
-                                        </StackPanel>
-                                    </Border>
-                                </Grid>
-                            </DataTemplate>
-                        </controls:UniformColumnDef.CellTemplate>
-                    </controls:UniformColumnDef>
-
-                    <controls:UniformColumnDef Header="Patient" WidthRatio="2.45" MinWidth="220">
-                        <controls:UniformColumnDef.CellTemplate>
-                            <DataTemplate>
-                                <Grid Background="Transparent"
-                                      Opacity="{Binding RowContentOpacity}"
-                                      ToolTip="{Binding ToolTipText}">
-                                    <StackPanel Orientation="Vertical"
-                                                Margin="10,4"
-                                                VerticalAlignment="Center">
-                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
-                                            <TextBlock Text="{Binding PatientNameDisplay}"
-                                                       FontFamily="{StaticResource FontFamilyPrimary}"
-                                                       FontSize="12"
-                                                       FontWeight="SemiBold"
-                                                       Foreground="{StaticResource TextPrimaryBrush}"
-                                                       VerticalAlignment="Center"
-                                                       TextWrapping="NoWrap"
-                                                       TextTrimming="None" />
-                                            <Border Visibility="{Binding HasCriticalAlert, Converter={StaticResource BoolToVisibilityConverter}}"
-                                                    Background="#FEF2F2"
-                                                    BorderBrush="#FECACA"
-                                                    BorderThickness="1"
-                                                    CornerRadius="4"
-                                                    Padding="5,1"
-                                                    Margin="8,0,0,0"
-                                                    VerticalAlignment="Center">
-                                                <TextBlock Text="ALERT"
-                                                           FontSize="9.5"
-                                                           FontWeight="Bold"
-                                                           Foreground="#DC2626"
+                            <controls:UniformColumnDef Header="Patient" MinWidth="180">
+                                <controls:UniformColumnDef.CellTemplate>
+                                    <DataTemplate>
+                                        <Grid Background="Transparent"
+                                              Opacity="{Binding RowContentOpacity}"
+                                              ToolTip="{Binding ToolTipText}">
+                                            <StackPanel Orientation="Vertical"
+                                                        Margin="14,5,26,5"
+                                                        VerticalAlignment="Center">
+                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding PatientNameDisplay}"
+                                                               FontFamily="{StaticResource FontFamilyPrimary}"
+                                                               FontSize="12.5"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="{StaticResource TextPrimaryBrush}"
+                                                               VerticalAlignment="Center"
+                                                               TextWrapping="NoWrap"
+                                                               TextTrimming="None" />
+                                                    <Border Visibility="{Binding HasCriticalAlert, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                            Background="#FEF2F2"
+                                                            BorderBrush="#FECACA"
+                                                            BorderThickness="1"
+                                                            CornerRadius="4"
+                                                            Padding="5,1"
+                                                            Margin="8,0,0,0"
+                                                            VerticalAlignment="Center">
+                                                        <TextBlock Text="ALERT"
+                                                                   FontSize="9.5"
+                                                                   FontWeight="Bold"
+                                                                   Foreground="#DC2626"
+                                                                   TextWrapping="NoWrap"
+                                                                   TextTrimming="None" />
+                                                    </Border>
+                                                </StackPanel>
+                                                <TextBlock Text="{Binding SimplePatientSubline}"
+                                                           FontFamily="{StaticResource FontFamilyPrimary}"
+                                                           FontSize="10.5"
+                                                           Foreground="{StaticResource TextMutedBrush}"
+                                                           Margin="0,1,0,0"
                                                            TextWrapping="NoWrap"
                                                            TextTrimming="None" />
-                                            </Border>
-                                        </StackPanel>
-                                        <TextBlock Text="{Binding ReceptionNoteDisplay}"
-                                                   Visibility="{Binding HasReceptionNote, Converter={StaticResource BoolToVisibilityConverter}}"
-                                                   FontFamily="{StaticResource FontFamilyPrimary}"
-                                                   FontSize="10.5"
-                                                   FontWeight="Normal"
-                                                   Foreground="{StaticResource TextMutedBrush}"
-                                                   Margin="0,1,0,0"
-                                                   TextWrapping="NoWrap"
-                                                   TextTrimming="None" />
-                                    </StackPanel>
-                                </Grid>
-                            </DataTemplate>
-                        </controls:UniformColumnDef.CellTemplate>
-                    </controls:UniformColumnDef>
+                                            </StackPanel>
+                                        </Grid>
+                                    </DataTemplate>
+                                </controls:UniformColumnDef.CellTemplate>
+                            </controls:UniformColumnDef>
 
-                    <controls:UniformColumnDef Header="Doctor &amp; Room" WidthRatio="1.65" MinWidth="180">
-                        <controls:UniformColumnDef.CellTemplate>
-                            <DataTemplate>
-                                <Grid Margin="10,0"
-                                      Background="Transparent"
-                                      Opacity="{Binding RowContentOpacity}"
-                                      ToolTip="{Binding ToolTipText}">
-                                    <TextBlock Text="{Binding DoctorRoomDisplay}"
-                                               FontFamily="{StaticResource FontFamilyPrimary}"
-                                               FontSize="12"
-                                               Foreground="#334155"
-                                               VerticalAlignment="Center"
-                                               TextWrapping="NoWrap"
-                                               TextTrimming="None" />
-                                </Grid>
-                            </DataTemplate>
-                        </controls:UniformColumnDef.CellTemplate>
-                    </controls:UniformColumnDef>
-                </controls:UniformPagedGrid>
+                            <controls:UniformColumnDef Header="Reminder" MinWidth="126">
+                                <controls:UniformColumnDef.CellTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="14,5,22,5"
+                                              Background="Transparent"
+                                              Opacity="{Binding RowContentOpacity}"
+                                              ToolTip="{Binding ToolTipText}">
+                                            <Border Background="{Binding ReminderBadgeBackground}"
+                                                    BorderBrush="{Binding ReminderBadgeBorder}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="11"
+                                                    MinWidth="106"
+                                                    Height="23"
+                                                    Padding="9,0"
+                                                    HorizontalAlignment="Left"
+                                                    VerticalAlignment="Center">
+                                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                    <Ellipse Width="5"
+                                                             Height="5"
+                                                             Fill="{Binding ReminderDotBrush}"
+                                                             VerticalAlignment="Center"
+                                                             Margin="0,0,6,0" />
+                                                    <TextBlock Text="{Binding ReminderDisplay}"
+                                                               FontFamily="{StaticResource FontFamilyPrimary}"
+                                                               FontSize="11"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="{Binding ReminderBadgeForeground}"
+                                                               VerticalAlignment="Center"
+                                                               TextWrapping="NoWrap"
+                                                               TextTrimming="None" />
+                                                </StackPanel>
+                                            </Border>
+                                        </Grid>
+                                    </DataTemplate>
+                                </controls:UniformColumnDef.CellTemplate>
+                            </controls:UniformColumnDef>
+
+                            <controls:UniformColumnDef Header="Status" MinWidth="118">
+                                <controls:UniformColumnDef.CellTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="14,5,18,5"
+                                              Background="Transparent"
+                                              ToolTip="{Binding ToolTipText}">
+                                            <Border Background="{Binding StatusBadgeBackground}"
+                                                    BorderBrush="{Binding StatusBadgeBorder}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="12"
+                                                    MinWidth="104"
+                                                    Height="24"
+                                                    Padding="10,0"
+                                                    HorizontalAlignment="Left"
+                                                    VerticalAlignment="Center">
+                                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                    <Ellipse Width="6"
+                                                             Height="6"
+                                                             Fill="{Binding StatusDotBrush}"
+                                                             VerticalAlignment="Center"
+                                                             Margin="0,0,6,0" />
+                                                    <TextBlock Text="{Binding StatusDisplay}"
+                                                               FontFamily="{StaticResource FontFamilyPrimary}"
+                                                               FontSize="11.5"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="{Binding StatusBadgeForeground}"
+                                                               VerticalAlignment="Center"
+                                                               TextWrapping="NoWrap"
+                                                               TextTrimming="None" />
+                                                </StackPanel>
+                                            </Border>
+                                        </Grid>
+                                    </DataTemplate>
+                                </controls:UniformColumnDef.CellTemplate>
+                            </controls:UniformColumnDef>
+                        </controls:UniformPagedGrid>
+
+                        <!-- 1B. Live Queue DETAILED Operations View (Opt-In: 5 Compact Content-Fitted Columns) -->
+                        <controls:UniformPagedGrid x:Name="DetailedQueuePagedGrid"
+                                                   Visibility="{Binding IsQueueDetailedGridVisible, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                   Title="{Binding QueueGridTitle}"
+                                                   Subtitle="{Binding QueuePulseSummary}"
+                                                   EmptyMessage="No matching patients in today's queue — adjust filters or click + Walk-In."
+                                                   HorizontalAlignment="Left"
+                                                   MinWidth="660"
+                                                   EnforceColumnLimit="False"
+                                                   AllowAutoRowHeight="True"
+                                                   FitColumnsToContent="True"
+                                                   RowSpacing="4"
+                                                   ItemsSource="{Binding QueueRows}"
+                                                   SelectedItem="{Binding SelectedQueueRow, Mode=TwoWay}"
+                                                   RowDoubleClicked="QueuePagedGrid_RowDoubleClicked">
+                            <controls:UniformColumnDef Header="Appt / Arrived" MinWidth="92">
+                                <controls:UniformColumnDef.CellTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="14,5,22,5"
+                                              Background="Transparent"
+                                              Opacity="{Binding RowContentOpacity}"
+                                              ToolTip="{Binding ToolTipText}">
+                                            <StackPanel VerticalAlignment="Center">
+                                                <TextBlock Text="{Binding StackedTimePrimaryDisplay}"
+                                                           TextWrapping="NoWrap"
+                                                           TextTrimming="None">
+                                                    <TextBlock.Style>
+                                                        <Style TargetType="TextBlock">
+                                                            <Setter Property="FontFamily" Value="{StaticResource FontFamilyMono}" />
+                                                            <Setter Property="FontSize" Value="12" />
+                                                            <Setter Property="FontWeight" Value="SemiBold" />
+                                                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                                                            <Style.Triggers>
+                                                                <DataTrigger Binding="{Binding IsWalkIn}" Value="True">
+                                                                    <Setter Property="FontFamily" Value="{StaticResource FontFamilyPrimary}" />
+                                                                    <Setter Property="Foreground" Value="#B45309" />
+                                                                </DataTrigger>
+                                                            </Style.Triggers>
+                                                        </Style>
+                                                    </TextBlock.Style>
+                                                </TextBlock>
+                                                <TextBlock Text="{Binding StackedTimeSecondaryDisplay}"
+                                                           FontFamily="{StaticResource FontFamilyMono}"
+                                                           FontSize="10.5"
+                                                           Foreground="{StaticResource TextMutedBrush}"
+                                                           Margin="0,1,0,0"
+                                                           TextWrapping="NoWrap"
+                                                           TextTrimming="None" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </DataTemplate>
+                                </controls:UniformColumnDef.CellTemplate>
+                            </controls:UniformColumnDef>
+
+                            <controls:UniformColumnDef Header="Patient &amp; Note" MinWidth="180">
+                                <controls:UniformColumnDef.CellTemplate>
+                                    <DataTemplate>
+                                        <Grid Background="Transparent"
+                                              Opacity="{Binding RowContentOpacity}"
+                                              ToolTip="{Binding ToolTipText}">
+                                            <StackPanel Orientation="Vertical"
+                                                        Margin="14,5,26,5"
+                                                        VerticalAlignment="Center">
+                                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                                    <TextBlock Text="{Binding PatientNameDisplay}"
+                                                               FontFamily="{StaticResource FontFamilyPrimary}"
+                                                               FontSize="12"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="{StaticResource TextPrimaryBrush}"
+                                                               VerticalAlignment="Center"
+                                                               TextWrapping="NoWrap"
+                                                               TextTrimming="None" />
+                                                    <Border Visibility="{Binding HasCriticalAlert, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                            Background="#FEF2F2"
+                                                            BorderBrush="#FECACA"
+                                                            BorderThickness="1"
+                                                            CornerRadius="4"
+                                                            Padding="5,1"
+                                                            Margin="8,0,0,0"
+                                                            VerticalAlignment="Center">
+                                                        <TextBlock Text="ALERT"
+                                                                   FontSize="9.5"
+                                                                   FontWeight="Bold"
+                                                                   Foreground="#DC2626"
+                                                                   TextWrapping="NoWrap"
+                                                                   TextTrimming="None" />
+                                                    </Border>
+                                                </StackPanel>
+                                                <TextBlock Text="{Binding DetailedPatientSubline}"
+                                                           Visibility="{Binding HasDetailedPatientSubline, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                           FontFamily="{StaticResource FontFamilyPrimary}"
+                                                           FontSize="10.5"
+                                                           Foreground="{StaticResource TextMutedBrush}"
+                                                           Margin="0,1,0,0"
+                                                           TextWrapping="NoWrap"
+                                                           TextTrimming="None" />
+                                            </StackPanel>
+                                        </Grid>
+                                    </DataTemplate>
+                                </controls:UniformColumnDef.CellTemplate>
+                            </controls:UniformColumnDef>
+
+                            <controls:UniformColumnDef Header="Doctor &amp; Room" MinWidth="140">
+                                <controls:UniformColumnDef.CellTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="14,5,22,5"
+                                              Background="Transparent"
+                                              Opacity="{Binding RowContentOpacity}"
+                                              ToolTip="{Binding ToolTipText}">
+                                            <TextBlock Text="{Binding DoctorRoomDisplay}"
+                                                       FontFamily="{StaticResource FontFamilyPrimary}"
+                                                       FontSize="12"
+                                                       Foreground="#334155"
+                                                       VerticalAlignment="Center"
+                                                       TextWrapping="NoWrap"
+                                                       TextTrimming="None" />
+                                        </Grid>
+                                    </DataTemplate>
+                                </controls:UniformColumnDef.CellTemplate>
+                            </controls:UniformColumnDef>
+
+                            <controls:UniformColumnDef Header="Reminder" MinWidth="120">
+                                <controls:UniformColumnDef.CellTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="14,5,20,5"
+                                              Background="Transparent"
+                                              Opacity="{Binding RowContentOpacity}"
+                                              ToolTip="{Binding ToolTipText}">
+                                            <Border Background="{Binding ReminderBadgeBackground}"
+                                                    BorderBrush="{Binding ReminderBadgeBorder}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="11"
+                                                    MinWidth="104"
+                                                    Height="23"
+                                                    Padding="8,0"
+                                                    HorizontalAlignment="Left"
+                                                    VerticalAlignment="Center">
+                                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                    <Ellipse Width="5"
+                                                             Height="5"
+                                                             Fill="{Binding ReminderDotBrush}"
+                                                             VerticalAlignment="Center"
+                                                             Margin="0,0,5,0" />
+                                                    <TextBlock Text="{Binding ReminderDisplay}"
+                                                               FontFamily="{StaticResource FontFamilyPrimary}"
+                                                               FontSize="11"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="{Binding ReminderBadgeForeground}"
+                                                               VerticalAlignment="Center"
+                                                               TextWrapping="NoWrap"
+                                                               TextTrimming="None" />
+                                                </StackPanel>
+                                            </Border>
+                                        </Grid>
+                                    </DataTemplate>
+                                </controls:UniformColumnDef.CellTemplate>
+                            </controls:UniformColumnDef>
+
+                            <controls:UniformColumnDef Header="Status" MinWidth="128">
+                                <controls:UniformColumnDef.CellTemplate>
+                                    <DataTemplate>
+                                        <Grid Margin="14,5,18,5"
+                                              Background="Transparent"
+                                              ToolTip="{Binding ToolTipText}">
+                                            <Border Background="{Binding StatusBadgeBackground}"
+                                                    BorderBrush="{Binding StatusBadgeBorder}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="12"
+                                                    MinWidth="112"
+                                                    Height="24"
+                                                    Padding="9,0"
+                                                    HorizontalAlignment="Left"
+                                                    VerticalAlignment="Center">
+                                                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                    <Ellipse Width="6"
+                                                             Height="6"
+                                                             Fill="{Binding StatusDotBrush}"
+                                                             VerticalAlignment="Center"
+                                                             Margin="0,0,6,0" />
+                                                    <TextBlock Text="{Binding StatusDisplay}"
+                                                               FontFamily="{StaticResource FontFamilyPrimary}"
+                                                               FontSize="11.5"
+                                                               FontWeight="SemiBold"
+                                                               Foreground="{Binding StatusBadgeForeground}"
+                                                               VerticalAlignment="Center"
+                                                               TextWrapping="NoWrap"
+                                                               TextTrimming="None" />
+                                                </StackPanel>
+                                            </Border>
+                                        </Grid>
+                                    </DataTemplate>
+                                </controls:UniformColumnDef.CellTemplate>
+                            </controls:UniformColumnDef>
+                        </controls:UniformPagedGrid>
+                    </Grid>
+
+                    <!-- Right Panel: Intentionally left empty for future contextual preview / workspace -->
+                    <Grid Grid.Column="1" />
+                </Grid>
 
                 <!-- 2. Appointments (Calendar + Paged Table) -->
                 <Grid Visibility="{Binding IsAppointmentsWorkspace, Converter={StaticResource BoolToVisibilityConverter}}">
@@ -1283,8 +1658,8 @@
                 </Grid>
             </Grid>
 
-            <!-- Row 4: Clean Status Footer Strip -->
-            <Border Grid.Row="4"
+            <!-- Row 3: Clean Status Footer Strip -->
+            <Border Grid.Row="3"
                     Background="{StaticResource SurfaceCardBrush}"
                     BorderBrush="{StaticResource BorderHairlineBrush}"
                     BorderThickness="1"

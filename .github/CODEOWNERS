@@ -1,0 +1,5 @@
+# Require repository owner approval for changes to shared AI agent rules and GitHub governance files.
+/.agents/ @badrolazim
+/AGENTS.md @badrolazim
+/.github/ @badrolazim
+

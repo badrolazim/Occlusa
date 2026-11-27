@@ -45,7 +45,11 @@ graph TD
 ```text
 ├── .agents/
 │   └── rules/
-│       └── calm-dental-color-system.md    # Always-on 60-30-10 Calm Dental color system rule
+│       ├── calm-dental-color-system.md    # Always-on 60-30-10 Calm Dental color system rule
+│       └── patient-flow.md                # Always-on 5-stage clinic patient flow status rule
+├── .github/
+│   ├── CODEOWNERS                         # Protects shared agent rules & GitHub config via PR review
+│   └── PULL_REQUEST_TEMPLATE.md           # PR checklist for patient flow, color system & tests
 ├── docs/
 │   ├── architecture/
 │   │   └── APPOINTMENTS_SCHEDULING.md     # Relational calendar & 4-step booking architecture
@@ -82,6 +86,7 @@ graph TD
 │       ├── 005_patient_visits_and_visit_odontograms.sql
 │       ├── 006_decoupled_billing_credits_and_settings.sql
 │       └── 007_reminders_and_user_preferences.sql
+├── AGENTS.md                          # Shared repository rule index for collaborators & AI agents
 ├── CHANGELOG.md                       # SemVer release history
 ├── Directory.Build.props              # Synchronized SemVer version metadata
 ├── Occlusa.sln                        # Visual Studio / .NET solution

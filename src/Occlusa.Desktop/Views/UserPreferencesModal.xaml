@@ -84,7 +84,7 @@
                                                                    Foreground="{StaticResource BrandHoverBrush}" />
                                                     </Border>
                                                 </DockPanel>
-                                                <TextBlock Text="Full-width single-line queue (Time · Patient · Treatment · Doctor · Room · Reminder · Status), 1 smart next-step button, finished visits hidden."
+                                                <TextBlock Text="Calm 3-Column Kanban Board (Waiting · In Chair · Ready for Payment) with collapsible Scheduled &amp; Completed drawers and 1-click next-process card buttons."
                                                            Style="{StaticResource UniformMutedTextStyle}"
                                                            TextWrapping="Wrap" />
                                             </StackPanel>
@@ -119,7 +119,7 @@
                                                            FontWeight="Bold"
                                                            Foreground="{StaticResource TextPrimaryBrush}"
                                                            Margin="0,0,0,4" />
-                                                <TextBlock Text="Full-width telemetry columns (Appt, Arrived, Type, IC, Treatment, Duration, Doctor, Room, Note), live wait timers, status chips &amp; full stage bar."
+                                                <TextBlock Text="Same 3-Column Kanban Board enriched with live wait &amp; chair timers, arrival &amp; IC telemetry, inline reception notes, and extra toolbar controls."
                                                            Style="{StaticResource UniformMutedTextStyle}"
                                                            TextWrapping="Wrap" />
                                             </StackPanel>
@@ -178,7 +178,7 @@
                                   Style="{StaticResource UniformCheckBoxStyle}"
                                   Margin="0,0,0,10" />
 
-                        <CheckBox Content="Show reception notes in Detailed Live Queue table column"
+                        <CheckBox Content="Show reception notes inside Detailed Live Queue Kanban cards"
                                   IsChecked="{Binding ShowInlineReceptionNotes, Mode=TwoWay}"
                                   Style="{StaticResource UniformCheckBoxStyle}"
                                   Margin="0,0,0,10" />

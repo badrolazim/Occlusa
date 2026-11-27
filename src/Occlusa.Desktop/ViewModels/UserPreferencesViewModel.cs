@@ -126,8 +126,8 @@ public partial class UserPreferencesViewModel : ObservableObject
         HasUnsavedChanges = true;
         IsStatusError = false;
         StatusMessage = mode == LiveQueueViewMode.Simple
-            ? "Applied Simple View preset (full-width calm queue, single-line rows, 1 smart action button)."
-            : "Applied Detailed Operations preset (full-width detailed queue, live wait timers, notes column, full stage controls).";
+            ? "Applied Simple View preset (calm 3-Column Kanban Board with compact cards and collapsible Scheduled/Completed drawers)."
+            : "Applied Detailed Operations preset (3-Column Kanban Board enriched with live wait timers, arrival metadata, and inline reception notes).";
     }
 
     [RelayCommand]

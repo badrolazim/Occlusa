@@ -1347,4 +1347,280 @@
         </Setter>
     </Style>
 
+    <!-- ================================================================
+         LIVE QUEUE 3-COLUMN KANBAN BOARD & DRAWER STYLES (Calm Dental 60-30-10)
+         ================================================================ -->
+    <Style x:Key="UniformKanbanColumnBorderStyle" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource BgSubtleBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource BorderDefaultBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+    </Style>
+
+    <Style x:Key="UniformKanbanCardBorderStyle" TargetType="Border">
+        <Setter Property="Background" Value="{StaticResource BgSurfaceBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource BorderDefaultBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="CornerRadius" Value="8" />
+        <Setter Property="Padding" Value="11,9" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Style.Triggers>
+            <Trigger Property="IsMouseOver" Value="True">
+                <Setter Property="BorderBrush" Value="{StaticResource TextSecondaryBrush}" />
+            </Trigger>
+            <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                <Setter Property="BorderBrush" Value="{StaticResource BrandPrimaryBrush}" />
+                <Setter Property="BorderThickness" Value="1.5" />
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+
+    <!-- Soft Destination-Tinted Card Next-Process Buttons (Reserve Solid #069494 Strictly for Single Primary CTA) -->
+    <Style x:Key="UniformKanbanNextInChairButtonStyle" TargetType="Button">
+        <Setter Property="FontFamily" Value="{StaticResource FontFamilyPrimary}" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{StaticResource BrandHoverBrush}" />
+        <Setter Property="Background" Value="{StaticResource BrandTintBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource BrandPrimaryBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Height" Value="30" />
+        <Setter Property="Padding" Value="10,0" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{StaticResource ControlCornerRadius}"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                          RecognizesAccessKey="True" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource BrandPrimaryBrush}" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource BrandPrimaryBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource TextInverseBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource BrandHoverBrush}" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource BrandHoverBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource TextInverseBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource BgSubtleBrush}" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource BorderDefaultBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+                            <Setter Property="Opacity" Value="0.6" />
+                            <Setter Property="Cursor" Value="Arrow" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="UniformKanbanNextPaymentButtonStyle" TargetType="Button" BasedOn="{StaticResource UniformKanbanNextInChairButtonStyle}">
+        <Setter Property="Foreground" Value="{StaticResource StatusInfoBrush}" />
+        <Setter Property="Background" Value="{StaticResource StatusInfoBgBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource StatusInfoBrush}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{StaticResource ControlCornerRadius}"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                          RecognizesAccessKey="True" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource StatusInfoBrush}" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource StatusInfoBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource TextInverseBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource StatusInfoBrush}" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource StatusInfoBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource TextInverseBrush}" />
+                            <Setter TargetName="Bd" Property="Opacity" Value="0.9" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource BgSubtleBrush}" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource BorderDefaultBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+                            <Setter Property="Opacity" Value="0.6" />
+                            <Setter Property="Cursor" Value="Arrow" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="UniformKanbanNextCompletedButtonStyle" TargetType="Button" BasedOn="{StaticResource UniformKanbanNextInChairButtonStyle}">
+        <Setter Property="Foreground" Value="{StaticResource StatusSuccessBrush}" />
+        <Setter Property="Background" Value="{StaticResource StatusSuccessBgBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource StatusSuccessBrush}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{StaticResource ControlCornerRadius}"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                          RecognizesAccessKey="True" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource StatusSuccessBrush}" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource StatusSuccessBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource TextInverseBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource StatusSuccessBrush}" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource StatusSuccessBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource TextInverseBrush}" />
+                            <Setter TargetName="Bd" Property="Opacity" Value="0.9" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource BgSubtleBrush}" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource BorderDefaultBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+                            <Setter Property="Opacity" Value="0.6" />
+                            <Setter Property="Cursor" Value="Arrow" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="UniformKanbanNextWaitingButtonStyle" TargetType="Button" BasedOn="{StaticResource UniformKanbanNextInChairButtonStyle}">
+        <Setter Property="Foreground" Value="{StaticResource StatusWarningBrush}" />
+        <Setter Property="Background" Value="{StaticResource StatusWarningBgBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource StatusWarningBrush}" />
+        <Setter Property="Height" Value="26" />
+        <Setter Property="FontSize" Value="11.5" />
+        <Setter Property="Padding" Value="9,0" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="Button">
+                    <Border x:Name="Bd"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{StaticResource ControlCornerRadius}"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                          RecognizesAccessKey="True" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource StatusWarningBrush}" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource StatusWarningBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource TextInverseBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsPressed" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource StatusWarningBrush}" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource StatusWarningBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource TextInverseBrush}" />
+                            <Setter TargetName="Bd" Property="Opacity" Value="0.9" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource BgSubtleBrush}" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource BorderDefaultBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+                            <Setter Property="Opacity" Value="0.6" />
+                            <Setter Property="Cursor" Value="Arrow" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="UniformKanbanPagerButtonStyle" TargetType="Button" BasedOn="{StaticResource UniformSecondaryButtonStyle}">
+        <Setter Property="Height" Value="24" />
+        <Setter Property="MinWidth" Value="28" />
+        <Setter Property="Padding" Value="8,0" />
+        <Setter Property="FontSize" Value="11" />
+    </Style>
+
+    <Style x:Key="UniformMyQueueToggleButtonStyle" TargetType="ToggleButton">
+        <Setter Property="FontFamily" Value="{StaticResource FontFamilyPrimary}" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+        <Setter Property="Background" Value="{StaticResource BgSurfaceBrush}" />
+        <Setter Property="BorderBrush" Value="{StaticResource BorderDefaultBrush}" />
+        <Setter Property="BorderThickness" Value="1" />
+        <Setter Property="Height" Value="32" />
+        <Setter Property="Padding" Value="12,0" />
+        <Setter Property="VerticalAlignment" Value="Center" />
+        <Setter Property="HorizontalContentAlignment" Value="Center" />
+        <Setter Property="VerticalContentAlignment" Value="Center" />
+        <Setter Property="Cursor" Value="Hand" />
+        <Setter Property="SnapsToDevicePixels" Value="True" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToggleButton">
+                    <Border x:Name="Bd"
+                            Background="{TemplateBinding Background}"
+                            BorderBrush="{TemplateBinding BorderBrush}"
+                            BorderThickness="{TemplateBinding BorderThickness}"
+                            CornerRadius="{StaticResource ControlCornerRadius}"
+                            Padding="{TemplateBinding Padding}">
+                        <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                          VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
+                                          RecognizesAccessKey="True" />
+                    </Border>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource BrandTintBrush}" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource BrandPrimaryBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource BrandHoverBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsChecked" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource BrandTintBrush}" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource BrandPrimaryBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource BrandHoverBrush}" />
+                        </Trigger>
+                        <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="Bd" Property="Background" Value="{StaticResource BgSubtleBrush}" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource BorderDefaultBrush}" />
+                            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+                            <Setter Property="Opacity" Value="0.65" />
+                            <Setter Property="Cursor" Value="Arrow" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
+    <Style x:Key="UniformDrawerToggleButtonStyle" TargetType="ToggleButton" BasedOn="{StaticResource UniformMyQueueToggleButtonStyle}">
+        <Setter Property="Height" Value="30" />
+        <Setter Property="Padding" Value="11,0" />
+        <Setter Property="FontSize" Value="11.5" />
+    </Style>
+
 </ResourceDictionary>

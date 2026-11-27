@@ -38,13 +38,88 @@ public partial class MainWindow : Window
         Closed += (_, _) => _viewModel.StopTimers();
     }
 
-    private async void QueuePagedGrid_RowDoubleClicked(object? sender, object? rowObj)
+    private async void LiveQueueKanban_CardNextStageRequested(object? sender, QueueRowItem row)
     {
-        if (rowObj is not QueueRowItem row)
+        var normalized = AppointmentCalendarHelper.NormalizeQueueStatus(row.Source.Status);
+        switch (normalized)
         {
-            return;
-        }
+            case QueueStatus.Waiting:
+            {
+                var updated = await _viewModel.TransitionQueueItemAsync(row, QueueStatus.InChair);
+                if (updated is not null)
+                {
+                    await OpenVisitForQueueItemAsync(updated, this);
+                }
+                break;
+            }
 
+            case QueueStatus.InChair:
+            {
+                var existingInvoice = _viewModel.FindActiveInvoiceForVisitOrAppointment(row.Source.VisitId, row.Source.Id);
+                var updated = await _viewModel.TransitionQueueItemAsync(row, QueueStatus.AwaitingCheckout);
+                if (updated is not null)
+                {
+                    await OpenCheckoutForQueueItemAsync(updated, forceDentistCheckout: existingInvoice is null);
+                }
+                break;
+            }
+
+            case QueueStatus.AwaitingCheckout:
+            {
+                var existingInvoice = _viewModel.FindActiveInvoiceForVisitOrAppointment(row.Source.VisitId, row.Source.Id);
+                if (existingInvoice is not null && !existingInvoice.IsVoided && existingInvoice.Payments.Count > 0 && existingInvoice.BalanceDue <= 0m)
+                {
+                    await _viewModel.TransitionQueueItemAsync(row, QueueStatus.Completed);
+                }
+                else
+                {
+                    await OpenCheckoutForQueueItemAsync(row.Source, forceDentistCheckout: false);
+                }
+                break;
+            }
+        }
+    }
+
+    private async void LiveQueueKanban_CardDoubleClicked(object? sender, QueueRowItem row)
+    {
+        await OpenContextualModalForQueueRowAsync(row);
+    }
+
+    private async void LiveQueueKanban_DrawerRowDoubleClicked(object? sender, QueueRowItem row)
+    {
+        await OpenContextualModalForQueueRowAsync(row);
+    }
+
+    private async void LiveQueueKanban_ScheduledCheckInRequested(object? sender, QueueRowItem row)
+    {
+        await _viewModel.TransitionQueueItemAsync(row, QueueStatus.Waiting);
+    }
+
+    private async void LiveQueueKanban_ScheduledApproveAiRequested(object? sender, QueueRowItem row)
+    {
+        await _viewModel.ApproveAiBookingRowAsync(row);
+    }
+
+    private void LiveQueueKanban_ScheduledRemindRequested(object? sender, QueueRowItem row)
+    {
+        OpenReminderModal(row.Source, owner: this, onUpdated: null);
+    }
+
+    private async void LiveQueueKanban_CompletedOpenInvoiceRequested(object? sender, QueueRowItem row)
+    {
+        var invoice = _viewModel.FindActiveInvoiceForVisitOrAppointment(row.Source.VisitId, row.Source.Id);
+        if (invoice is not null)
+        {
+            await OpenExistingInvoiceModalAsync(invoice);
+        }
+        else
+        {
+            _viewModel.StatusMessage = $"No active invoice recorded for {row.Source.PatientName}.";
+        }
+    }
+
+    private async Task OpenContextualModalForQueueRowAsync(QueueRowItem row)
+    {
         var normalized = AppointmentCalendarHelper.NormalizeQueueStatus(row.Source.Status);
         if (normalized == QueueStatus.AwaitingCheckout)
         {
@@ -530,7 +605,7 @@ public partial class MainWindow : Window
         }
     }
 
-    private async Task OpenCheckoutForQueueItemAsync(AppointmentQueueItemDto queueItem)
+    private async Task OpenCheckoutForQueueItemAsync(AppointmentQueueItemDto queueItem, bool? forceDentistCheckout = null)
     {
         try
         {
@@ -550,7 +625,7 @@ public partial class MainWindow : Window
             };
 
             var existingInvoice = _viewModel.FindActiveInvoiceForVisitOrAppointment(visit.Id, queueItem.Id);
-            bool dentistCheckout = queueItem.Status == QueueStatus.InChair && existingInvoice is null;
+            bool dentistCheckout = forceDentistCheckout ?? (queueItem.Status == QueueStatus.InChair && existingInvoice is null);
 
             OpenInvoiceBuilderModal(
                 existingInvoice: existingInvoice,

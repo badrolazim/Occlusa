@@ -45,6 +45,25 @@ public sealed record DentistSlotAvailability(
 }
 
 /// <summary>
+/// Deterministic 5-stage bucket partition backing the 3-Column Live Queue Kanban Board
+/// (Waiting, In Chair, Ready for Payment) plus collapsible Scheduled and Completed drawers.
+/// </summary>
+public sealed record LiveQueueKanbanBuckets(
+    IReadOnlyList<AppointmentQueueItemDto> Waiting,
+    IReadOnlyList<AppointmentQueueItemDto> InChair,
+    IReadOnlyList<AppointmentQueueItemDto> ReadyForPayment,
+    IReadOnlyList<AppointmentQueueItemDto> Scheduled,
+    IReadOnlyList<AppointmentQueueItemDto> Completed);
+
+/// <summary>
+/// One clamped zero-scrollbar page slice of items inside a Kanban column.
+/// </summary>
+public sealed record KanbanPageSlice<T>(
+    IReadOnlyList<T> Items,
+    int CurrentPage,
+    int TotalPages);
+
+/// <summary>
 /// Pure deterministic calendar projection, slot mapping, and filtering helpers
 /// shared between Occlusa.Desktop and automated unit tests.
 /// </summary>
@@ -507,13 +526,13 @@ public static class AppointmentCalendarHelper
         && (now - appt.ArrivedAt.Value).TotalMinutes >= thresholdMinutes;
 
     /// <summary>
-    /// Human-readable short status label used across appointment tables and cards.
+    /// Human-readable canonical 5-stage status label used across appointment tables, Live Queue cards, and drawers.
     /// </summary>
     public static string FormatStatusLabel(QueueStatus status) => NormalizeQueueStatus(status) switch
     {
-        QueueStatus.AiBookedPending => "AI-Booked",
+        QueueStatus.AiBookedPending => "AI-Booked Pending",
         QueueStatus.InChair => "In Chair",
-        QueueStatus.AwaitingCheckout => "Checkout",
+        QueueStatus.AwaitingCheckout => "Ready for Payment",
         _ => NormalizeQueueStatus(status).ToString()
     };
 
@@ -1104,6 +1123,131 @@ public static class AppointmentCalendarHelper
         }
 
         return SortLiveQueue(query);
+    }
+
+    /// <summary>
+    /// Partitions today's Live Queue into the 3 active Kanban columns (Waiting, In Chair, Ready for Payment)
+    /// and the 2 collapsible drawers (Scheduled including AI-Booked Pending, Completed including Cancelled),
+    /// applying dentist My Queue scoping, optional doctor filtering, and optional unreminded filtering.
+    /// </summary>
+    public static LiveQueueKanbanBuckets PartitionLiveQueueKanban(
+        IEnumerable<AppointmentQueueItemDto> todayItems,
+        LiveQueueScopeMode scope,
+        string? activeStaffName,
+        IReadOnlyList<DentistDto>? dentists,
+        Guid? doctorFilterId = null,
+        string? doctorFilterName = null,
+        bool scheduledUnremindedOnly = false)
+    {
+        IEnumerable<AppointmentQueueItemDto> scoped = todayItems;
+
+        if (scope == LiveQueueScopeMode.MyQueue && IsDentistStaff(activeStaffName, dentists))
+        {
+            scoped = scoped.Where(a => MatchesDentistStaff(a, activeStaffName, dentists));
+        }
+        else if (doctorFilterId.HasValue || !string.IsNullOrWhiteSpace(doctorFilterName))
+        {
+            scoped = scoped.Where(a =>
+            {
+                if (doctorFilterId.HasValue && a.DentistId.HasValue)
+                {
+                    return a.DentistId.Value == doctorFilterId.Value;
+                }
+
+                return !string.IsNullOrWhiteSpace(doctorFilterName)
+                    && string.Equals(a.DoctorName.Trim(), doctorFilterName.Trim(), StringComparison.OrdinalIgnoreCase);
+            });
+        }
+
+        var list = scoped.ToList();
+
+        var waiting = list
+            .Where(a => NormalizeQueueStatus(a.Status) == QueueStatus.Waiting)
+            .OrderBy(a => a.ArrivedAt ?? a.ScheduledAt)
+            .ThenBy(a => a.ScheduledAt)
+            .ThenBy(a => a.Id)
+            .ToList();
+
+        var inChair = list
+            .Where(a => a.Status == QueueStatus.InChair)
+            .OrderBy(a => a.SeatedAt ?? a.ScheduledAt)
+            .ThenBy(a => a.ScheduledAt)
+            .ThenBy(a => a.Id)
+            .ToList();
+
+        var readyForPayment = list
+            .Where(a => a.Status == QueueStatus.AwaitingCheckout)
+            .OrderBy(a => a.CheckoutAt ?? a.ScheduledAt)
+            .ThenBy(a => a.ScheduledAt)
+            .ThenBy(a => a.Id)
+            .ToList();
+
+        IEnumerable<AppointmentQueueItemDto> scheduledQuery = list
+            .Where(a => a.Status is QueueStatus.AiBookedPending or QueueStatus.Scheduled);
+
+        if (scheduledUnremindedOnly)
+        {
+            scheduledQuery = scheduledQuery.Where(a =>
+                IsUpcomingRemindableAppointment(a)
+                && a.ReminderStatus is ReminderStatus.NotReminded or ReminderStatus.NoReply);
+        }
+
+        var scheduled = scheduledQuery
+            .OrderBy(a => a.Status == QueueStatus.AiBookedPending ? 0 : 1)
+            .ThenBy(a => a.ScheduledAt)
+            .ThenBy(a => a.Id)
+            .ToList();
+
+        var completed = list
+            .Where(a => a.Status is QueueStatus.Completed or QueueStatus.Cancelled)
+            .OrderBy(a => a.Status == QueueStatus.Completed ? 0 : 1)
+            .ThenByDescending(a => a.CompletedAt ?? a.LastUpdatedAt ?? a.ScheduledAt)
+            .ThenBy(a => a.Id)
+            .ToList();
+
+        return new LiveQueueKanbanBuckets(waiting, inChair, readyForPayment, scheduled, completed);
+    }
+
+    /// <summary>
+    /// Computes a clamped zero-scrollbar page slice for a Kanban column.
+    /// </summary>
+    public static KanbanPageSlice<T> ComputeKanbanPage<T>(
+        IReadOnlyList<T> items,
+        int requestedPage,
+        int pageSize)
+    {
+        int safePageSize = Math.Max(1, pageSize);
+        int totalPages = Math.Max(1, (int)Math.Ceiling(items.Count / (double)safePageSize));
+        int clampedPage = Math.Clamp(requestedPage, 1, totalPages);
+
+        if (items.Count == 0)
+        {
+            return new KanbanPageSlice<T>(Array.Empty<T>(), 1, 1);
+        }
+
+        int skip = (clampedPage - 1) * safePageSize;
+        var slice = items.Skip(skip).Take(safePageSize).ToList();
+        return new KanbanPageSlice<T>(slice, clampedPage, totalPages);
+    }
+
+    /// <summary>
+    /// Computes how many fixed-height Kanban cards fit inside a column body without introducing scrollbars.
+    /// </summary>
+    public static int CalculateKanbanCardsPerPage(
+        double availableHeight,
+        double cardHeight,
+        double cardSpacing = 8.0)
+    {
+        if (double.IsNaN(availableHeight)
+            || double.IsInfinity(availableHeight)
+            || availableHeight <= 0
+            || cardHeight <= 0)
+        {
+            return 1;
+        }
+
+        double spacing = Math.Max(0.0, cardSpacing);
+        return Math.Max(1, (int)Math.Floor((availableHeight + spacing) / (cardHeight + spacing)));
     }
 
     /// <summary>

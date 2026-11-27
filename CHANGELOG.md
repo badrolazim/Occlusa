@@ -6,6 +6,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.9.0] - 2026-11-27
+### Added
+- **Live Queue 3-Column Kanban Board (`LiveQueueKanbanView`, `LiveQueueKanbanColumnVm`):** Replaced the tabular Live Queue workspace with a zero-scrollbar 3-column Kanban board displaying the three active in-clinic stages side-by-side—**`Waiting (N)`**, **`In Chair (N)`**, and **`Ready for Payment (N)`**—with dynamic height-aware per-column pagination (`◀` / `▶`), selection highlighting, and Calm Dental 60-30-10 card styling.
+- **Collapsible Inline `Scheduled` & `Completed` Bottom Drawers (`LiveQueueDrawerMode`):** Tucked **`Scheduled (N) ▲`** (including `AI-Booked Pending` exceptions + `All Upcoming` / `Unreminded` filtering and inline **`Waiting →`** / **`Approve AI`** row actions) and **`Completed (N) ▲`** (including `Cancelled` exceptions + `Open Invoice`) into a pinned bottom dock bar that expands inline `UniformPagedGrid` drawers upward on click without introducing scrollbars.
+- **Stacked `"Move patient to"` Modal-Backed Card Transitions:** Added a `"Move patient to"` micro-label directly above destination-tinted next-process buttons on every Kanban card:
+  - **`Waiting` → `In Chair →`**: Moves card into Column 2 (`In Chair`) and opens `VisitRecordModal`.
+  - **`In Chair` → `Ready for Payment →`**: Moves card into Column 3 (`Ready for Payment`) and opens `InvoiceCheckoutModal` in Dentist Draft mode when no invoice exists yet.
+  - **`Ready for Payment` → `Completed →`**: Opens `InvoiceCheckoutModal` in Cashier Settlement mode (auto-transitioning to `Completed` upon full payment, or completing directly if already settled).
+- **Top-Bar Dentist `My Queue` Personal Filter Toggle (`ToggleMyQueueScopeCommand`, `UniformMyQueueToggleButtonStyle`):** Added a prominent top-left **`My Queue`** toggle button available across both Simple and Detailed views so practicing dentists can filter all three Kanban columns and both hidden drawers strictly to their own patients in one click, paired with a `Doctor:` dropdown filter for Reception and All Clinic views.
+- **Pure Kanban Partitioning & Pagination Helpers (`AppointmentCalendarHelper`):** Added `LiveQueueKanbanBuckets`, `PartitionLiveQueueKanban`, `KanbanPageSlice<T>`, `ComputeKanbanPage`, and `CalculateKanbanCardsPerPage`.
+- **4 New xUnit Tests (`110` total tests in `Occlusa.Tests`):** Expanded `LiveQueueRemindersAndPreferencesTests.cs` covering 3-column + hidden-drawer bucketing and ordering, Dentist `My Queue` / Doctor / `Unreminded` scoping, zero-scrollbar pagination clamping and card capacity math, and strict 5-stage canonical status labels.
+
+### Changed
+- **Strict 5-Stage Canonical Terminology (`.agents/rules/patient-flow.md`):** Standardized all Live Queue UI labels, `AppointmentCalendarHelper.FormatStatusLabel`, `QueueRowItem`, and pulse summaries to exact canonical names (`Scheduled`, `Waiting`, `In Chair`, `Ready for Payment`, `Completed`, preserving elapsed timer prefixes like `Waiting · 21m` and `Ready for Payment · 7m`).
+- **Unified Live Queue Toolbar & Sidebar Shortcut (`MainWindow.xaml`, `MainViewModel.cs`):** Consolidated the dual Simple/Detailed Live Queue toolbars into one clean single-row toolbar keeping **`+ Walk-In`** as the sole solid `#069494` primary CTA, wired the sidebar `AI-Booked Pending` shortcut (`SelectQueueWorkspaceAndScheduledDrawerCommand`) to jump straight into Live Queue with the `Scheduled` drawer expanded, and updated Simple/Detailed Kanban descriptions in `UserPreferencesModal.xaml` and `UserPreferencesViewModel.cs`.
+- Updated `docs/UI_UNIFORMITY_RULES.md` and `README.md` to document the 3-Column Live Queue Kanban Board, top-bar Dentist `My Queue` toggle, and collapsible bottom drawers.
+
+### Removed
+- Removed legacy dual `UniformPagedGrid` Live Queue tables (`SimpleQueuePagedGrid` and `DetailedQueuePagedGrid`) and legacy `"Checkout"` / `"Done"` UI status labels from `MainWindow.xaml` and `MainDisplayRows.cs`.
+
 ## [0.8.0] - 2026-11-27
 ### Added
 - **Calm Dental App Color System (`Themes/UniformTheme.xaml`, `Themes/CalmThemePalette.cs`, `.agents/rules/calm-dental-color-system.md`):** Centralized all desktop UI colors into the strict 17-token 60-30-10 clinical palette (`#F7FAFA` canvas, `#FFFFFF` cards, `#EDF3F3` subtle surfaces/sidebars/headers, `#D8E3E3` borders, `#182929`/`#566B6B` typography, `#069494`/`#057878`/`#E3F4F4` teal accent & soft tint, plus calm Success `#2B825B`/`#EAF6F0`, Info `#2E6FA3`/`#EBF3FA`, Warning `#C47B1B`/`#FDF4E7`, and Error `#C44545`/`#FBECEC` semantic pairs) with a frozen C# token accessor (`CalmThemePalette`) and an `always_on` workspace rule.

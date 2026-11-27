@@ -92,6 +92,15 @@ public sealed partial class QueueRowItem : ObservableObject
     private string _statusDisplay = string.Empty;
 
     [ObservableProperty]
+    private string _elapsedBadgeDisplay = string.Empty;
+
+    [ObservableProperty]
+    private bool _showCardTimerBadge;
+
+    [ObservableProperty]
+    private bool _isLongWaitAlert;
+
+    [ObservableProperty]
     private Brush _statusBadgeBackground = ScheduledPalette.Background;
 
     [ObservableProperty]
@@ -106,14 +115,29 @@ public sealed partial class QueueRowItem : ObservableObject
     [ObservableProperty]
     private string _toolTipText = string.Empty;
 
+    [ObservableProperty]
+    private bool _isSelected;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CanExecuteNextStage))]
+    private bool _isTransitioning;
+
     public QueueRowItem(
         AppointmentQueueItemDto source,
         bool showDoctorInSubline = false,
         bool showWaitTimers = false,
-        bool showInlineReceptionNotes = false)
+        bool showInlineReceptionNotes = false,
+        bool isDetailedCard = false)
     {
         Source = source;
         _showWaitTimers = showWaitTimers;
+        IsDetailedCard = isDetailedCard;
+        NormalizedStatus = AppointmentCalendarHelper.NormalizeQueueStatus(source.Status);
+        IsWaitingStage = NormalizedStatus == QueueStatus.Waiting;
+        IsInChairStage = NormalizedStatus == QueueStatus.InChair;
+        IsReadyForPaymentStage = NormalizedStatus == QueueStatus.AwaitingCheckout;
+        IsAiBookedPending = source.Status == QueueStatus.AiBookedPending;
+        CanCheckInFromDrawer = source.Status is QueueStatus.Scheduled or QueueStatus.AiBookedPending;
         IsWalkIn = source.VisitType == VisitType.WalkIn;
         IsNoAppointment = IsWalkIn;
         ApptTimeDisplay = IsWalkIn
@@ -157,6 +181,9 @@ public sealed partial class QueueRowItem : ObservableObject
         };
 
         PatientNameDisplay = source.PatientName;
+        CardPatientNameDisplay = source.PatientName.Length <= 28
+            ? source.PatientName
+            : AppointmentCalendarHelper.FormatCompactPatientName(source.PatientName);
         PatientIcDisplay = string.IsNullOrWhiteSpace(source.PatientIc) ? "—" : source.PatientIc;
         HasCriticalAlert = source.HasCriticalMedicalAlert;
         PatientMeasureText = HasCriticalAlert
@@ -169,6 +196,7 @@ public sealed partial class QueueRowItem : ObservableObject
         TreatmentDisplay = string.IsNullOrWhiteSpace(source.ProcedureSummary)
             ? "Consultation"
             : RowTextHelper.NormalizeSingleLine(source.ProcedureSummary);
+        CardTreatmentDisplay = AppointmentCalendarHelper.FormatCompactTreatment(TreatmentDisplay, 38);
         DurationDisplay = $"{source.DurationMinutes}m";
         DoctorDisplay = string.IsNullOrWhiteSpace(source.DoctorName) ? "Unassigned" : source.DoctorName.Trim();
         RoomDisplay = string.IsNullOrWhiteSpace(source.RoomName) ? "—" : source.RoomName.Trim();
@@ -176,10 +204,25 @@ public sealed partial class QueueRowItem : ObservableObject
             ? DoctorDisplay
             : $"{DoctorDisplay} · {RoomDisplay}";
 
+        CardClinicianSummary = showDoctorInSubline
+            ? $"{DoctorDisplay} · {DurationDisplay}"
+            : DurationDisplay;
+
+        string arrivedMeta = IsWalkIn
+            ? $"Arr {ArrivedShortDisplay} · Walk-In"
+            : (HasArrivalTime ? $"Arr {ArrivedShortDisplay} · {VisitTypeDisplay}" : VisitTypeDisplay);
+        CardDetailedMetaDisplay = string.IsNullOrWhiteSpace(source.PatientIc)
+            ? arrivedMeta
+            : $"{arrivedMeta} · {source.PatientIc}";
+
         string fullNote = RowTextHelper.NormalizeSingleLine(source.Notes);
         ReceptionNoteDisplay = fullNote;
         HasReceptionNote = showInlineReceptionNotes && !string.IsNullOrWhiteSpace(fullNote);
         NoteColumnDisplay = HasReceptionNote ? fullNote : "—";
+        CardReceptionNoteDisplay = HasReceptionNote
+            ? AppointmentCalendarHelper.FormatCompactReceptionNote(fullNote, 46)
+            : string.Empty;
+        ShowCardReceptionNote = HasReceptionNote && !string.IsNullOrWhiteSpace(CardReceptionNoteDisplay);
 
         SimplePatientSubline = showDoctorInSubline
             ? $"{DoctorDisplay} · {TreatmentDisplay}"
@@ -189,6 +232,30 @@ public sealed partial class QueueRowItem : ObservableObject
 
         IsFinished = AppointmentCalendarHelper.IsFinishedQueueStatus(source.Status);
         RowContentOpacity = IsFinished ? 0.58 : 1.0;
+
+        FinishedAtDisplay = (source.CompletedAt ?? source.LastUpdatedAt ?? source.ScheduledAt)
+            .ToLocalTime()
+            .ToString("HH:mm", CultureInfo.InvariantCulture);
+
+        NextStageTargetStatus = NormalizedStatus switch
+        {
+            QueueStatus.AiBookedPending => QueueStatus.Waiting,
+            QueueStatus.Scheduled => QueueStatus.Waiting,
+            QueueStatus.Waiting => QueueStatus.InChair,
+            QueueStatus.InChair => QueueStatus.AwaitingCheckout,
+            QueueStatus.AwaitingCheckout => QueueStatus.Completed,
+            _ => null
+        };
+
+        NextStageLabel = NormalizedStatus switch
+        {
+            QueueStatus.AiBookedPending => "Waiting →",
+            QueueStatus.Scheduled => "Waiting →",
+            QueueStatus.Waiting => "In Chair →",
+            QueueStatus.InChair => "Ready for Payment →",
+            QueueStatus.AwaitingCheckout => "Completed →",
+            _ => string.Empty
+        };
 
         ReminderDisplay = AppointmentCalendarHelper.FormatReminderBadgeLabel(source);
         IsReminderQuiet = !AppointmentCalendarHelper.IsUpcomingRemindableAppointment(source);
@@ -210,6 +277,17 @@ public sealed partial class QueueRowItem : ObservableObject
     }
 
     public AppointmentQueueItemDto Source { get; }
+    public QueueStatus NormalizedStatus { get; }
+    public bool IsDetailedCard { get; }
+    public bool IsWaitingStage { get; }
+    public bool IsInChairStage { get; }
+    public bool IsReadyForPaymentStage { get; }
+    public bool IsAiBookedPending { get; }
+    public bool CanCheckInFromDrawer { get; }
+    public QueueStatus? NextStageTargetStatus { get; }
+    public string NextStageLabel { get; }
+    public bool CanExecuteNextStage => !IsTransitioning && NextStageTargetStatus.HasValue;
+    public string FinishedAtDisplay { get; }
     public string TimeDisplay { get; }
     public string SimpleTimeDisplay { get; }
     public string StackedTimePrimaryDisplay { get; }
@@ -222,12 +300,18 @@ public sealed partial class QueueRowItem : ObservableObject
     public bool HasArrivalTime { get; }
     public string VisitTypeDisplay { get; }
     public string PatientNameDisplay { get; }
+    public string CardPatientNameDisplay { get; }
     public string PatientMeasureText { get; }
     public string PatientIcDisplay { get; }
     public string TreatmentDisplay { get; }
+    public string CardTreatmentDisplay { get; }
     public string DurationDisplay { get; }
     public string DoctorDisplay { get; }
     public string RoomDisplay { get; }
+    public string CardClinicianSummary { get; }
+    public string CardDetailedMetaDisplay { get; }
+    public string CardReceptionNoteDisplay { get; }
+    public bool ShowCardReceptionNote { get; }
     public string NoteColumnDisplay { get; }
     public string SimplePatientSubline { get; }
     public string DetailedPatientSubline { get; }
@@ -250,21 +334,33 @@ public sealed partial class QueueRowItem : ObservableObject
     {
         var normalized = AppointmentCalendarHelper.NormalizeQueueStatus(Source.Status);
 
+        string elapsed = normalized switch
+        {
+            QueueStatus.Waiting => AppointmentCalendarHelper.FormatElapsedMinutes(Source.ArrivedAt, now),
+            QueueStatus.InChair => AppointmentCalendarHelper.FormatElapsedMinutes(Source.SeatedAt, now),
+            QueueStatus.AwaitingCheckout => AppointmentCalendarHelper.FormatElapsedMinutes(Source.CheckoutAt, now),
+            _ => string.Empty
+        };
+
+        ElapsedBadgeDisplay = elapsed;
+        ShowCardTimerBadge = _showWaitTimers && !string.IsNullOrEmpty(elapsed);
+        IsLongWaitAlert = _showWaitTimers && AppointmentCalendarHelper.IsLongWait(Source, now);
+
         StatusDisplay = normalized switch
         {
             QueueStatus.Waiting => _showWaitTimers ? FormatWaitingStatus(now) : "Waiting",
             QueueStatus.InChair => _showWaitTimers ? FormatInChairStatus(now) : "In Chair",
-            QueueStatus.AwaitingCheckout => "Checkout",
-            QueueStatus.AiBookedPending => "AI Pending",
+            QueueStatus.AwaitingCheckout => _showWaitTimers ? FormatReadyForPaymentStatus(now) : "Ready for Payment",
+            QueueStatus.AiBookedPending => "AI-Booked Pending",
             QueueStatus.Scheduled => "Scheduled",
-            QueueStatus.Completed => "Done",
+            QueueStatus.Completed => "Completed",
             QueueStatus.Cancelled => "Cancelled",
             _ => normalized.ToString()
         };
 
         var palette = normalized switch
         {
-            QueueStatus.Waiting => (_showWaitTimers && AppointmentCalendarHelper.IsLongWait(Source, now)) ? LongWaitPalette : WaitingPalette,
+            QueueStatus.Waiting => IsLongWaitAlert ? LongWaitPalette : WaitingPalette,
             QueueStatus.InChair => InChairPalette,
             QueueStatus.AwaitingCheckout => CheckoutPalette,
             QueueStatus.AiBookedPending => AiPendingPalette,
@@ -290,6 +386,12 @@ public sealed partial class QueueRowItem : ObservableObject
     {
         var elapsed = AppointmentCalendarHelper.FormatElapsedMinutes(Source.SeatedAt, now);
         return string.IsNullOrEmpty(elapsed) ? "In Chair" : $"In Chair · {elapsed}";
+    }
+
+    private string FormatReadyForPaymentStatus(DateTimeOffset now)
+    {
+        var elapsed = AppointmentCalendarHelper.FormatElapsedMinutes(Source.CheckoutAt, now);
+        return string.IsNullOrEmpty(elapsed) ? "Ready for Payment" : $"Ready for Payment · {elapsed}";
     }
 
     private string BuildToolTip(QueueStatus normalized)

@@ -122,6 +122,136 @@ public class LiveQueueRemindersAndPreferencesTests
     }
 
     [Fact]
+    public void PartitionLiveQueueKanban_GroupsIntoThreeActiveColumnsAndHiddenScheduledCompletedBuckets()
+    {
+        var dAina = new DentistDto { Id = Guid.NewGuid(), FullName = "Dr. Aina Rahman" };
+        var dentists = new List<DentistDto> { dAina };
+        var now = new DateTimeOffset(2026, 11, 27, 11, 0, 0, TimeSpan.FromHours(8));
+
+        var items = new List<AppointmentQueueItemDto>
+        {
+            new() { Id = Guid.NewGuid(), PatientName = "Waiting Recent", DentistId = dAina.Id, DoctorName = dAina.FullName, Status = QueueStatus.Waiting, ScheduledAt = now.AddMinutes(-10), ArrivedAt = now.AddMinutes(-8) },
+            new() { Id = Guid.NewGuid(), PatientName = "Legacy Arrived Longest", DentistId = dAina.Id, DoctorName = dAina.FullName, Status = QueueStatus.Arrived, ScheduledAt = now.AddMinutes(-5), ArrivedAt = now.AddMinutes(-35) },
+            new() { Id = Guid.NewGuid(), PatientName = "In Chair Newer", DentistId = dAina.Id, DoctorName = dAina.FullName, Status = QueueStatus.InChair, ScheduledAt = now.AddMinutes(-20), SeatedAt = now.AddMinutes(-10) },
+            new() { Id = Guid.NewGuid(), PatientName = "In Chair Earlier", DentistId = dAina.Id, DoctorName = dAina.FullName, Status = QueueStatus.InChair, ScheduledAt = now.AddMinutes(-40), SeatedAt = now.AddMinutes(-25) },
+            new() { Id = Guid.NewGuid(), PatientName = "Payment Newer", DentistId = dAina.Id, DoctorName = dAina.FullName, Status = QueueStatus.AwaitingCheckout, ScheduledAt = now.AddMinutes(-50), CheckoutAt = now.AddMinutes(-3) },
+            new() { Id = Guid.NewGuid(), PatientName = "Payment Earlier", DentistId = dAina.Id, DoctorName = dAina.FullName, Status = QueueStatus.AwaitingCheckout, ScheduledAt = now.AddMinutes(-60), CheckoutAt = now.AddMinutes(-12) },
+            new() { Id = Guid.NewGuid(), PatientName = "Scheduled Afternoon", DentistId = dAina.Id, DoctorName = dAina.FullName, Status = QueueStatus.Scheduled, ScheduledAt = now.AddHours(3) },
+            new() { Id = Guid.NewGuid(), PatientName = "Scheduled Midday", DentistId = dAina.Id, DoctorName = dAina.FullName, Status = QueueStatus.Scheduled, ScheduledAt = now.AddHours(1) },
+            new() { Id = Guid.NewGuid(), PatientName = "AI Pending Slot", DentistId = dAina.Id, DoctorName = dAina.FullName, Status = QueueStatus.AiBookedPending, VisitType = VisitType.AiBooked, ScheduledAt = now.AddHours(2) },
+            new() { Id = Guid.NewGuid(), PatientName = "Cancelled Morning", DentistId = dAina.Id, DoctorName = dAina.FullName, Status = QueueStatus.Cancelled, ScheduledAt = now.AddHours(-1), LastUpdatedAt = now.AddMinutes(-5) },
+            new() { Id = Guid.NewGuid(), PatientName = "Completed Older", DentistId = dAina.Id, DoctorName = dAina.FullName, Status = QueueStatus.Completed, ScheduledAt = now.AddHours(-3), CompletedAt = now.AddHours(-2) },
+            new() { Id = Guid.NewGuid(), PatientName = "Completed Latest", DentistId = dAina.Id, DoctorName = dAina.FullName, Status = QueueStatus.Completed, ScheduledAt = now.AddHours(-2), CompletedAt = now.AddMinutes(-30) }
+        };
+
+        var buckets = AppointmentCalendarHelper.PartitionLiveQueueKanban(
+            items,
+            LiveQueueScopeMode.AllClinic,
+            "Siti (Reception)",
+            dentists);
+
+        Assert.Equal(new[] { "Legacy Arrived Longest", "Waiting Recent" }, buckets.Waiting.Select(x => x.PatientName).ToArray());
+        Assert.Equal(new[] { "In Chair Earlier", "In Chair Newer" }, buckets.InChair.Select(x => x.PatientName).ToArray());
+        Assert.Equal(new[] { "Payment Earlier", "Payment Newer" }, buckets.ReadyForPayment.Select(x => x.PatientName).ToArray());
+        Assert.Equal(new[] { "AI Pending Slot", "Scheduled Midday", "Scheduled Afternoon" }, buckets.Scheduled.Select(x => x.PatientName).ToArray());
+        Assert.Equal(new[] { "Completed Latest", "Completed Older", "Cancelled Morning" }, buckets.Completed.Select(x => x.PatientName).ToArray());
+    }
+
+    [Fact]
+    public void PartitionLiveQueueKanban_RespectsDentistMyQueueScopeDoctorFilterAndUnremindedFilter()
+    {
+        var dAina = new DentistDto { Id = Guid.NewGuid(), FullName = "Dr. Aina Rahman" };
+        var dMarcus = new DentistDto { Id = Guid.NewGuid(), FullName = "Dr. Marcus Tan" };
+        var dentists = new List<DentistDto> { dAina, dMarcus };
+        var now = DateTimeOffset.UtcNow;
+
+        var items = new List<AppointmentQueueItemDto>
+        {
+            new() { Id = Guid.NewGuid(), PatientName = "Aina Waiting", DentistId = dAina.Id, DoctorName = dAina.FullName, Status = QueueStatus.Waiting, ScheduledAt = now },
+            new() { Id = Guid.NewGuid(), PatientName = "Aina InChair", DentistId = dAina.Id, DoctorName = dAina.FullName, Status = QueueStatus.InChair, ScheduledAt = now },
+            new() { Id = Guid.NewGuid(), PatientName = "Aina Payment", DentistId = dAina.Id, DoctorName = dAina.FullName, Status = QueueStatus.AwaitingCheckout, ScheduledAt = now },
+            new() { Id = Guid.NewGuid(), PatientName = "Aina Scheduled Unreminded", DentistId = dAina.Id, DoctorName = dAina.FullName, Status = QueueStatus.Scheduled, ReminderStatus = ReminderStatus.NotReminded, ScheduledAt = now.AddHours(1) },
+            new() { Id = Guid.NewGuid(), PatientName = "Aina Scheduled Confirmed", DentistId = dAina.Id, DoctorName = dAina.FullName, Status = QueueStatus.Scheduled, ReminderStatus = ReminderStatus.Confirmed, ScheduledAt = now.AddHours(2) },
+            new() { Id = Guid.NewGuid(), PatientName = "Aina Completed", DentistId = dAina.Id, DoctorName = dAina.FullName, Status = QueueStatus.Completed, ScheduledAt = now.AddHours(-2) },
+            new() { Id = Guid.NewGuid(), PatientName = "Marcus Waiting", DentistId = dMarcus.Id, DoctorName = dMarcus.FullName, Status = QueueStatus.Waiting, ScheduledAt = now },
+            new() { Id = Guid.NewGuid(), PatientName = "Marcus Payment", DentistId = dMarcus.Id, DoctorName = dMarcus.FullName, Status = QueueStatus.AwaitingCheckout, ScheduledAt = now },
+            new() { Id = Guid.NewGuid(), PatientName = "Marcus Completed", DentistId = dMarcus.Id, DoctorName = dMarcus.FullName, Status = QueueStatus.Completed, ScheduledAt = now.AddHours(-1) }
+        };
+
+        // Top-bar My Queue toggle ON for Dr. Aina -> filters ALL 3 columns AND both drawers strictly to Dr. Aina
+        var ainaOnly = AppointmentCalendarHelper.PartitionLiveQueueKanban(
+            items, LiveQueueScopeMode.MyQueue, dAina.FullName, dentists, doctorFilterId: dMarcus.Id, doctorFilterName: dMarcus.FullName);
+
+        Assert.Single(ainaOnly.Waiting);
+        Assert.Equal("Aina Waiting", ainaOnly.Waiting[0].PatientName);
+        Assert.Single(ainaOnly.InChair);
+        Assert.Single(ainaOnly.ReadyForPayment);
+        Assert.Equal(2, ainaOnly.Scheduled.Count);
+        Assert.Single(ainaOnly.Completed);
+        Assert.Equal("Aina Completed", ainaOnly.Completed[0].PatientName);
+
+        // Unreminded filter inside Scheduled drawer leaves active columns intact
+        var ainaUnreminded = AppointmentCalendarHelper.PartitionLiveQueueKanban(
+            items, LiveQueueScopeMode.MyQueue, dAina.FullName, dentists, scheduledUnremindedOnly: true);
+        Assert.Single(ainaUnreminded.Waiting);
+        Assert.Single(ainaUnreminded.Scheduled);
+        Assert.Equal("Aina Scheduled Unreminded", ainaUnreminded.Scheduled[0].PatientName);
+
+        // Reception All Clinic + Doctor dropdown filter for Dr. Marcus
+        var marcusFiltered = AppointmentCalendarHelper.PartitionLiveQueueKanban(
+            items, LiveQueueScopeMode.AllClinic, "Siti (Reception)", dentists, doctorFilterId: dMarcus.Id, doctorFilterName: dMarcus.FullName);
+        Assert.Single(marcusFiltered.Waiting);
+        Assert.Empty(marcusFiltered.InChair);
+        Assert.Single(marcusFiltered.ReadyForPayment);
+        Assert.Empty(marcusFiltered.Scheduled);
+        Assert.Single(marcusFiltered.Completed);
+    }
+
+    [Fact]
+    public void ComputeKanbanPage_And_CalculateKanbanCardsPerPage_HandleClampingAndZeroScrollbarMath()
+    {
+        var items = Enumerable.Range(1, 7).ToList();
+
+        var page1 = AppointmentCalendarHelper.ComputeKanbanPage(items, requestedPage: 1, pageSize: 3);
+        Assert.Equal(1, page1.CurrentPage);
+        Assert.Equal(3, page1.TotalPages);
+        Assert.Equal(new[] { 1, 2, 3 }, page1.Items);
+
+        var page3 = AppointmentCalendarHelper.ComputeKanbanPage(items, requestedPage: 3, pageSize: 3);
+        Assert.Equal(3, page3.CurrentPage);
+        Assert.Equal(new[] { 7 }, page3.Items);
+
+        // Shrinking column clamps requestedPage cleanly back to the last valid page
+        var clamped = AppointmentCalendarHelper.ComputeKanbanPage(new[] { 1, 2, 3 }, requestedPage: 3, pageSize: 3);
+        Assert.Equal(1, clamped.CurrentPage);
+        Assert.Equal(1, clamped.TotalPages);
+        Assert.Equal(new[] { 1, 2, 3 }, clamped.Items);
+
+        var empty = AppointmentCalendarHelper.ComputeKanbanPage(Array.Empty<int>(), requestedPage: 2, pageSize: 4);
+        Assert.Equal(1, empty.CurrentPage);
+        Assert.Equal(1, empty.TotalPages);
+        Assert.Empty(empty.Items);
+
+        Assert.Equal(1, AppointmentCalendarHelper.CalculateKanbanCardsPerPage(0, 156));
+        Assert.Equal(1, AppointmentCalendarHelper.CalculateKanbanCardsPerPage(double.NaN, 156));
+        Assert.Equal(4, AppointmentCalendarHelper.CalculateKanbanCardsPerPage(660, 156, 8));
+        Assert.Equal(3, AppointmentCalendarHelper.CalculateKanbanCardsPerPage(660, 198, 8));
+    }
+
+    [Fact]
+    public void FormatStatusLabel_UsesStrictFiveStageCanonicalLabels()
+    {
+        Assert.Equal("Scheduled", AppointmentCalendarHelper.FormatStatusLabel(QueueStatus.Scheduled));
+        Assert.Equal("Waiting", AppointmentCalendarHelper.FormatStatusLabel(QueueStatus.Waiting));
+        Assert.Equal("Waiting", AppointmentCalendarHelper.FormatStatusLabel(QueueStatus.Arrived));
+        Assert.Equal("In Chair", AppointmentCalendarHelper.FormatStatusLabel(QueueStatus.InChair));
+        Assert.Equal("Ready for Payment", AppointmentCalendarHelper.FormatStatusLabel(QueueStatus.AwaitingCheckout));
+        Assert.Equal("Completed", AppointmentCalendarHelper.FormatStatusLabel(QueueStatus.Completed));
+        Assert.Equal("AI-Booked Pending", AppointmentCalendarHelper.FormatStatusLabel(QueueStatus.AiBookedPending));
+        Assert.Equal("Cancelled", AppointmentCalendarHelper.FormatStatusLabel(QueueStatus.Cancelled));
+    }
+
+    [Fact]
     public void ReminderHelpers_FormatBadgesBuildBilingualMessageAndGuardNegations()
     {
         var offset = TimeSpan.FromHours(8);

@@ -5,14 +5,25 @@ using System.Windows.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Occlusa.Desktop.Services;
+using Occlusa.Desktop.Themes;
 using Occlusa.Shared.Models;
 using Occlusa.Shared.Services;
 
 namespace Occlusa.Desktop.ViewModels;
 
 /// <summary>
-/// Primary workspace ViewModel coordinating the 5 single-screen tabs, branch switching,
-/// live SignalR + 5s polling fallback, PC/SC MyKad registration, and pinned MedicalAlertsBanner.
+/// Which hidden bottom drawer is currently expanded beneath the 3-Column Live Queue Kanban Board.
+/// </summary>
+public enum LiveQueueDrawerMode
+{
+    None,
+    Scheduled,
+    Completed
+}
+
+/// <summary>
+/// Primary workspace ViewModel coordinating the 6 single-screen tabs, branch switching,
+/// live SignalR + 5s polling fallback, PC/SC MyKad registration, and 3-Column Live Queue Kanban Board.
 /// </summary>
 public partial class MainViewModel : ObservableObject
 {
@@ -86,7 +97,46 @@ public partial class MainViewModel : ObservableObject
     [NotifyPropertyChangedFor(nameof(IsMyQueueScope))]
     [NotifyPropertyChangedFor(nameof(IsAllClinicScope))]
     [NotifyPropertyChangedFor(nameof(QueueGridTitle))]
+    [NotifyPropertyChangedFor(nameof(MyQueueToggleLabel))]
+    [NotifyPropertyChangedFor(nameof(MyQueueToggleToolTip))]
+    [NotifyPropertyChangedFor(nameof(CanUseDoctorDropdownFilter))]
+    [NotifyPropertyChangedFor(nameof(ShowDoctorFilterDropdown))]
+    [NotifyPropertyChangedFor(nameof(ActiveWorkspaceSubtitle))]
     private LiveQueueScopeMode _activeQueueScope = LiveQueueScopeMode.AllClinic;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsScheduledDrawerOpen))]
+    [NotifyPropertyChangedFor(nameof(IsCompletedDrawerOpen))]
+    [NotifyPropertyChangedFor(nameof(IsAnyQueueDrawerOpen))]
+    [NotifyPropertyChangedFor(nameof(ScheduledDrawerChevron))]
+    [NotifyPropertyChangedFor(nameof(CompletedDrawerChevron))]
+    private LiveQueueDrawerMode _activeQueueDrawer = LiveQueueDrawerMode.None;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(IsScheduledAllFilterChecked))]
+    [NotifyPropertyChangedFor(nameof(IsScheduledUnremindedFilterChecked))]
+    private bool _showUnremindedOnlyInScheduledDrawer;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(ScheduledDrawerToggleLabel))]
+    private int _scheduledQueueCount;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(CompletedDrawerToggleLabel))]
+    private int _completedQueueCount;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(HasCancelledQueueItems))]
+    [NotifyPropertyChangedFor(nameof(CancelledBadgeLabel))]
+    private int _cancelledQueueCount;
+
+    [ObservableProperty]
+    [NotifyPropertyChangedFor(nameof(UnremindedFilterLabel))]
+    [NotifyPropertyChangedFor(nameof(HasUnremindedScheduled))]
+    private int _unremindedScheduledCount;
+
+    [ObservableProperty]
+    private int _activeBoardQueueCount;
 
     [ObservableProperty]
     [NotifyPropertyChangedFor(nameof(IsActiveOnlyChecked))]
@@ -195,6 +245,30 @@ public partial class MainViewModel : ObservableObject
             _myKadService.SimulatedProfiles.Select(p => $"{p.FullName} ({p.IcNumber})"));
 
         QueueRows = new ObservableCollection<QueueRowItem>();
+        ScheduledQueueRows = new ObservableCollection<QueueRowItem>();
+        CompletedQueueRows = new ObservableCollection<QueueRowItem>();
+        WaitingColumn = new LiveQueueKanbanColumnVm(
+            QueueStatus.Waiting,
+            "Waiting",
+            "No patients currently waiting.",
+            CalmThemePalette.StatusWarningBrush,
+            CalmThemePalette.StatusWarningBgBrush,
+            CalmThemePalette.StatusWarningBrush);
+        InChairColumn = new LiveQueueKanbanColumnVm(
+            QueueStatus.InChair,
+            "In Chair",
+            "No patients currently in chair.",
+            CalmThemePalette.BrandPrimaryBrush,
+            CalmThemePalette.BrandTintBrush,
+            CalmThemePalette.BrandHoverBrush);
+        ReadyForPaymentColumn = new LiveQueueKanbanColumnVm(
+            QueueStatus.AwaitingCheckout,
+            "Ready for Payment",
+            "No patients ready for payment.",
+            CalmThemePalette.StatusInfoBrush,
+            CalmThemePalette.StatusInfoBgBrush,
+            CalmThemePalette.StatusInfoBrush);
+
         PatientRows = new ObservableCollection<PatientRowItem>();
         InvoiceRows = new ObservableCollection<InvoiceRowItem>();
         WhatsAppRows = new ObservableCollection<WhatsAppThreadRowItem>();
@@ -241,6 +315,11 @@ public partial class MainViewModel : ObservableObject
     public ObservableCollection<string> StaffMembers { get; }
     public ObservableCollection<string> SimulatedProfileNames { get; }
     public ObservableCollection<QueueRowItem> QueueRows { get; }
+    public ObservableCollection<QueueRowItem> ScheduledQueueRows { get; }
+    public ObservableCollection<QueueRowItem> CompletedQueueRows { get; }
+    public LiveQueueKanbanColumnVm WaitingColumn { get; }
+    public LiveQueueKanbanColumnVm InChairColumn { get; }
+    public LiveQueueKanbanColumnVm ReadyForPaymentColumn { get; }
     public ObservableCollection<PatientRowItem> PatientRows { get; }
     public ObservableCollection<InvoiceRowItem> InvoiceRows { get; }
     public ObservableCollection<WhatsAppThreadRowItem> WhatsAppRows { get; }
@@ -269,9 +348,48 @@ public partial class MainViewModel : ObservableObject
     public bool ShowDentistScopeToggle => IsCurrentStaffDentist;
     public bool IsMyQueueScope => ActiveQueueScope == LiveQueueScopeMode.MyQueue && IsCurrentStaffDentist;
     public bool IsAllClinicScope => !IsMyQueueScope;
+    public string MyQueueToggleLabel
+    {
+        get
+        {
+            if (!IsCurrentStaffDentist)
+            {
+                return "My Queue (Dentist)";
+            }
+
+            var shortDoc = AppointmentCalendarHelper.FormatCompactDentistName(SelectedStaffName);
+            return IsMyQueueScope ? $"✓ My Queue · {shortDoc}" : $"My Queue · {shortDoc}";
+        }
+    }
+
+    public string MyQueueToggleToolTip => IsCurrentStaffDentist
+        ? (IsMyQueueScope
+            ? $"Showing only {SelectedStaffName}'s queue across all 3 columns and drawers. Click to view All Clinic."
+            : $"Click to filter all 3 columns and drawers strictly to {SelectedStaffName}'s queue.")
+        : "Select a Dentist under Active Staff in the left sidebar to filter to your personal queue.";
+
+    public bool CanUseDoctorDropdownFilter => !IsMyQueueScope;
+    public bool ShowDoctorFilterDropdown => CanUseDoctorDropdownFilter;
+
+    public bool IsScheduledDrawerOpen => ActiveQueueDrawer == LiveQueueDrawerMode.Scheduled;
+    public bool IsCompletedDrawerOpen => ActiveQueueDrawer == LiveQueueDrawerMode.Completed;
+    public bool IsAnyQueueDrawerOpen => ActiveQueueDrawer != LiveQueueDrawerMode.None;
+    public string ScheduledDrawerChevron => IsScheduledDrawerOpen ? "▼" : "▲";
+    public string CompletedDrawerChevron => IsCompletedDrawerOpen ? "▼" : "▲";
+    public string ScheduledDrawerToggleLabel => $"Scheduled ({ScheduledQueueCount})";
+    public string CompletedDrawerToggleLabel => $"Completed ({CompletedQueueCount})";
+    public bool HasCancelledQueueItems => CancelledQueueCount > 0;
+    public string CancelledBadgeLabel => $"{CancelledQueueCount} Cancelled";
+    public bool IsScheduledAllFilterChecked => !ShowUnremindedOnlyInScheduledDrawer;
+    public bool IsScheduledUnremindedFilterChecked => ShowUnremindedOnlyInScheduledDrawer;
+    public bool HasUnremindedScheduled => UnremindedScheduledCount > 0;
+    public string UnremindedFilterLabel => UnremindedScheduledCount > 0
+        ? $"Unreminded ({UnremindedScheduledCount})"
+        : "Unreminded";
+
     public bool IsActiveOnlyChecked => !ShowFinishedQueueRows;
     public bool IsShowDoneChecked => ShowFinishedQueueRows;
-    public string ShowDoneToggleLabel => FinishedQueueCount > 0 ? $"Show Done ({FinishedQueueCount})" : "Show Done";
+    public string ShowDoneToggleLabel => FinishedQueueCount > 0 ? $"Completed ({FinishedQueueCount})" : "Completed";
     public bool IsStatusChipAll => string.Equals(SelectedQueueStatusChip, "All", StringComparison.OrdinalIgnoreCase);
     public bool IsStatusChipWaiting => string.Equals(SelectedQueueStatusChip, "Waiting", StringComparison.OrdinalIgnoreCase);
     public bool IsStatusChipInChair => string.Equals(SelectedQueueStatusChip, "InChair", StringComparison.OrdinalIgnoreCase);
@@ -287,11 +405,11 @@ public partial class MainViewModel : ObservableObject
         ? string.Empty
         : AppointmentCalendarHelper.NormalizeQueueStatus(SelectedQueueRow.Source.Status) switch
         {
-            QueueStatus.AiBookedPending => "Approve Booking",
-            QueueStatus.Scheduled => "Check In",
-            QueueStatus.Waiting => "Call to Chair",
-            QueueStatus.InChair => "Send to Checkout",
-            QueueStatus.AwaitingCheckout => "Collect Payment",
+            QueueStatus.AiBookedPending => "Approve AI Booking",
+            QueueStatus.Scheduled => "Waiting",
+            QueueStatus.Waiting => "In Chair",
+            QueueStatus.InChair => "Ready for Payment",
+            QueueStatus.AwaitingCheckout => "Completed",
             _ => string.Empty
         };
     public bool HasSmartNextAction => !string.IsNullOrEmpty(SmartNextActionLabel);
@@ -320,9 +438,11 @@ public partial class MainViewModel : ObservableObject
 
     public string ActiveWorkspaceSubtitle => ActiveWorkspaceIndex switch
     {
-        WorkspaceQueue => IsSimpleQueueView
-            ? "Today's patient queue & appointment reminders · Switch to Detailed anytime in My View"
-            : "Detailed operations board — arrival tracking, live wait timers, reminders & stage controls",
+        WorkspaceQueue => IsMyQueueScope
+            ? $"Filtered to {SelectedStaffName} · Waiting → In Chair → Ready for Payment · Click My Queue again for All Clinic"
+            : IsSimpleQueueView
+                ? "Active clinic flow (Waiting → In Chair → Ready for Payment) · Scheduled & Completed tucked below"
+                : "Detailed Kanban board — live wait & chair timers, arrival telemetry, reception notes & stage actions",
         WorkspaceAppointments => "Multi-day dentist schedule, treatments & table directory",
         WorkspacePatients => "MyKad IC verification, clinical safety alerts & pure clinical visit notes",
         WorkspaceBilling => "Draft invoices, walk-in OTC sales, shared patient credit & split-payment checkout",
@@ -402,6 +522,14 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
+    partial void OnShowUnremindedOnlyInScheduledDrawerChanged(bool value)
+    {
+        if (!_suppressQueueFilterRebuild)
+        {
+            RebuildQueueRows();
+        }
+    }
+
     partial void OnShowFinishedQueueRowsChanged(bool value)
     {
         if (!_suppressQueueFilterRebuild)
@@ -439,6 +567,11 @@ public partial class MainViewModel : ObservableObject
 
     partial void OnSelectedQueueRowChanged(QueueRowItem? value)
     {
+        var selectedId = value?.Source.Id;
+        WaitingColumn.SyncSelection(selectedId);
+        InChairColumn.SyncSelection(selectedId);
+        ReadyForPaymentColumn.SyncSelection(selectedId);
+
         if (value != null)
         {
             SelectPatientById(value.Source.PatientId, value.Source.PatientName, value.Source.PatientIc);
@@ -492,6 +625,65 @@ public partial class MainViewModel : ObservableObject
                 ? LiveQueueScopeMode.AllClinic
                 : parsed;
         }
+    }
+
+    [RelayCommand]
+    private void ToggleMyQueueScope()
+    {
+        if (!IsCurrentStaffDentist)
+        {
+            return;
+        }
+
+        ActiveQueueScope = IsMyQueueScope
+            ? LiveQueueScopeMode.AllClinic
+            : LiveQueueScopeMode.MyQueue;
+
+        StatusMessage = IsMyQueueScope
+            ? $"Live Queue filtered to {SelectedStaffName}."
+            : "Live Queue showing All Clinic.";
+    }
+
+    [RelayCommand]
+    private void ToggleQueueDrawer(string modeName)
+    {
+        if (!Enum.TryParse<LiveQueueDrawerMode>(modeName, out var parsed) || parsed == LiveQueueDrawerMode.None)
+        {
+            ActiveQueueDrawer = LiveQueueDrawerMode.None;
+            return;
+        }
+
+        ActiveQueueDrawer = ActiveQueueDrawer == parsed
+            ? LiveQueueDrawerMode.None
+            : parsed;
+    }
+
+    [RelayCommand]
+    private void CollapseQueueDrawer()
+    {
+        ActiveQueueDrawer = LiveQueueDrawerMode.None;
+    }
+
+    [RelayCommand]
+    private void SelectQueueWorkspaceAndScheduledDrawer()
+    {
+        ActiveWorkspaceIndex = WorkspaceQueue;
+        ActiveQueueDrawer = LiveQueueDrawerMode.Scheduled;
+    }
+
+    [RelayCommand]
+    private void SetScheduledUnremindedFilter(string flagStr)
+    {
+        if (bool.TryParse(flagStr, out bool flag))
+        {
+            ShowUnremindedOnlyInScheduledDrawer = flag;
+        }
+    }
+
+    [RelayCommand]
+    private void SelectQueueCard(QueueRowItem? row)
+    {
+        SelectedQueueRow = row;
     }
 
     [RelayCommand]
@@ -581,6 +773,10 @@ public partial class MainViewModel : ObservableObject
         OnPropertyChanged(nameof(ShowDentistScopeToggle));
         OnPropertyChanged(nameof(IsMyQueueScope));
         OnPropertyChanged(nameof(IsAllClinicScope));
+        OnPropertyChanged(nameof(MyQueueToggleLabel));
+        OnPropertyChanged(nameof(MyQueueToggleToolTip));
+        OnPropertyChanged(nameof(CanUseDoctorDropdownFilter));
+        OnPropertyChanged(nameof(ShowDoctorFilterDropdown));
         OnPropertyChanged(nameof(ShowFullMyKadBar));
         OnPropertyChanged(nameof(ShowCompactMyKadButton));
         OnPropertyChanged(nameof(ActiveWorkspaceSubtitle));
@@ -653,6 +849,42 @@ public partial class MainViewModel : ObservableObject
         await HandleMyKadReadResultAsync(result);
     }
 
+    public async Task<AppointmentQueueItemDto?> TransitionQueueItemAsync(QueueRowItem row, QueueStatus targetStatus)
+    {
+        if (row == null || row.IsTransitioning)
+        {
+            return null;
+        }
+
+        var newStatus = AppointmentCalendarHelper.NormalizeQueueStatus(targetStatus);
+        row.IsTransitioning = true;
+        try
+        {
+            var updated = await _apiClient.UpdateQueueStatusAsync(
+                row.Source.Id,
+                new UpdateQueueStatusRequest
+                {
+                    NewStatus = newStatus,
+                    RoomName = row.Source.RoomName,
+                    UpdatedBy = SelectedStaffName
+                });
+
+            UpsertQueueItem(updated);
+            SelectedQueueRow = QueueRows.FirstOrDefault(r => r.Source.Id == updated.Id);
+            StatusMessage = $"{updated.PatientName} → {AppointmentCalendarHelper.FormatStatusLabel(updated.Status)} (by {SelectedStaffName}).";
+            return updated;
+        }
+        catch (Exception ex)
+        {
+            StatusMessage = $"Status update failed: {ex.Message}";
+            return null;
+        }
+        finally
+        {
+            row.IsTransitioning = false;
+        }
+    }
+
     [RelayCommand]
     private async Task AdvanceQueueStatusAsync(string targetStatusName)
     {
@@ -661,26 +893,7 @@ public partial class MainViewModel : ObservableObject
             return;
         }
 
-        var newStatus = AppointmentCalendarHelper.NormalizeQueueStatus(parsedStatus);
-        try
-        {
-            var updated = await _apiClient.UpdateQueueStatusAsync(
-                SelectedQueueRow.Source.Id,
-                new UpdateQueueStatusRequest
-                {
-                    NewStatus = newStatus,
-                    RoomName = SelectedQueueRow.Source.RoomName,
-                    UpdatedBy = SelectedStaffName
-                });
-
-            UpsertQueueItem(updated);
-            SelectedQueueRow = QueueRows.FirstOrDefault(r => r.Source.Id == updated.Id);
-            StatusMessage = $"{updated.PatientName} → {AppointmentCalendarHelper.FormatStatusLabel(updated.Status)} (by {SelectedStaffName}).";
-        }
-        catch (Exception ex)
-        {
-            StatusMessage = $"Status update failed: {ex.Message}";
-        }
+        await TransitionQueueItemAsync(SelectedQueueRow, parsedStatus);
     }
 
     [RelayCommand]
@@ -727,21 +940,33 @@ public partial class MainViewModel : ObservableObject
     [RelayCommand]
     private async Task ApproveSelectedAiBookingAsync()
     {
-        if (SelectedQueueRow == null || SelectedQueueRow.Source.Status != QueueStatus.AiBookedPending)
+        await ApproveAiBookingRowAsync(SelectedQueueRow);
+    }
+
+    [RelayCommand]
+    public async Task ApproveAiBookingRowAsync(QueueRowItem? row)
+    {
+        var target = row ?? SelectedQueueRow;
+        if (target == null || target.Source.Status != QueueStatus.AiBookedPending || target.IsTransitioning)
         {
             return;
         }
 
+        target.IsTransitioning = true;
         try
         {
-            var approved = await _apiClient.ApproveAiBookingAsync(SelectedQueueRow.Source.Id, SelectedStaffName);
+            var approved = await _apiClient.ApproveAiBookingAsync(target.Source.Id, SelectedStaffName);
             UpsertQueueItem(approved);
             SelectedQueueRow = QueueRows.FirstOrDefault(r => r.Source.Id == approved.Id);
-            StatusMessage = $"Approved AI booking for {approved.PatientName} (by {SelectedStaffName}).";
+            StatusMessage = $"Approved AI booking for {approved.PatientName} → Scheduled (by {SelectedStaffName}).";
         }
         catch (Exception ex)
         {
             StatusMessage = $"AI booking approval failed: {ex.Message}";
+        }
+        finally
+        {
+            target.IsTransitioning = false;
         }
     }
 
@@ -851,9 +1076,11 @@ public partial class MainViewModel : ObservableObject
                             });
                         UpsertQueueItem(updated);
                         SelectedQueueRow = QueueRows.FirstOrDefault(r => r.Source.Id == updated.Id);
-                        StatusMessage = $"Checked in {saved.FullName} via MyKad (by {SelectedStaffName}).";
+                        StatusMessage = $"Checked in {saved.FullName} to Waiting via MyKad (by {SelectedStaffName}).";
                         return;
                     }
+
+                    ActiveQueueDrawer = LiveQueueDrawerMode.Scheduled;
                 }
 
                 StatusMessage = $"MyKad verified: {saved.FullName} ({activeVisitRow.StatusDisplay})";
@@ -1107,46 +1334,96 @@ public partial class MainViewModel : ObservableObject
             .Where(a => AppointmentCalendarHelper.IsTodayForLiveQueue(a, localToday, localOffset))
             .ToList();
 
-        // Scope-aware base items (used to compute FinishedQueueCount & pulse summary cleanly)
-        var scopedBase = AppointmentCalendarHelper.FilterLiveQueue(
+        var scope = IsMyQueueScope ? LiveQueueScopeMode.MyQueue : LiveQueueScopeMode.AllClinic;
+        Guid? doctorFilterId = !IsMyQueueScope ? SelectedQueueDoctorFilter?.Id : null;
+        string? doctorFilterName = !IsMyQueueScope && SelectedQueueDoctorFilter?.Id != null
+            ? SelectedQueueDoctorFilter.Label
+            : null;
+
+        // Partition scoped today items into the 3 active Kanban columns + 2 collapsible drawers
+        var allScopedBuckets = AppointmentCalendarHelper.PartitionLiveQueueKanban(
             todayItems,
-            IsMyQueueScope ? LiveQueueScopeMode.MyQueue : LiveQueueScopeMode.AllClinic,
+            scope,
             SelectedStaffName,
             _dentists,
-            IsDetailedQueueView ? SelectedQueueDoctorFilter?.Id : null,
-            IsDetailedQueueView && SelectedQueueDoctorFilter?.Id != null ? SelectedQueueDoctorFilter.Label : null,
-            statusChip: null,
-            includeFinished: true);
+            doctorFilterId,
+            doctorFilterName,
+            scheduledUnremindedOnly: false);
 
-        FinishedQueueCount = scopedBase.Count(a => AppointmentCalendarHelper.IsFinishedQueueStatus(a.Status));
-
-        var filtered = AppointmentCalendarHelper.FilterLiveQueue(
-            todayItems,
-            IsMyQueueScope ? LiveQueueScopeMode.MyQueue : LiveQueueScopeMode.AllClinic,
-            SelectedStaffName,
-            _dentists,
-            IsDetailedQueueView ? SelectedQueueDoctorFilter?.Id : null,
-            IsDetailedQueueView && SelectedQueueDoctorFilter?.Id != null ? SelectedQueueDoctorFilter.Label : null,
-            IsDetailedQueueView ? SelectedQueueStatusChip : null,
-            includeFinished: ShowFinishedQueueRows);
+        var scheduledDrawerBuckets = ShowUnremindedOnlyInScheduledDrawer
+            ? AppointmentCalendarHelper.PartitionLiveQueueKanban(
+                todayItems,
+                scope,
+                SelectedStaffName,
+                _dentists,
+                doctorFilterId,
+                doctorFilterName,
+                scheduledUnremindedOnly: true)
+            : allScopedBuckets;
 
         bool showDoctorInSubline = !IsMyQueueScope;
         bool showWaitTimers = _activeUserPreferences.ShowWaitTimers;
         bool showInlineNotes = _activeUserPreferences.ShowInlineReceptionNotes;
+        bool isDetailedCard = IsDetailedQueueView;
 
-        QueueRows.Clear();
-        foreach (var item in filtered)
+        QueueRowItem CreateRow(AppointmentQueueItemDto dto) =>
+            new(dto, showDoctorInSubline, showWaitTimers, showInlineNotes, isDetailedCard);
+
+        var waitingRows = allScopedBuckets.Waiting.Select(CreateRow).ToList();
+        var inChairRows = allScopedBuckets.InChair.Select(CreateRow).ToList();
+        var readyForPaymentRows = allScopedBuckets.ReadyForPayment.Select(CreateRow).ToList();
+        var allScheduledRows = allScopedBuckets.Scheduled.Select(CreateRow).ToList();
+        var drawerScheduledRows = ShowUnremindedOnlyInScheduledDrawer
+            ? scheduledDrawerBuckets.Scheduled.Select(CreateRow).ToList()
+            : allScheduledRows;
+        var completedRows = allScopedBuckets.Completed.Select(CreateRow).ToList();
+
+        WaitingColumn.SetItems(waitingRows, selectedId);
+        InChairColumn.SetItems(inChairRows, selectedId);
+        ReadyForPaymentColumn.SetItems(readyForPaymentRows, selectedId);
+
+        ScheduledQueueRows.Clear();
+        foreach (var row in drawerScheduledRows)
         {
-            QueueRows.Add(new QueueRowItem(item, showDoctorInSubline, showWaitTimers, showInlineNotes));
+            ScheduledQueueRows.Add(row);
         }
+
+        CompletedQueueRows.Clear();
+        foreach (var row in completedRows)
+        {
+            CompletedQueueRows.Add(row);
+        }
+
+        // Keep unified QueueRows synchronized so MyKad Smart Check-In, Patient Check-In, and selection lookup work across all 5 stages
+        QueueRows.Clear();
+        foreach (var row in readyForPaymentRows) QueueRows.Add(row);
+        foreach (var row in inChairRows) QueueRows.Add(row);
+        foreach (var row in waitingRows) QueueRows.Add(row);
+        foreach (var row in allScheduledRows) QueueRows.Add(row);
+        foreach (var row in completedRows) QueueRows.Add(row);
+
+        ScheduledQueueCount = allScopedBuckets.Scheduled.Count;
+        CompletedQueueCount = allScopedBuckets.Completed.Count(a => a.Status == QueueStatus.Completed);
+        CancelledQueueCount = allScopedBuckets.Completed.Count(a => a.Status == QueueStatus.Cancelled);
+        FinishedQueueCount = allScopedBuckets.Completed.Count;
+        UnremindedScheduledCount = allScopedBuckets.Scheduled.Count(a =>
+            AppointmentCalendarHelper.IsUpcomingRemindableAppointment(a)
+            && a.ReminderStatus is ReminderStatus.NotReminded or ReminderStatus.NoReply);
+        ActiveBoardQueueCount = waitingRows.Count + inChairRows.Count + readyForPaymentRows.Count;
 
         if (selectedId.HasValue)
         {
             SelectedQueueRow = QueueRows.FirstOrDefault(r => r.Source.Id == selectedId.Value);
         }
 
-        QueueCount = scopedBase.Count(a => !AppointmentCalendarHelper.IsFinishedQueueStatus(a.Status));
-        UpdateQueuePulseSummary(scopedBase);
+        QueueCount = ActiveBoardQueueCount + ScheduledQueueCount;
+        UpdateQueuePulseSummary(
+            waitingRows.Count,
+            inChairRows.Count,
+            readyForPaymentRows.Count,
+            ScheduledQueueCount,
+            UnremindedScheduledCount,
+            CompletedQueueCount);
         NotifyQueueCommandStates();
     }
 
@@ -1158,6 +1435,9 @@ public partial class MainViewModel : ObservableObject
         }
 
         var now = DateTimeOffset.Now;
+        WaitingColumn.RefreshElapsed(now);
+        InChairColumn.RefreshElapsed(now);
+        ReadyForPaymentColumn.RefreshElapsed(now);
         foreach (var row in QueueRows)
         {
             if (!row.IsFinished)
@@ -1167,20 +1447,17 @@ public partial class MainViewModel : ObservableObject
         }
     }
 
-    private void UpdateQueuePulseSummary(IReadOnlyList<AppointmentQueueItemDto> scopedToday)
+    private void UpdateQueuePulseSummary(
+        int waiting,
+        int inChair,
+        int readyForPayment,
+        int scheduled,
+        int unreminded,
+        int completed)
     {
-        int waiting = scopedToday.Count(q => AppointmentCalendarHelper.NormalizeQueueStatus(q.Status) == QueueStatus.Waiting);
-        int inChair = scopedToday.Count(q => q.Status == QueueStatus.InChair);
-        int checkout = scopedToday.Count(q => q.Status == QueueStatus.AwaitingCheckout);
-        int upcoming = scopedToday.Count(q => q.Status is QueueStatus.Scheduled or QueueStatus.AiBookedPending);
-        int unreminded = scopedToday.Count(q =>
-            AppointmentCalendarHelper.IsUpcomingRemindableAppointment(q)
-            && q.ReminderStatus is ReminderStatus.NotReminded or ReminderStatus.NoReply);
-        int done = scopedToday.Count(q => AppointmentCalendarHelper.IsFinishedQueueStatus(q.Status));
-
         QueuePulseSummary = IsSimpleQueueView
-            ? $"{waiting} waiting · {inChair} in chair · {checkout} checkout · {unreminded} unreminded"
-            : $"Waiting: {waiting} · In Chair: {inChair} · Checkout: {checkout} · Upcoming: {upcoming} ({unreminded} unreminded) · Done: {done}";
+            ? $"{waiting} Waiting · {inChair} In Chair · {readyForPayment} Ready for Payment"
+            : $"{waiting} Waiting · {inChair} In Chair · {readyForPayment} Ready for Payment · {scheduled} Scheduled ({unreminded} unreminded) · {completed} Completed";
     }
 
     private void NotifyQueueCommandStates()

@@ -1,0 +1,870 @@
+<UserControl x:Class="Occlusa.Desktop.Controls.LiveQueueKanbanView"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:controls="clr-namespace:Occlusa.Desktop.Controls"
+             x:Name="RootKanbanControl"
+             ScrollViewer.VerticalScrollBarVisibility="Disabled"
+             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
+
+    <UserControl.Resources>
+        <!-- Reusable Kanban Patient Card Template (Calm Dental 60-30-10, Zero Ellipsis, Zero Scrollbars) -->
+        <DataTemplate x:Key="KanbanPatientCardTemplate">
+            <Border Style="{StaticResource UniformKanbanCardBorderStyle}"
+                    Margin="0,0,0,8"
+                    ToolTip="{Binding ToolTipText}"
+                    MouseLeftButtonDown="KanbanCard_MouseLeftButtonDown">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                        <RowDefinition Height="Auto" />
+                    </Grid.RowDefinitions>
+
+                    <!-- Row 0: Appointment Time / Walk-In + Optional Wait Timer + Room + Critical Alert -->
+                    <DockPanel Grid.Row="0" LastChildFill="False" Margin="0,0,0,4">
+                        <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                            <Border CornerRadius="4"
+                                    Padding="6,1"
+                                    BorderThickness="1"
+                                    VerticalAlignment="Center">
+                                <Border.Style>
+                                    <Style TargetType="Border">
+                                        <Setter Property="Background" Value="{StaticResource BgSubtleBrush}" />
+                                        <Setter Property="BorderBrush" Value="{StaticResource BorderDefaultBrush}" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding IsWalkIn}" Value="True">
+                                                <Setter Property="Background" Value="{StaticResource StatusWarningBgBrush}" />
+                                                <Setter Property="BorderBrush" Value="{StaticResource StatusWarningBrush}" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </Border.Style>
+                                <TextBlock Text="{Binding SimpleTimeDisplay}"
+                                           VerticalAlignment="Center"
+                                           TextWrapping="NoWrap"
+                                           TextTrimming="None">
+                                    <TextBlock.Style>
+                                        <Style TargetType="TextBlock">
+                                            <Setter Property="FontFamily" Value="{StaticResource FontFamilyMono}" />
+                                            <Setter Property="FontSize" Value="11" />
+                                            <Setter Property="FontWeight" Value="SemiBold" />
+                                            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsWalkIn}" Value="True">
+                                                    <Setter Property="FontFamily" Value="{StaticResource FontFamilyPrimary}" />
+                                                    <Setter Property="FontSize" Value="10.5" />
+                                                    <Setter Property="Foreground" Value="{StaticResource StatusWarningBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </TextBlock.Style>
+                                </TextBlock>
+                            </Border>
+
+                            <!-- Live Wait / Chair / Payment Elapsed Timer Pill (when ShowWaitTimers is enabled) -->
+                            <Border Visibility="{Binding ShowCardTimerBadge, Converter={StaticResource BoolToVisibilityConverter}}"
+                                    Background="{Binding StatusBadgeBackground}"
+                                    BorderBrush="{Binding StatusBadgeBorder}"
+                                    BorderThickness="1"
+                                    CornerRadius="10"
+                                    Padding="7,1"
+                                    Margin="6,0,0,0"
+                                    VerticalAlignment="Center">
+                                <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                    <Ellipse Width="5"
+                                             Height="5"
+                                             Fill="{Binding StatusDotBrush}"
+                                             VerticalAlignment="Center"
+                                             Margin="0,0,5,0" />
+                                    <TextBlock Text="{Binding StatusDisplay}"
+                                               FontSize="10.5"
+                                               FontWeight="SemiBold"
+                                               Foreground="{Binding StatusBadgeForeground}"
+                                               VerticalAlignment="Center"
+                                               TextWrapping="NoWrap"
+                                               TextTrimming="None" />
+                                </StackPanel>
+                            </Border>
+                        </StackPanel>
+
+                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                            <Border Visibility="{Binding HasCriticalAlert, Converter={StaticResource BoolToVisibilityConverter}}"
+                                    Background="{StaticResource StatusErrorBgBrush}"
+                                    BorderBrush="{StaticResource StatusErrorBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="4"
+                                    Padding="5,1"
+                                    Margin="0,0,5,0"
+                                    VerticalAlignment="Center">
+                                <TextBlock Text="ALERT"
+                                           FontSize="9.5"
+                                           FontWeight="Bold"
+                                           Foreground="{StaticResource StatusErrorBrush}"
+                                           TextWrapping="NoWrap"
+                                           TextTrimming="None" />
+                            </Border>
+
+                            <Border Background="{StaticResource BgCanvasBrush}"
+                                    BorderBrush="{StaticResource BorderDefaultBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="4"
+                                    Padding="6,1"
+                                    VerticalAlignment="Center">
+                                <TextBlock Text="{Binding RoomDisplay}"
+                                           FontSize="10.5"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource TextSecondaryBrush}"
+                                           TextWrapping="NoWrap"
+                                           TextTrimming="None" />
+                            </Border>
+                        </StackPanel>
+                    </DockPanel>
+
+                    <!-- Row 1: Patient Name -->
+                    <TextBlock Grid.Row="1"
+                               Text="{Binding CardPatientNameDisplay}"
+                               FontSize="13"
+                               FontWeight="SemiBold"
+                               Foreground="{StaticResource TextPrimaryBrush}"
+                               TextWrapping="NoWrap"
+                               TextTrimming="None"
+                               Margin="0,0,0,2" />
+
+                    <!-- Row 2: Treatment Summary -->
+                    <TextBlock Grid.Row="2"
+                               Text="{Binding CardTreatmentDisplay}"
+                               FontSize="11.5"
+                               Foreground="{StaticResource TextSecondaryBrush}"
+                               TextWrapping="NoWrap"
+                               TextTrimming="None"
+                               Margin="0,0,0,2" />
+
+                    <!-- Row 3: Doctor & Duration Summary -->
+                    <TextBlock Grid.Row="3"
+                               Text="{Binding CardClinicianSummary}"
+                               FontSize="11"
+                               FontWeight="Medium"
+                               Foreground="{StaticResource TextSecondaryBrush}"
+                               TextWrapping="NoWrap"
+                               TextTrimming="None" />
+
+                    <!-- Row 4: Detailed View Telemetry (Arrived Time, Visit Type, IC) -->
+                    <TextBlock Grid.Row="4"
+                               Visibility="{Binding IsDetailedCard, Converter={StaticResource BoolToVisibilityConverter}}"
+                               Text="{Binding CardDetailedMetaDisplay}"
+                               FontFamily="{StaticResource FontFamilyMono}"
+                               FontSize="10.5"
+                               Foreground="{StaticResource TextSecondaryBrush}"
+                               TextWrapping="NoWrap"
+                               TextTrimming="None"
+                               Margin="0,3,0,0" />
+
+                    <!-- Row 5: Optional Inline Reception Note Strip (Detailed / Opt-in) -->
+                    <Border Grid.Row="5"
+                            Visibility="{Binding ShowCardReceptionNote, Converter={StaticResource BoolToVisibilityConverter}}"
+                            Background="{StaticResource BgSubtleBrush}"
+                            BorderBrush="{StaticResource BorderDefaultBrush}"
+                            BorderThickness="2,0,0,0"
+                            CornerRadius="3"
+                            Padding="7,2"
+                            Margin="0,4,0,0">
+                        <TextBlock Text="{Binding CardReceptionNoteDisplay}"
+                                   FontSize="10.5"
+                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                   TextWrapping="NoWrap"
+                                   TextTrimming="None" />
+                    </Border>
+
+                    <!-- Row 6: Next-Process Action Footer ("Move patient to" above canonical destination button) -->
+                    <StackPanel Grid.Row="6" Margin="0,7,0,0">
+                        <Border Height="1"
+                                Background="{StaticResource BorderDefaultBrush}"
+                                Margin="0,0,0,5" />
+                        <TextBlock Text="Move patient to"
+                                   FontSize="10"
+                                   FontWeight="SemiBold"
+                                   Foreground="{StaticResource TextSecondaryBrush}"
+                                   TextWrapping="NoWrap"
+                                   TextTrimming="None"
+                                   Margin="0,0,0,3" />
+                        <Button Content="In Chair →"
+                                Visibility="{Binding IsWaitingStage, Converter={StaticResource BoolToVisibilityConverter}}"
+                                IsEnabled="{Binding CanExecuteNextStage}"
+                                Click="CardNextStageButton_Click"
+                                Style="{StaticResource UniformKanbanNextInChairButtonStyle}"
+                                Height="28"
+                                HorizontalAlignment="Stretch" />
+                        <Button Content="Ready for Payment →"
+                                Visibility="{Binding IsInChairStage, Converter={StaticResource BoolToVisibilityConverter}}"
+                                IsEnabled="{Binding CanExecuteNextStage}"
+                                Click="CardNextStageButton_Click"
+                                Style="{StaticResource UniformKanbanNextPaymentButtonStyle}"
+                                Height="28"
+                                HorizontalAlignment="Stretch" />
+                        <Button Content="Completed →"
+                                Visibility="{Binding IsReadyForPaymentStage, Converter={StaticResource BoolToVisibilityConverter}}"
+                                IsEnabled="{Binding CanExecuteNextStage}"
+                                Click="CardNextStageButton_Click"
+                                Style="{StaticResource UniformKanbanNextCompletedButtonStyle}"
+                                Height="28"
+                                HorizontalAlignment="Stretch" />
+                    </StackPanel>
+                </Grid>
+            </Border>
+        </DataTemplate>
+
+        <!-- Reusable Kanban Column ControlTemplate-style Container Template -->
+        <DataTemplate x:Key="KanbanColumnTemplate">
+            <Border Style="{StaticResource UniformKanbanColumnBorderStyle}">
+                <Grid>
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="44" />
+                        <RowDefinition Height="*" />
+                        <RowDefinition Height="34" />
+                    </Grid.RowDefinitions>
+
+                    <!-- Column Header -->
+                    <Border Grid.Row="0"
+                            Background="{StaticResource BgSurfaceBrush}"
+                            BorderBrush="{StaticResource BorderDefaultBrush}"
+                            BorderThickness="0,0,0,1"
+                            CornerRadius="8,8,0,0"
+                            Padding="12,0">
+                        <DockPanel LastChildFill="False">
+                            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Ellipse Width="9"
+                                         Height="9"
+                                         Fill="{Binding AccentBrush}"
+                                         VerticalAlignment="Center"
+                                         Margin="0,0,8,0" />
+                                <TextBlock Text="{Binding Title}"
+                                           FontSize="13.5"
+                                           FontWeight="Bold"
+                                           Foreground="{StaticResource TextPrimaryBrush}"
+                                           VerticalAlignment="Center"
+                                           TextWrapping="NoWrap"
+                                           TextTrimming="None" />
+                            </StackPanel>
+
+                            <Border DockPanel.Dock="Right"
+                                    Background="{Binding HeaderTintBrush}"
+                                    BorderBrush="{StaticResource BorderDefaultBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="11"
+                                    MinWidth="28"
+                                    Height="22"
+                                    Padding="8,0"
+                                    VerticalAlignment="Center">
+                                <TextBlock Text="{Binding TotalCount}"
+                                           FontSize="11.5"
+                                           FontWeight="Bold"
+                                           Foreground="{Binding BadgeForegroundBrush}"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"
+                                           TextWrapping="NoWrap"
+                                           TextTrimming="None" />
+                            </Border>
+                        </DockPanel>
+                    </Border>
+
+                    <!-- Column Paged Cards Body (Zero Scrollbars, Dynamic Per-Column Capacity) -->
+                    <Grid Grid.Row="1"
+                          Margin="10,10,10,2"
+                          ClipToBounds="True"
+                          SizeChanged="ColumnBodyHost_SizeChanged">
+                        <ItemsControl ItemsSource="{Binding PagedCards}"
+                                      ItemTemplate="{StaticResource KanbanPatientCardTemplate}"
+                                      Visibility="{Binding HasItems, Converter={StaticResource BoolToVisibilityConverter}}"
+                                      ScrollViewer.VerticalScrollBarVisibility="Disabled"
+                                      ScrollViewer.HorizontalScrollBarVisibility="Disabled" />
+
+                        <Border Visibility="{Binding IsEmpty, Converter={StaticResource BoolToVisibilityConverter}}"
+                                Background="{StaticResource BgCanvasBrush}"
+                                BorderBrush="{StaticResource BorderDefaultBrush}"
+                                BorderThickness="1"
+                                CornerRadius="6"
+                                Padding="14,18"
+                                VerticalAlignment="Top">
+                            <TextBlock Text="{Binding EmptyMessage}"
+                                       Style="{StaticResource UniformMutedTextStyle}"
+                                       HorizontalAlignment="Center"
+                                       TextAlignment="Center"
+                                       TextWrapping="Wrap"
+                                       TextTrimming="None" />
+                        </Border>
+                    </Grid>
+
+                    <!-- Column Zero-Scrollbar Pagination Footer -->
+                    <Border Grid.Row="2"
+                            Background="{StaticResource BgCanvasBrush}"
+                            BorderBrush="{StaticResource BorderDefaultBrush}"
+                            BorderThickness="0,1,0,0"
+                            CornerRadius="0,0,8,8"
+                            Padding="10,0">
+                        <DockPanel LastChildFill="False">
+                            <TextBlock DockPanel.Dock="Left"
+                                       Text="{Binding PaginationSummary}"
+                                       Style="{StaticResource UniformMutedTextStyle}"
+                                       FontWeight="SemiBold"
+                                       VerticalAlignment="Center"
+                                       TextWrapping="NoWrap"
+                                       TextTrimming="None" />
+                            <StackPanel DockPanel.Dock="Right"
+                                        Orientation="Horizontal"
+                                        VerticalAlignment="Center"
+                                        Visibility="{Binding HasMultiplePages, Converter={StaticResource BoolToVisibilityConverter}}">
+                                <Button Content="◀"
+                                        Command="{Binding PrevPageCommand}"
+                                        IsEnabled="{Binding CanGoPrev}"
+                                        Style="{StaticResource UniformKanbanPagerButtonStyle}"
+                                        ToolTip="Previous page in this column"
+                                        Margin="0,0,4,0" />
+                                <Button Content="▶"
+                                        Command="{Binding NextPageCommand}"
+                                        IsEnabled="{Binding CanGoNext}"
+                                        Style="{StaticResource UniformKanbanPagerButtonStyle}"
+                                        ToolTip="Next page in this column" />
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
+                </Grid>
+            </Border>
+        </DataTemplate>
+    </UserControl.Resources>
+
+    <Grid>
+        <Grid.RowDefinitions>
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- ================================================================
+             ROW 0: 3-COLUMN ACTIVE KANBAN BOARD
+             1. Waiting (N)  |  2. In Chair (N)  |  3. Ready for Payment (N)
+             ================================================================ -->
+        <Grid Grid.Row="0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="12" />
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="12" />
+                <ColumnDefinition Width="*" />
+            </Grid.ColumnDefinitions>
+
+            <ContentControl Grid.Column="0"
+                            Content="{Binding WaitingColumn}"
+                            ContentTemplate="{StaticResource KanbanColumnTemplate}"
+                            Focusable="False" />
+
+            <ContentControl Grid.Column="2"
+                            Content="{Binding InChairColumn}"
+                            ContentTemplate="{StaticResource KanbanColumnTemplate}"
+                            Focusable="False" />
+
+            <ContentControl Grid.Column="4"
+                            Content="{Binding ReadyForPaymentColumn}"
+                            ContentTemplate="{StaticResource KanbanColumnTemplate}"
+                            Focusable="False" />
+        </Grid>
+
+        <!-- ================================================================
+             ROW 1: EXPANDABLE INLINE DRAWER (Scheduled OR Completed)
+             Hidden by default; expands cleanly upward above the bottom dock bar
+             ================================================================ -->
+        <Border Grid.Row="1"
+                Visibility="{Binding IsAnyQueueDrawerOpen, Converter={StaticResource BoolToVisibilityConverter}}"
+                Style="{StaticResource UniformCardBorderStyle}"
+                Padding="0"
+                Margin="0,10,0,0">
+            <Grid>
+                <!-- 1A. SCHEDULED DRAWER (Upcoming Booked & AI-Booked Pending) -->
+                <Grid Visibility="{Binding IsScheduledDrawerOpen, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="38" />
+                        <RowDefinition x:Name="ScheduledDrawerGridRow" Height="226" />
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0"
+                            Background="{StaticResource BgCanvasBrush}"
+                            BorderBrush="{StaticResource BorderDefaultBrush}"
+                            BorderThickness="0,0,0,1"
+                            CornerRadius="8,8,0,0"
+                            Padding="12,0">
+                        <DockPanel LastChildFill="False">
+                            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Ellipse Width="8"
+                                         Height="8"
+                                         Fill="{StaticResource TextSecondaryBrush}"
+                                         VerticalAlignment="Center"
+                                         Margin="0,0,7,0" />
+                                <TextBlock Text="{Binding ScheduledDrawerToggleLabel}"
+                                           FontSize="13"
+                                           FontWeight="Bold"
+                                           Foreground="{StaticResource TextPrimaryBrush}"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,12,0" />
+
+                                <RadioButton GroupName="ScheduledDrawerFilter"
+                                             Content="All Upcoming"
+                                             IsChecked="{Binding IsScheduledAllFilterChecked, Mode=OneWay}"
+                                             Command="{Binding SetScheduledUnremindedFilterCommand}"
+                                             CommandParameter="False"
+                                             Style="{StaticResource UniformSegmentedToggleRadioStyle}"
+                                             Height="26"
+                                             Padding="9,0"
+                                             FontSize="11.5"
+                                             Margin="0,0,4,0" />
+                                <RadioButton GroupName="ScheduledDrawerFilter"
+                                             Content="{Binding UnremindedFilterLabel}"
+                                             IsChecked="{Binding IsScheduledUnremindedFilterChecked, Mode=OneWay}"
+                                             Command="{Binding SetScheduledUnremindedFilterCommand}"
+                                             CommandParameter="True"
+                                             Style="{StaticResource UniformSegmentedToggleRadioStyle}"
+                                             Height="26"
+                                             Padding="9,0"
+                                             FontSize="11.5" />
+                            </StackPanel>
+
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button Content="Remind"
+                                        Click="ScheduledRemindSelectedButton_Click"
+                                        IsEnabled="{Binding CanRemindSelected}"
+                                        Style="{StaticResource UniformWarningButtonStyle}"
+                                        Height="26"
+                                        Padding="10,0"
+                                        FontSize="11.5"
+                                        Margin="0,0,6,0" />
+                                <Button Content="Hide ▼"
+                                        Command="{Binding CollapseQueueDrawerCommand}"
+                                        Style="{StaticResource UniformGhostButtonStyle}"
+                                        Height="26"
+                                        Padding="8,0"
+                                        FontSize="11.5" />
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
+
+                    <controls:UniformPagedGrid x:Name="ScheduledDrawerGrid"
+                                               Grid.Row="1"
+                                               AutoPageSize="False"
+                                               PageSize="4"
+                                               EmptyMessage="No upcoming Scheduled appointments for today."
+                                               ItemsSource="{Binding ScheduledQueueRows}"
+                                               SelectedItem="{Binding SelectedQueueRow, Mode=TwoWay}"
+                                               RowDoubleClicked="DrawerGrid_RowDoubleClicked">
+                        <controls:UniformColumnDef Header="Time" BindingPath="ApptTimeDisplay" Priority="1" MinWidth="74" WidthRatio="0.3" IsMonospace="True" IsBold="True" />
+
+                        <controls:UniformColumnDef Header="Patient"
+                                                   Priority="1"
+                                                   MinWidth="175"
+                                                   WidthRatio="2.0"
+                                                   IsBold="True"
+                                                   MeasureBindingPath="PatientMeasureText"
+                                                   MeasureExtraWidth="42">
+                            <controls:UniformColumnDef.CellTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="10,0" Background="Transparent" ToolTip="{Binding ToolTipText}">
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding PatientNameDisplay}"
+                                                       FontFamily="{StaticResource FontFamilyPrimary}"
+                                                       FontSize="12"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{StaticResource TextPrimaryBrush}"
+                                                       VerticalAlignment="Center"
+                                                       TextWrapping="NoWrap"
+                                                       TextTrimming="None" />
+                                            <Border Visibility="{Binding HasCriticalAlert, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                    Background="{StaticResource StatusErrorBgBrush}"
+                                                    BorderBrush="{StaticResource StatusErrorBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="4"
+                                                    Padding="5,1"
+                                                    Margin="8,0,0,0"
+                                                    VerticalAlignment="Center">
+                                                <TextBlock Text="ALERT"
+                                                           FontSize="9.5"
+                                                           FontWeight="Bold"
+                                                           Foreground="{StaticResource StatusErrorBrush}"
+                                                           TextWrapping="NoWrap"
+                                                           TextTrimming="None" />
+                                            </Border>
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </controls:UniformColumnDef.CellTemplate>
+                        </controls:UniformColumnDef>
+
+                        <controls:UniformColumnDef Header="Treatment" BindingPath="TreatmentDisplay" Priority="1" MinWidth="145" WidthRatio="2.0" />
+                        <controls:UniformColumnDef Header="Doctor" BindingPath="DoctorDisplay" Priority="2" MinWidth="120" WidthRatio="1.1" />
+                        <controls:UniformColumnDef Header="Room" BindingPath="RoomDisplay" Priority="3" MinWidth="80" WidthRatio="0.5" />
+
+                        <controls:UniformColumnDef Header="Reminder"
+                                                   Priority="1"
+                                                   MinWidth="132"
+                                                   WidthRatio="0.45"
+                                                   MeasureBindingPath="ReminderDisplay"
+                                                   MeasureExtraWidth="52">
+                            <controls:UniformColumnDef.CellTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="10,0" Background="Transparent" ToolTip="{Binding ToolTipText}">
+                                        <Border Background="{Binding ReminderBadgeBackground}"
+                                                BorderBrush="{Binding ReminderBadgeBorder}"
+                                                BorderThickness="1"
+                                                CornerRadius="11"
+                                                MinWidth="102"
+                                                Height="22"
+                                                Padding="8,0"
+                                                HorizontalAlignment="Left"
+                                                VerticalAlignment="Center">
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                <Ellipse Width="5"
+                                                         Height="5"
+                                                         Fill="{Binding ReminderDotBrush}"
+                                                         VerticalAlignment="Center"
+                                                         Margin="0,0,5,0" />
+                                                <TextBlock Text="{Binding ReminderDisplay}"
+                                                           FontFamily="{StaticResource FontFamilyPrimary}"
+                                                           FontSize="11"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{Binding ReminderBadgeForeground}"
+                                                           VerticalAlignment="Center"
+                                                           TextWrapping="NoWrap"
+                                                           TextTrimming="None" />
+                                            </StackPanel>
+                                        </Border>
+                                    </Grid>
+                                </DataTemplate>
+                            </controls:UniformColumnDef.CellTemplate>
+                        </controls:UniformColumnDef>
+
+                        <controls:UniformColumnDef Header="Status"
+                                                   Priority="2"
+                                                   MinWidth="132"
+                                                   WidthRatio="0.45"
+                                                   MeasureBindingPath="StatusDisplay"
+                                                   MeasureExtraWidth="52">
+                            <controls:UniformColumnDef.CellTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="10,0" Background="Transparent" ToolTip="{Binding ToolTipText}">
+                                        <Border Background="{Binding StatusBadgeBackground}"
+                                                BorderBrush="{Binding StatusBadgeBorder}"
+                                                BorderThickness="1"
+                                                CornerRadius="11"
+                                                MinWidth="96"
+                                                Height="22"
+                                                Padding="8,0"
+                                                HorizontalAlignment="Left"
+                                                VerticalAlignment="Center">
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                <Ellipse Width="5"
+                                                         Height="5"
+                                                         Fill="{Binding StatusDotBrush}"
+                                                         VerticalAlignment="Center"
+                                                         Margin="0,0,5,0" />
+                                                <TextBlock Text="{Binding StatusDisplay}"
+                                                           FontFamily="{StaticResource FontFamilyPrimary}"
+                                                           FontSize="11"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{Binding StatusBadgeForeground}"
+                                                           VerticalAlignment="Center"
+                                                           TextWrapping="NoWrap"
+                                                           TextTrimming="None" />
+                                            </StackPanel>
+                                        </Border>
+                                    </Grid>
+                                </DataTemplate>
+                            </controls:UniformColumnDef.CellTemplate>
+                        </controls:UniformColumnDef>
+
+                        <controls:UniformColumnDef Header="Move patient to"
+                                                   Priority="1"
+                                                   MinWidth="178"
+                                                   WidthRatio="0.6"
+                                                   MeasureExtraWidth="178">
+                            <controls:UniformColumnDef.CellTemplate>
+                                <DataTemplate>
+                                    <StackPanel Orientation="Horizontal"
+                                                Margin="8,0"
+                                                VerticalAlignment="Center"
+                                                HorizontalAlignment="Left">
+                                        <Button Content="Approve AI"
+                                                Visibility="{Binding IsAiBookedPending, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                IsEnabled="{Binding CanExecuteNextStage}"
+                                                Click="ScheduledApproveAiButton_Click"
+                                                ToolTip="Approve provisional WhatsApp AI booking to Scheduled"
+                                                Style="{StaticResource UniformWarningButtonStyle}"
+                                                Height="26"
+                                                Padding="8,0"
+                                                FontSize="11"
+                                                Margin="0,0,5,0" />
+                                        <Button Content="Waiting →"
+                                                Visibility="{Binding CanCheckInFromDrawer, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                IsEnabled="{Binding CanExecuteNextStage}"
+                                                Click="ScheduledCheckInButton_Click"
+                                                ToolTip="Move patient to Waiting"
+                                                Style="{StaticResource UniformKanbanNextWaitingButtonStyle}" />
+                                    </StackPanel>
+                                </DataTemplate>
+                            </controls:UniformColumnDef.CellTemplate>
+                        </controls:UniformColumnDef>
+                    </controls:UniformPagedGrid>
+                </Grid>
+
+                <!-- 1B. COMPLETED DRAWER (Completed + Cancelled Exceptions) -->
+                <Grid Visibility="{Binding IsCompletedDrawerOpen, Converter={StaticResource BoolToVisibilityConverter}}">
+                    <Grid.RowDefinitions>
+                        <RowDefinition Height="38" />
+                        <RowDefinition x:Name="CompletedDrawerGridRow" Height="226" />
+                    </Grid.RowDefinitions>
+
+                    <Border Grid.Row="0"
+                            Background="{StaticResource BgCanvasBrush}"
+                            BorderBrush="{StaticResource BorderDefaultBrush}"
+                            BorderThickness="0,0,0,1"
+                            CornerRadius="8,8,0,0"
+                            Padding="12,0">
+                        <DockPanel LastChildFill="False">
+                            <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Ellipse Width="8"
+                                         Height="8"
+                                         Fill="{StaticResource StatusSuccessBrush}"
+                                         VerticalAlignment="Center"
+                                         Margin="0,0,7,0" />
+                                <TextBlock Text="{Binding CompletedDrawerToggleLabel}"
+                                           FontSize="13"
+                                           FontWeight="Bold"
+                                           Foreground="{StaticResource TextPrimaryBrush}"
+                                           VerticalAlignment="Center"
+                                           Margin="0,0,10,0" />
+                                <Border Visibility="{Binding HasCancelledQueueItems, Converter={StaticResource BoolToVisibilityConverter}}"
+                                        Background="{StaticResource StatusErrorBgBrush}"
+                                        BorderBrush="{StaticResource BorderDefaultBrush}"
+                                        BorderThickness="1"
+                                        CornerRadius="10"
+                                        Padding="8,1"
+                                        VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding CancelledBadgeLabel}"
+                                               FontSize="10.5"
+                                               FontWeight="SemiBold"
+                                               Foreground="{StaticResource StatusErrorBrush}" />
+                                </Border>
+                            </StackPanel>
+
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Button Content="Open Invoice"
+                                        Click="CompletedOpenInvoiceButton_Click"
+                                        IsEnabled="{Binding HasSelectedQueueRow}"
+                                        Style="{StaticResource UniformSecondaryButtonStyle}"
+                                        Height="26"
+                                        Padding="10,0"
+                                        FontSize="11.5"
+                                        Margin="0,0,6,0" />
+                                <Button Content="Hide ▼"
+                                        Command="{Binding CollapseQueueDrawerCommand}"
+                                        Style="{StaticResource UniformGhostButtonStyle}"
+                                        Height="26"
+                                        Padding="8,0"
+                                        FontSize="11.5" />
+                            </StackPanel>
+                        </DockPanel>
+                    </Border>
+
+                    <controls:UniformPagedGrid x:Name="CompletedDrawerGrid"
+                                               Grid.Row="1"
+                                               AutoPageSize="False"
+                                               PageSize="4"
+                                               EmptyMessage="No Completed visits recorded yet today."
+                                               ItemsSource="{Binding CompletedQueueRows}"
+                                               SelectedItem="{Binding SelectedQueueRow, Mode=TwoWay}"
+                                               RowDoubleClicked="DrawerGrid_RowDoubleClicked">
+                        <controls:UniformColumnDef Header="Appt Time" BindingPath="ApptTimeDisplay" Priority="1" MinWidth="82" WidthRatio="0.3" IsMonospace="True" />
+
+                        <controls:UniformColumnDef Header="Patient"
+                                                   Priority="1"
+                                                   MinWidth="175"
+                                                   WidthRatio="2.0"
+                                                   IsBold="True"
+                                                   MeasureBindingPath="PatientMeasureText"
+                                                   MeasureExtraWidth="42">
+                            <controls:UniformColumnDef.CellTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="10,0" Background="Transparent" ToolTip="{Binding ToolTipText}">
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                                            <TextBlock Text="{Binding PatientNameDisplay}"
+                                                       FontFamily="{StaticResource FontFamilyPrimary}"
+                                                       FontSize="12"
+                                                       FontWeight="SemiBold"
+                                                       Foreground="{StaticResource TextPrimaryBrush}"
+                                                       VerticalAlignment="Center"
+                                                       TextWrapping="NoWrap"
+                                                       TextTrimming="None" />
+                                            <Border Visibility="{Binding HasCriticalAlert, Converter={StaticResource BoolToVisibilityConverter}}"
+                                                    Background="{StaticResource StatusErrorBgBrush}"
+                                                    BorderBrush="{StaticResource StatusErrorBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="4"
+                                                    Padding="5,1"
+                                                    Margin="8,0,0,0"
+                                                    VerticalAlignment="Center">
+                                                <TextBlock Text="ALERT"
+                                                           FontSize="9.5"
+                                                           FontWeight="Bold"
+                                                           Foreground="{StaticResource StatusErrorBrush}"
+                                                           TextWrapping="NoWrap"
+                                                           TextTrimming="None" />
+                                            </Border>
+                                        </StackPanel>
+                                    </Grid>
+                                </DataTemplate>
+                            </controls:UniformColumnDef.CellTemplate>
+                        </controls:UniformColumnDef>
+
+                        <controls:UniformColumnDef Header="Treatment" BindingPath="TreatmentDisplay" Priority="1" MinWidth="150" WidthRatio="2.1" />
+                        <controls:UniformColumnDef Header="Doctor" BindingPath="DoctorDisplay" Priority="2" MinWidth="120" WidthRatio="1.1" />
+                        <controls:UniformColumnDef Header="Room" BindingPath="RoomDisplay" Priority="3" MinWidth="80" WidthRatio="0.5" />
+                        <controls:UniformColumnDef Header="Finished" BindingPath="FinishedAtDisplay" Priority="2" MinWidth="76" WidthRatio="0.35" IsMonospace="True" HorizontalAlignment="Right" />
+
+                        <controls:UniformColumnDef Header="Status"
+                                                   Priority="1"
+                                                   MinWidth="124"
+                                                   WidthRatio="0.45"
+                                                   MeasureBindingPath="StatusDisplay"
+                                                   MeasureExtraWidth="52">
+                            <controls:UniformColumnDef.CellTemplate>
+                                <DataTemplate>
+                                    <Grid Margin="10,0" Background="Transparent" ToolTip="{Binding ToolTipText}">
+                                        <Border Background="{Binding StatusBadgeBackground}"
+                                                BorderBrush="{Binding StatusBadgeBorder}"
+                                                BorderThickness="1"
+                                                CornerRadius="11"
+                                                MinWidth="96"
+                                                Height="22"
+                                                Padding="8,0"
+                                                HorizontalAlignment="Left"
+                                                VerticalAlignment="Center">
+                                            <StackPanel Orientation="Horizontal" HorizontalAlignment="Center" VerticalAlignment="Center">
+                                                <Ellipse Width="5"
+                                                         Height="5"
+                                                         Fill="{Binding StatusDotBrush}"
+                                                         VerticalAlignment="Center"
+                                                         Margin="0,0,5,0" />
+                                                <TextBlock Text="{Binding StatusDisplay}"
+                                                           FontFamily="{StaticResource FontFamilyPrimary}"
+                                                           FontSize="11"
+                                                           FontWeight="SemiBold"
+                                                           Foreground="{Binding StatusBadgeForeground}"
+                                                           VerticalAlignment="Center"
+                                                           TextWrapping="NoWrap"
+                                                           TextTrimming="None" />
+                                            </StackPanel>
+                                        </Border>
+                                    </Grid>
+                                </DataTemplate>
+                            </controls:UniformColumnDef.CellTemplate>
+                        </controls:UniformColumnDef>
+                    </controls:UniformPagedGrid>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <!-- ================================================================
+             ROW 2: PINNED COLLAPSIBLE BOTTOM DOCK BAR
+             Keeps Scheduled & Completed hidden until clicked without shifting under cursor
+             ================================================================ -->
+        <Border Grid.Row="2"
+                Style="{StaticResource UniformCardBorderStyle}"
+                Padding="12,5"
+                Margin="0,8,0,0">
+            <DockPanel LastChildFill="False">
+                <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center">
+                    <ToggleButton IsChecked="{Binding IsScheduledDrawerOpen, Mode=OneWay}"
+                                  Command="{Binding ToggleQueueDrawerCommand}"
+                                  CommandParameter="Scheduled"
+                                  Style="{StaticResource UniformDrawerToggleButtonStyle}"
+                                  ToolTip="Click to show or hide today's Scheduled appointments (and AI-Booked Pending)"
+                                  Margin="0,0,8,0">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <Ellipse Width="6"
+                                     Height="6"
+                                     Fill="{StaticResource TextSecondaryBrush}"
+                                     VerticalAlignment="Center"
+                                     Margin="0,0,6,0" />
+                            <TextBlock Text="{Binding ScheduledDrawerToggleLabel}"
+                                       VerticalAlignment="Center"
+                                       TextWrapping="NoWrap"
+                                       TextTrimming="None" />
+                            <Border Visibility="{Binding HasAiBookedPending, Converter={StaticResource BoolToVisibilityConverter}}"
+                                    Background="{StaticResource StatusWarningBgBrush}"
+                                    BorderBrush="{StaticResource StatusWarningBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="8"
+                                    Padding="5,0"
+                                    Margin="7,0,0,0"
+                                    VerticalAlignment="Center">
+                                <TextBlock Text="{Binding AiBookedPendingCount, StringFormat='{}{0} AI'}"
+                                           FontSize="10"
+                                           FontWeight="Bold"
+                                           Foreground="{StaticResource StatusWarningBrush}" />
+                            </Border>
+                            <TextBlock Text="{Binding ScheduledDrawerChevron}"
+                                       FontSize="9.5"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       VerticalAlignment="Center"
+                                       Margin="7,0,0,0" />
+                        </StackPanel>
+                    </ToggleButton>
+
+                    <ToggleButton IsChecked="{Binding IsCompletedDrawerOpen, Mode=OneWay}"
+                                  Command="{Binding ToggleQueueDrawerCommand}"
+                                  CommandParameter="Completed"
+                                  Style="{StaticResource UniformDrawerToggleButtonStyle}"
+                                  ToolTip="Click to show or hide today's Completed visits">
+                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center">
+                            <Ellipse Width="6"
+                                     Height="6"
+                                     Fill="{StaticResource StatusSuccessBrush}"
+                                     VerticalAlignment="Center"
+                                     Margin="0,0,6,0" />
+                            <TextBlock Text="{Binding CompletedDrawerToggleLabel}"
+                                       VerticalAlignment="Center"
+                                       TextWrapping="NoWrap"
+                                       TextTrimming="None" />
+                            <Border Visibility="{Binding HasCancelledQueueItems, Converter={StaticResource BoolToVisibilityConverter}}"
+                                    Background="{StaticResource StatusErrorBgBrush}"
+                                    BorderBrush="{StaticResource BorderDefaultBrush}"
+                                    BorderThickness="1"
+                                    CornerRadius="8"
+                                    Padding="5,0"
+                                    Margin="7,0,0,0"
+                                    VerticalAlignment="Center">
+                                <TextBlock Text="{Binding CancelledBadgeLabel}"
+                                           FontSize="10"
+                                           FontWeight="SemiBold"
+                                           Foreground="{StaticResource StatusErrorBrush}" />
+                            </Border>
+                            <TextBlock Text="{Binding CompletedDrawerChevron}"
+                                       FontSize="9.5"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
+                                       VerticalAlignment="Center"
+                                       Margin="7,0,0,0" />
+                        </StackPanel>
+                    </ToggleButton>
+                </StackPanel>
+
+                <TextBlock DockPanel.Dock="Right"
+                           Text="{Binding QueuePulseSummary}"
+                           Style="{StaticResource UniformMutedTextStyle}"
+                           FontWeight="SemiBold"
+                           VerticalAlignment="Center"
+                           TextWrapping="NoWrap"
+                           TextTrimming="None" />
+            </DockPanel>
+        </Border>
+    </Grid>
+</UserControl>
+

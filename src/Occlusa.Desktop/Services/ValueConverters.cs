@@ -2,6 +2,7 @@ using System.Globalization;
 using System.Windows;
 using System.Windows.Data;
 using System.Windows.Media;
+using Occlusa.Desktop.Themes;
 using Occlusa.Shared.Models;
 
 namespace Occlusa.Desktop.Services;
@@ -83,7 +84,7 @@ public sealed class ToothConditionToBrushConverter : IValueConverter
             return brush;
         }
 
-        return Brushes.White;
+        return CalmThemePalette.BgSurfaceBrush;
     }
 
     public object ConvertBack(object? value, Type targetType, object? parameter, CultureInfo culture) =>

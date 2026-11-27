@@ -5,6 +5,7 @@ using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
 using Occlusa.Desktop.Services;
+using Occlusa.Desktop.Themes;
 using Occlusa.Shared.Models;
 using Occlusa.Shared.Services;
 
@@ -121,12 +122,12 @@ public sealed record OdontogramProcedurePresetVm(string Name, ToothCondition Def
 /// </summary>
 public partial class VisitRecordViewModel : ObservableObject
 {
-    private static readonly Brush SurfaceEmptyBrush = FreezeBrush("#FFFFFF");
-    private static readonly Brush CariesBrush = FreezeBrush("#EF4444");
-    private static readonly Brush FillingBrush = FreezeBrush("#0EA5E9");
-    private static readonly Brush CrownBrush = FreezeBrush("#8B5CF6");
-    private static readonly Brush RctBrush = FreezeBrush("#F97316");
-    private static readonly Brush ImplantBrush = FreezeBrush("#14B8A6");
+    private static Brush SurfaceEmptyBrush => CalmThemePalette.BgSurfaceBrush;
+    private static Brush CariesBrush => CalmThemePalette.StatusErrorBrush;
+    private static Brush FillingBrush => CalmThemePalette.StatusInfoBrush;
+    private static Brush CrownBrush => CalmThemePalette.StatusSuccessBrush;
+    private static Brush RctBrush => CalmThemePalette.StatusWarningBrush;
+    private static Brush ImplantBrush => CalmThemePalette.BrandPrimaryBrush;
 
     private readonly OcclusaApiClient _apiClient;
     private readonly string _activeStaffName;
@@ -863,12 +864,5 @@ public partial class VisitRecordViewModel : ObservableObject
 
     private void SyncUnsavedFlag() =>
         HasUnsavedChanges = _visitNotesDirty || _toothEditDirty;
-
-    private static Brush FreezeBrush(string hex)
-    {
-        var brush = (SolidColorBrush)new BrushConverter().ConvertFromString(hex)!;
-        brush.Freeze();
-        return brush;
-    }
 }
 

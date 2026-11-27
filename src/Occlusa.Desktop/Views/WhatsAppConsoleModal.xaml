@@ -9,7 +9,8 @@
         MinHeight="720"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
-        Background="{StaticResource SurfaceCanvasBrush}"
+        Background="{StaticResource BgCanvasBrush}"
+        Foreground="{StaticResource TextPrimaryBrush}"
         ScrollViewer.VerticalScrollBarVisibility="Disabled"
         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
 
@@ -48,7 +49,7 @@
                                     Content="Approve AI-Booked (Pending)"
                                     Command="{Binding ApproveAiBookingCommand}"
                                     Visibility="{Binding HasPendingAiBooking, Converter={StaticResource BoolToVisibilityConverter}}"
-                                    Style="{StaticResource UniformPrimaryButtonStyle}" />
+                                    Style="{StaticResource UniformWarningButtonStyle}" />
                         </DockPanel>
 
                         <Border Grid.Row="1"
@@ -73,8 +74,8 @@
                                         <StackPanel>
                                             <DockPanel Margin="0,0,0,6" LastChildFill="False">
                                                 <Border DockPanel.Dock="Left"
-                                                        Background="{StaticResource BrandPrimarySoftBrush}"
-                                                        BorderBrush="#99F6E4"
+                                                        Background="{StaticResource BrandTintBrush}"
+                                                        BorderBrush="{StaticResource BorderDefaultBrush}"
                                                         BorderThickness="1"
                                                         CornerRadius="4"
                                                         Padding="7,2"
@@ -82,7 +83,7 @@
                                                     <TextBlock Text="{Binding Sender}"
                                                                FontSize="11"
                                                                FontWeight="Bold"
-                                                               Foreground="{StaticResource BrandPrimaryBrush}"
+                                                               Foreground="{StaticResource BrandHoverBrush}"
                                                                TextTrimming="None" />
                                                 </Border>
                                                 <TextBlock DockPanel.Dock="Right"
@@ -252,7 +253,7 @@
         <controls:ModalDialogShell.FooterLeftContent>
             <TextBlock Text="{Binding StatusMessage}"
                        Style="{StaticResource UniformBodyTextStyle}"
-                       Foreground="{StaticResource BrandPrimaryBrush}"
+                       Foreground="{StaticResource BrandHoverBrush}"
                        FontWeight="SemiBold"
                        VerticalAlignment="Center" />
         </controls:ModalDialogShell.FooterLeftContent>

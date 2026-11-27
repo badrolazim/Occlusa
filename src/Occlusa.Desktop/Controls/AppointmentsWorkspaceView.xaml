@@ -240,8 +240,8 @@
         <!-- ================================================================
              MODE B1: CALENDAR DAY VIEW (Floating Dentist Lanes | 4 Rows/Hr)
              ================================================================ -->
-        <Border Background="#F6F8FB"
-                BorderBrush="{StaticResource BorderHairlineBrush}"
+        <Border Background="{StaticResource BgCanvasBrush}"
+                BorderBrush="{StaticResource BorderDefaultBrush}"
                 BorderThickness="1"
                 CornerRadius="8"
                 Padding="6,6,8,0"
@@ -255,7 +255,9 @@
 
                 <!-- Quick-Date Pill Strip (Click to switch day, or Drop appointment to move to date) -->
                 <Border Grid.Row="0"
-                        Background="{StaticResource SurfaceCardBrush}"
+                        Background="{StaticResource BgSurfaceBrush}"
+                        BorderBrush="{StaticResource BorderDefaultBrush}"
+                        BorderThickness="1"
                         CornerRadius="8"
                         Padding="8,5"
                         Margin="4,2,4,8">
@@ -263,7 +265,7 @@
                         <TextBlock DockPanel.Dock="Right"
                                    Text="Drag appointment onto another date pill to move (same dentist)"
                                    FontSize="10.5"
-                                   Foreground="{StaticResource TextMutedBrush}"
+                                   Foreground="{StaticResource TextSecondaryBrush}"
                                    VerticalAlignment="Center"
                                    Margin="12,0,4,0" />
                         <ItemsControl ItemsSource="{Binding DayQuickDates}">
@@ -288,8 +290,8 @@
                                                 <Setter Property="BorderBrush" Value="Transparent" />
                                                 <Style.Triggers>
                                                     <DataTrigger Binding="{Binding IsToday}" Value="True">
-                                                        <Setter Property="Background" Value="#EDF7F5" />
-                                                        <Setter Property="BorderBrush" Value="#CBEAE4" />
+                                                        <Setter Property="Background" Value="{StaticResource BrandTintBrush}" />
+                                                        <Setter Property="BorderBrush" Value="{StaticResource BorderDefaultBrush}" />
                                                     </DataTrigger>
                                                     <DataTrigger Binding="{Binding IsSelected}" Value="True">
                                                         <Setter Property="Background" Value="{StaticResource BrandPrimaryBrush}" />
@@ -315,7 +317,7 @@
                                                             <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
                                                             <Style.Triggers>
                                                                 <DataTrigger Binding="{Binding IsToday}" Value="True">
-                                                                    <Setter Property="Foreground" Value="{StaticResource BrandPrimaryBrush}" />
+                                                                    <Setter Property="Foreground" Value="{StaticResource BrandHoverBrush}" />
                                                                 </DataTrigger>
                                                                 <DataTrigger Binding="{Binding IsSelected}" Value="True">
                                                                     <Setter Property="Foreground" Value="{StaticResource TextInverseBrush}" />
@@ -330,10 +332,10 @@
                                                         Margin="5,0,0,0">
                                                     <Border.Style>
                                                         <Style TargetType="Border">
-                                                            <Setter Property="Background" Value="#E2E8F0" />
+                                                            <Setter Property="Background" Value="{StaticResource BgSubtleBrush}" />
                                                             <Style.Triggers>
                                                                 <DataTrigger Binding="{Binding IsSelected}" Value="True">
-                                                                    <Setter Property="Background" Value="#115E59" />
+                                                                    <Setter Property="Background" Value="{StaticResource BrandHoverBrush}" />
                                                                 </DataTrigger>
                                                             </Style.Triggers>
                                                         </Style>
@@ -373,7 +375,7 @@
                                Text="TIME"
                                FontSize="10"
                                FontWeight="Bold"
-                               Foreground="{StaticResource TextMutedBrush}"
+                               Foreground="{StaticResource TextSecondaryBrush}"
                                HorizontalAlignment="Right"
                                VerticalAlignment="Center"
                                Margin="0,0,8,0" />
@@ -386,7 +388,9 @@
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Border Background="{StaticResource SurfaceCardBrush}"
+                                <Border Background="{StaticResource BgSurfaceBrush}"
+                                        BorderBrush="{StaticResource BorderDefaultBrush}"
+                                        BorderThickness="1"
                                         CornerRadius="8"
                                         Padding="12,7"
                                         Margin="5,0">
@@ -404,11 +408,11 @@
                                                            Foreground="{StaticResource TextPrimaryBrush}" />
                                                 <TextBlock Text="{Binding Subtitle}"
                                                            FontSize="10.5"
-                                                           Foreground="{StaticResource TextMutedBrush}" />
+                                                           Foreground="{StaticResource TextSecondaryBrush}" />
                                             </StackPanel>
                                         </StackPanel>
                                         <Border DockPanel.Dock="Right"
-                                                Background="#F1F5F9"
+                                                Background="{StaticResource BgSubtleBrush}"
                                                 CornerRadius="10"
                                                 Padding="8,2"
                                                 VerticalAlignment="Center">
@@ -453,7 +457,9 @@
                         </ItemsControl.ItemsPanel>
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Border Background="{StaticResource SurfaceCardBrush}"
+                                <Border Background="{StaticResource BgSurfaceBrush}"
+                                        BorderBrush="{StaticResource BorderDefaultBrush}"
+                                        BorderThickness="1"
                                         CornerRadius="8"
                                         Margin="5,0,5,8"
                                         ClipToBounds="True">
@@ -475,15 +481,15 @@
                                         <Canvas IsHitTestVisible="False" ClipToBounds="True">
                                             <Border x:Name="HoverSlotIndicator"
                                                     Visibility="Collapsed"
-                                                    Background="#F0FDFA"
-                                                    BorderBrush="#99F6E4"
+                                                    Background="{StaticResource BrandTintBrush}"
+                                                    BorderBrush="{StaticResource BrandPrimaryBrush}"
                                                     BorderThickness="1"
                                                     CornerRadius="5"
                                                     Padding="8,0">
                                                 <TextBlock x:Name="HoverSlotText"
                                                            FontSize="10"
                                                            FontWeight="SemiBold"
-                                                           Foreground="{StaticResource BrandPrimaryBrush}"
+                                                           Foreground="{StaticResource BrandHoverBrush}"
                                                            VerticalAlignment="Center"
                                                            TextWrapping="NoWrap"
                                                            TextTrimming="None" />
@@ -491,8 +497,8 @@
 
                                             <Border x:Name="DropGhostIndicator"
                                                     Visibility="Collapsed"
-                                                    Background="#CCFBF1"
-                                                    BorderBrush="#0F766E"
+                                                    Background="{StaticResource BrandTintBrush}"
+                                                    BorderBrush="{StaticResource BrandPrimaryBrush}"
                                                     BorderThickness="1.5"
                                                     CornerRadius="7"
                                                     Opacity="0.92"
@@ -500,7 +506,7 @@
                                                 <TextBlock x:Name="DropGhostText"
                                                            FontSize="10.5"
                                                            FontWeight="SemiBold"
-                                                           Foreground="#0F3D39"
+                                                           Foreground="{StaticResource TextPrimaryBrush}"
                                                            VerticalAlignment="Top"
                                                            TextWrapping="NoWrap"
                                                            TextTrimming="None" />
@@ -537,8 +543,8 @@
         <!-- ================================================================
              MODE B2: CALENDAR WEEK VIEW (Floating Day Lanes | 4 Rows/Hr)
              ================================================================ -->
-        <Border Background="#F6F8FB"
-                BorderBrush="{StaticResource BorderHairlineBrush}"
+        <Border Background="{StaticResource BgCanvasBrush}"
+                BorderBrush="{StaticResource BorderDefaultBrush}"
                 BorderThickness="1"
                 CornerRadius="8"
                 Padding="6,8,8,0"
@@ -560,7 +566,7 @@
                                Text="TIME"
                                FontSize="10"
                                FontWeight="Bold"
-                               Foreground="{StaticResource TextMutedBrush}"
+                               Foreground="{StaticResource TextSecondaryBrush}"
                                HorizontalAlignment="Right"
                                VerticalAlignment="Center"
                                Margin="0,0,8,0" />
@@ -574,17 +580,19 @@
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
                                 <Border CornerRadius="8"
+                                        BorderBrush="{StaticResource BorderDefaultBrush}"
+                                        BorderThickness="1"
                                         Padding="8,5"
                                         Margin="3,0">
                                     <Border.Style>
                                         <Style TargetType="Border">
-                                            <Setter Property="Background" Value="{StaticResource SurfaceCardBrush}" />
+                                            <Setter Property="Background" Value="{StaticResource BgSurfaceBrush}" />
                                             <Style.Triggers>
                                                 <DataTrigger Binding="{Binding IsSunday}" Value="True">
-                                                    <Setter Property="Background" Value="#FAFBFD" />
+                                                    <Setter Property="Background" Value="{StaticResource BgCanvasBrush}" />
                                                 </DataTrigger>
                                                 <DataTrigger Binding="{Binding IsToday}" Value="True">
-                                                    <Setter Property="Background" Value="{StaticResource BrandPrimarySoftBrush}" />
+                                                    <Setter Property="Background" Value="{StaticResource BrandTintBrush}" />
                                                 </DataTrigger>
                                             </Style.Triggers>
                                         </Style>
@@ -607,7 +615,7 @@
                                                             <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
                                                             <Style.Triggers>
                                                                 <DataTrigger Binding="{Binding IsToday}" Value="True">
-                                                                    <Setter Property="Foreground" Value="{StaticResource BrandPrimaryBrush}" />
+                                                                    <Setter Property="Foreground" Value="{StaticResource BrandHoverBrush}" />
                                                                 </DataTrigger>
                                                             </Style.Triggers>
                                                         </Style>
@@ -621,7 +629,7 @@
 
                                         <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                                             <Border Visibility="{Binding HasCount, Converter={StaticResource BoolToVisibilityConverter}}"
-                                                    Background="#F1F5F9"
+                                                    Background="{StaticResource BgSubtleBrush}"
                                                     CornerRadius="9"
                                                     Padding="6,1"
                                                     Margin="0,0,3,0">
@@ -680,16 +688,16 @@
                                         ClipToBounds="True">
                                     <Border.Style>
                                         <Style TargetType="Border">
-                                            <Setter Property="Background" Value="{StaticResource SurfaceCardBrush}" />
-                                            <Setter Property="BorderThickness" Value="0" />
+                                            <Setter Property="Background" Value="{StaticResource BgSurfaceBrush}" />
+                                            <Setter Property="BorderThickness" Value="1" />
+                                            <Setter Property="BorderBrush" Value="{StaticResource BorderDefaultBrush}" />
                                             <Style.Triggers>
                                                 <DataTrigger Binding="{Binding IsSunday}" Value="True">
-                                                    <Setter Property="Background" Value="#FAFBFD" />
+                                                    <Setter Property="Background" Value="{StaticResource BgCanvasBrush}" />
                                                 </DataTrigger>
                                                 <DataTrigger Binding="{Binding IsToday}" Value="True">
-                                                    <Setter Property="Background" Value="#F4FBF9" />
-                                                    <Setter Property="BorderThickness" Value="1" />
-                                                    <Setter Property="BorderBrush" Value="#CBEAE4" />
+                                                    <Setter Property="Background" Value="{StaticResource BgCanvasBrush}" />
+                                                    <Setter Property="BorderBrush" Value="{StaticResource BrandPrimaryBrush}" />
                                                 </DataTrigger>
                                             </Style.Triggers>
                                         </Style>
@@ -712,15 +720,15 @@
                                         <Canvas IsHitTestVisible="False" ClipToBounds="True">
                                             <Border x:Name="HoverSlotIndicator"
                                                     Visibility="Collapsed"
-                                                    Background="#F0FDFA"
-                                                    BorderBrush="#99F6E4"
+                                                    Background="{StaticResource BrandTintBrush}"
+                                                    BorderBrush="{StaticResource BrandPrimaryBrush}"
                                                     BorderThickness="1"
                                                     CornerRadius="5"
                                                     Padding="6,0">
                                                 <TextBlock x:Name="HoverSlotText"
                                                            FontSize="9.5"
                                                            FontWeight="SemiBold"
-                                                           Foreground="{StaticResource BrandPrimaryBrush}"
+                                                           Foreground="{StaticResource BrandHoverBrush}"
                                                            VerticalAlignment="Center"
                                                            TextWrapping="NoWrap"
                                                            TextTrimming="None" />
@@ -728,8 +736,8 @@
 
                                             <Border x:Name="DropGhostIndicator"
                                                     Visibility="Collapsed"
-                                                    Background="#CCFBF1"
-                                                    BorderBrush="#0F766E"
+                                                    Background="{StaticResource BrandTintBrush}"
+                                                    BorderBrush="{StaticResource BrandPrimaryBrush}"
                                                     BorderThickness="1.5"
                                                     CornerRadius="7"
                                                     Opacity="0.92"
@@ -737,7 +745,7 @@
                                                 <TextBlock x:Name="DropGhostText"
                                                            FontSize="10"
                                                            FontWeight="SemiBold"
-                                                           Foreground="#0F3D39"
+                                                           Foreground="{StaticResource TextPrimaryBrush}"
                                                            VerticalAlignment="Top"
                                                            TextWrapping="NoWrap"
                                                            TextTrimming="None" />
@@ -785,8 +793,8 @@
 
                 <!-- Weekday Header Bar -->
                 <Border Grid.Row="0"
-                        Background="{StaticResource SurfaceSubtleBrush}"
-                        BorderBrush="#EEF2F6"
+                        Background="{StaticResource BgSubtleBrush}"
+                        BorderBrush="{StaticResource BorderDefaultBrush}"
                         BorderThickness="0,0,0,1"
                         CornerRadius="8,8,0,0"
                         Padding="0,7">
@@ -828,14 +836,14 @@
                                     Drop="MonthCell_Drop">
                                 <Border.Style>
                                     <Style TargetType="Border">
-                                        <Setter Property="Background" Value="{StaticResource SurfaceCardBrush}" />
-                                        <Setter Property="BorderBrush" Value="#EEF2F6" />
+                                        <Setter Property="Background" Value="{StaticResource BgSurfaceBrush}" />
+                                        <Setter Property="BorderBrush" Value="{StaticResource BorderDefaultBrush}" />
                                         <Style.Triggers>
                                             <DataTrigger Binding="{Binding IsCurrentMonth}" Value="False">
-                                                <Setter Property="Background" Value="{StaticResource SurfaceSubtleBrush}" />
+                                                <Setter Property="Background" Value="{StaticResource BgSubtleBrush}" />
                                             </DataTrigger>
                                             <DataTrigger Binding="{Binding IsToday}" Value="True">
-                                                <Setter Property="Background" Value="#F0FDFA" />
+                                                <Setter Property="Background" Value="{StaticResource BrandTintBrush}" />
                                             </DataTrigger>
                                         </Style.Triggers>
                                     </Style>

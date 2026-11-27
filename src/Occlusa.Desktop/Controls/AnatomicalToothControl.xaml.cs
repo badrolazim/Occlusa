@@ -1,6 +1,7 @@
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using Occlusa.Desktop.Themes;
 using Occlusa.Shared.Models;
 using Occlusa.Shared.Services;
 
@@ -12,30 +13,30 @@ namespace Occlusa.Desktop.Controls;
 /// </summary>
 public partial class AnatomicalToothControl : UserControl
 {
-    private static readonly Brush EnamelWhite = Freeze("#FFFFFF");
-    private static readonly Brush RootIvory = Freeze("#FEF9EC");
-    private static readonly Brush CariesRed = Freeze("#EF4444");
-    private static readonly Brush CariesSoft = Freeze("#FEE2E2");
-    private static readonly Brush FillingBlue = Freeze("#0EA5E9");
-    private static readonly Brush FillingSoft = Freeze("#E0F2FE");
-    private static readonly Brush CrownViolet = Freeze("#8B5CF6");
-    private static readonly Brush CrownCapFill = Freeze("#DDD6FE");
-    private static readonly Brush RctOrange = Freeze("#F97316");
-    private static readonly Brush ImplantTeal = Freeze("#14B8A6");
-    private static readonly Brush ImplantCrownFill = Freeze("#CCFBF1");
-    private static readonly Brush ExtractSoft = Freeze("#FEE2E2");
-    private static readonly Brush MissingGray = Freeze("#CBD5E1");
-    private static readonly Brush OutlineDark = Freeze("#475569");
-    private static readonly Brush OutlineRoot = Freeze("#64748B");
+    private static Brush EnamelWhite => CalmThemePalette.BgSurfaceBrush;
+    private static Brush RootIvory => CalmThemePalette.StatusWarningBgBrush;
+    private static Brush CariesRed => CalmThemePalette.StatusErrorBrush;
+    private static Brush CariesSoft => CalmThemePalette.StatusErrorBgBrush;
+    private static Brush FillingBlue => CalmThemePalette.StatusInfoBrush;
+    private static Brush FillingSoft => CalmThemePalette.StatusInfoBgBrush;
+    private static Brush CrownAccent => CalmThemePalette.StatusSuccessBrush;
+    private static Brush CrownCapFill => CalmThemePalette.StatusSuccessBgBrush;
+    private static Brush RctWarning => CalmThemePalette.StatusWarningBrush;
+    private static Brush ImplantTeal => CalmThemePalette.BrandPrimaryBrush;
+    private static Brush ImplantCrownFill => CalmThemePalette.BrandTintBrush;
+    private static Brush ExtractSoft => CalmThemePalette.StatusErrorBgBrush;
+    private static Brush MissingGray => CalmThemePalette.BorderDefaultBrush;
+    private static Brush OutlineDark => CalmThemePalette.TextPrimaryBrush;
+    private static Brush OutlineRoot => CalmThemePalette.TextSecondaryBrush;
 
-    private static readonly Brush StageDoneBg = Freeze("#DCFCE7");
-    private static readonly Brush StageDoneFg = Freeze("#166534");
-    private static readonly Brush StageAcptBg = Freeze("#DBEAFE");
-    private static readonly Brush StageAcptFg = Freeze("#1E40AF");
-    private static readonly Brush StagePropBg = Freeze("#FEF3C7");
-    private static readonly Brush StagePropFg = Freeze("#92400E");
-    private static readonly Brush StageBaseBg = Freeze("#F1F5F9");
-    private static readonly Brush StageBaseFg = Freeze("#475569");
+    private static Brush StageDoneBg => CalmThemePalette.StatusSuccessBgBrush;
+    private static Brush StageDoneFg => CalmThemePalette.StatusSuccessBrush;
+    private static Brush StageAcptBg => CalmThemePalette.StatusInfoBgBrush;
+    private static Brush StageAcptFg => CalmThemePalette.StatusInfoBrush;
+    private static Brush StagePropBg => CalmThemePalette.StatusWarningBgBrush;
+    private static Brush StagePropFg => CalmThemePalette.StatusWarningBrush;
+    private static Brush StageBaseBg => CalmThemePalette.BgSubtleBrush;
+    private static Brush StageBaseFg => CalmThemePalette.TextSecondaryBrush;
 
     public static readonly DependencyProperty ToothNumberProperty =
         DependencyProperty.Register(nameof(ToothNumber), typeof(int), typeof(AnatomicalToothControl),
@@ -155,7 +156,7 @@ public partial class AnatomicalToothControl : UserControl
         if (isCrown)
         {
             CrownPath.Fill = CrownCapFill;
-            CrownPath.Stroke = CrownViolet;
+            CrownPath.Stroke = CrownAccent;
         }
         else if (isImplant)
         {
@@ -202,8 +203,8 @@ public partial class AnatomicalToothControl : UserControl
         {
             ToothCondition.Caries => CariesRed,
             ToothCondition.Filling => FillingBlue,
-            ToothCondition.Crown => CrownViolet,
-            ToothCondition.RootCanal => RctOrange,
+            ToothCondition.Crown => CrownAccent,
+            ToothCondition.RootCanal => RctWarning,
             ToothCondition.Implant => ImplantTeal,
             ToothCondition.ExtractionNeeded => CariesRed,
             _ => EnamelWhite
@@ -254,13 +255,6 @@ public partial class AnatomicalToothControl : UserControl
         }
 
         return normSurfaces.Contains(target);
-    }
-
-    private static Brush Freeze(string hex)
-    {
-        var brush = (SolidColorBrush)new BrushConverter().ConvertFromString(hex)!;
-        brush.Freeze();
-        return brush;
     }
 }
 

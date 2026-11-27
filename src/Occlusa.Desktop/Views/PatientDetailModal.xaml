@@ -9,7 +9,8 @@
         MinHeight="750"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
-        Background="{StaticResource SurfaceCanvasBrush}"
+        Background="{StaticResource BgCanvasBrush}"
+        Foreground="{StaticResource TextPrimaryBrush}"
         ScrollViewer.VerticalScrollBarVisibility="Disabled"
         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
 
@@ -93,7 +94,7 @@
 
                             <TextBlock Text="{Binding NricHintText}"
                                        Style="{StaticResource UniformMutedTextStyle}"
-                                       Foreground="{StaticResource BrandPrimaryBrush}"
+                                       Foreground="{StaticResource BrandHoverBrush}"
                                        Margin="0,0,0,8" />
 
                             <Grid Margin="0,0,0,8">
@@ -190,7 +191,7 @@
                                             Margin="0,0,8,0" />
                                     <Button Content="+ New Visit Record"
                                             Click="CreateNewVisitButton_Click"
-                                            Style="{StaticResource UniformPrimaryButtonStyle}"
+                                            Style="{StaticResource UniformSecondaryButtonStyle}"
                                             Height="32"
                                             Padding="12,0" />
                                 </StackPanel>
@@ -222,7 +223,7 @@
         <controls:ModalDialogShell.FooterLeftContent>
             <TextBlock Text="{Binding StatusMessage}"
                        Style="{StaticResource UniformBodyTextStyle}"
-                       Foreground="{StaticResource BrandPrimaryBrush}"
+                       Foreground="{StaticResource BrandHoverBrush}"
                        FontWeight="SemiBold"
                        VerticalAlignment="Center" />
         </controls:ModalDialogShell.FooterLeftContent>

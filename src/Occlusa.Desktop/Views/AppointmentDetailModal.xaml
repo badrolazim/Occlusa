@@ -9,7 +9,8 @@
         MinHeight="770"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
-        Background="{StaticResource SurfaceCanvasBrush}"
+        Background="{StaticResource BgCanvasBrush}"
+        Foreground="{StaticResource TextPrimaryBrush}"
         ScrollViewer.VerticalScrollBarVisibility="Disabled"
         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
 
@@ -67,7 +68,7 @@
                                       Margin="0,0,0,3" />
                             <TextBlock Text="{Binding TreatmentFeeSummary}"
                                        Style="{StaticResource UniformMutedTextStyle}"
-                                       Foreground="{StaticResource BrandPrimaryBrush}"
+                                       Foreground="{StaticResource BrandHoverBrush}"
                                        FontWeight="SemiBold"
                                        Margin="0,0,0,6" />
 
@@ -210,10 +211,10 @@
                                                                        VerticalAlignment="Center">
                                                                 <TextBlock.Style>
                                                                     <Style TargetType="TextBlock">
-                                                                        <Setter Property="Foreground" Value="{StaticResource BrandPrimaryBrush}" />
+                                                                        <Setter Property="Foreground" Value="{StaticResource BrandHoverBrush}" />
                                                                         <Style.Triggers>
                                                                             <DataTrigger Binding="{Binding IsAvailable}" Value="False">
-                                                                                <Setter Property="Foreground" Value="{StaticResource WarningBrush}" />
+                                                                                <Setter Property="Foreground" Value="{StaticResource StatusWarningBrush}" />
                                                                             </DataTrigger>
                                                                             <DataTrigger Binding="{Binding IsSelected}" Value="True">
                                                                                 <Setter Property="Foreground" Value="{StaticResource TextInverseBrush}" />
@@ -344,7 +345,7 @@
                                                                    Text="Select &#x2192;"
                                                                    FontSize="11.5"
                                                                    FontWeight="SemiBold"
-                                                                   Foreground="{StaticResource BrandPrimaryBrush}"
+                                                                   Foreground="{StaticResource BrandHoverBrush}"
                                                                    VerticalAlignment="Center" />
                                                     </DockPanel>
                                                 </Button>
@@ -354,8 +355,8 @@
 
                                     <!-- No Match Found -> Prompt to Add Patient -->
                                     <Border Visibility="{Binding ShowNoPatientMatchPrompt, Converter={StaticResource BoolToVisibilityConverter}}"
-                                            Background="{StaticResource WarningBgBrush}"
-                                            BorderBrush="{StaticResource WarningBorderBrush}"
+                                            Background="{StaticResource StatusWarningBgBrush}"
+                                            BorderBrush="{StaticResource StatusWarningBrush}"
                                             BorderThickness="1"
                                             CornerRadius="6"
                                             Padding="12,10">
@@ -363,7 +364,7 @@
                                             <Button DockPanel.Dock="Right"
                                                     Content="+ Register New Patient"
                                                     Command="{Binding StartRegisterNewPatientCommand}"
-                                                    Style="{StaticResource UniformPrimaryButtonStyle}"
+                                                    Style="{StaticResource UniformSecondaryButtonStyle}"
                                                     Height="32"
                                                     Margin="10,0,0,0" />
                                             <StackPanel VerticalAlignment="Center">
@@ -441,7 +442,7 @@
 
                                     <TextBlock Text="{Binding NricParseHint}"
                                                Style="{StaticResource UniformMutedTextStyle}"
-                                               Foreground="{StaticResource BrandPrimaryBrush}"
+                                               Foreground="{StaticResource BrandHoverBrush}"
                                                Margin="0,0,0,8" />
 
                                     <Grid Margin="0,0,0,8">
@@ -537,7 +538,7 @@
                                         <Button Content="✓ Confirm"
                                                 Command="{Binding QuickConfirmReminderCommand}"
                                                 Visibility="{Binding CanConfirmReminderQuickly, Converter={StaticResource BoolToVisibilityConverter}}"
-                                                Style="{StaticResource UniformPrimaryButtonStyle}"
+                                                Style="{StaticResource UniformSecondaryButtonStyle}"
                                                 Height="32"
                                                 Padding="10,0"
                                                 FontSize="11.5" />
@@ -619,7 +620,7 @@
                                                                FontFamily="{StaticResource FontFamilyMono}"
                                                                FontSize="11"
                                                                FontWeight="SemiBold"
-                                                               Foreground="{StaticResource BrandPrimaryBrush}"
+                                                               Foreground="{StaticResource BrandHoverBrush}"
                                                                Width="42"
                                                                VerticalAlignment="Center" />
                                                     <TextBlock Text="{Binding SummaryLine}"
@@ -646,11 +647,11 @@
                        VerticalAlignment="Center">
                 <TextBlock.Style>
                     <Style TargetType="TextBlock" BasedOn="{StaticResource UniformBodyTextStyle}">
-                        <Setter Property="Foreground" Value="{StaticResource BrandPrimaryBrush}" />
+                        <Setter Property="Foreground" Value="{StaticResource BrandHoverBrush}" />
                         <Setter Property="FontWeight" Value="SemiBold" />
                         <Style.Triggers>
                             <DataTrigger Binding="{Binding IsStatusError}" Value="True">
-                                <Setter Property="Foreground" Value="{StaticResource DangerBrush}" />
+                                <Setter Property="Foreground" Value="{StaticResource StatusErrorBrush}" />
                             </DataTrigger>
                         </Style.Triggers>
                     </Style>

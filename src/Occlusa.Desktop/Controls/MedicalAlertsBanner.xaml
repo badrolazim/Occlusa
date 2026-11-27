@@ -38,32 +38,34 @@
                 </Grid.RowDefinitions>
 
                 <StackPanel Grid.Row="0" Orientation="Horizontal" VerticalAlignment="Center">
-                    <Border Background="#E2E8F0"
+                    <Border Background="{StaticResource BgSurfaceBrush}"
+                            BorderBrush="{StaticResource BorderDefaultBrush}"
+                            BorderThickness="1"
                             CornerRadius="4"
                             Padding="8,2"
                             Margin="0,0,10,0"
                             VerticalAlignment="Center">
                         <TextBlock Text="CLINICAL SAFETY"
-                                   FontFamily="Segoe UI"
+                                   FontFamily="{StaticResource FontFamilyPrimary}"
                                    FontSize="10.5"
                                    FontWeight="Bold"
-                                   Foreground="#334155"
+                                   Foreground="{StaticResource TextSecondaryBrush}"
                                    TextTrimming="None" />
                     </Border>
                     <TextBlock Text="No active patient selected"
-                               FontFamily="Segoe UI"
+                               FontFamily="{StaticResource FontFamilyPrimary}"
                                FontSize="12.5"
                                FontWeight="SemiBold"
-                               Foreground="#334155"
+                               Foreground="{StaticResource TextPrimaryBrush}"
                                VerticalAlignment="Center"
                                TextTrimming="None" />
                 </StackPanel>
 
                 <TextBlock Grid.Row="1"
                            Text="Select a patient row or scan a MyKad to inspect allergies, medical flags, and clinical safety notes."
-                           FontFamily="Segoe UI"
+                           FontFamily="{StaticResource FontFamilyPrimary}"
                            FontSize="11.5"
-                           Foreground="#64748B"
+                           Foreground="{StaticResource TextSecondaryBrush}"
                            Margin="0,4,0,0"
                            VerticalAlignment="Center"
                            TextWrapping="NoWrap"
@@ -83,15 +85,15 @@
                 <DockPanel Grid.Row="0" LastChildFill="True">
                     <StackPanel DockPanel.Dock="Left" Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,14,0">
                         <TextBlock Text="{Binding PatientName, ElementName=RootBanner}"
-                                   FontFamily="Segoe UI"
+                                   FontFamily="{StaticResource FontFamilyPrimary}"
                                    FontSize="13.5"
                                    FontWeight="Bold"
-                                   Foreground="#0F172A"
+                                   Foreground="{StaticResource TextPrimaryBrush}"
                                    VerticalAlignment="Center"
                                    TextTrimming="None" />
 
-                        <Border Background="#FFFFFF"
-                                BorderBrush="#CBD5E1"
+                        <Border Background="{StaticResource BgSurfaceBrush}"
+                                BorderBrush="{StaticResource BorderDefaultBrush}"
                                 BorderThickness="1"
                                 CornerRadius="4"
                                 Padding="8,2"
@@ -99,10 +101,10 @@
                                 VerticalAlignment="Center"
                                 Visibility="{Binding HasIcNumber, ElementName=RootBanner, Converter={StaticResource BoolToVis}}">
                             <TextBlock Text="{Binding FormattedIcText, ElementName=RootBanner}"
-                                       FontFamily="Consolas"
+                                       FontFamily="{StaticResource FontFamilyMono}"
                                        FontSize="11.5"
                                        FontWeight="SemiBold"
-                                       Foreground="#334155"
+                                       Foreground="{StaticResource TextSecondaryBrush}"
                                        VerticalAlignment="Center"
                                        TextTrimming="None" />
                         </Border>
@@ -116,7 +118,7 @@
                                 Margin="8,0,0,0"
                                 VerticalAlignment="Center">
                             <TextBlock Text="{Binding MyKadBadgeText, ElementName=RootBanner}"
-                                       FontFamily="Segoe UI"
+                                       FontFamily="{StaticResource FontFamilyPrimary}"
                                        FontSize="11"
                                        FontWeight="SemiBold"
                                        Foreground="{Binding MyKadBadgeForeground, ElementName=RootBanner}"
@@ -125,83 +127,91 @@
                         </Border>
                     </StackPanel>
 
-                    <!-- Clinical Safety Alert Pills (Single-line StackPanel prevents vertical wrap shift) -->
+                    <!-- Clinical Safety Alert Pills (Calm Semantic Soft Fill + Matching Text) -->
                     <StackPanel Orientation="Horizontal" VerticalAlignment="Center" HorizontalAlignment="Right">
                         <!-- Clear State Pill -->
                         <Border Visibility="{Binding ShowClearBadge, ElementName=RootBanner, Converter={StaticResource BoolToVis}}"
-                                Background="#DCFCE7"
-                                BorderBrush="#86EFAC"
+                                Background="{StaticResource StatusSuccessBgBrush}"
+                                BorderBrush="{StaticResource StatusSuccessBrush}"
                                 BorderThickness="1"
                                 CornerRadius="10"
                                 Padding="9,2"
                                 Margin="6,0,0,0"
                                 VerticalAlignment="Center">
                             <TextBlock Text="✓ NO CRITICAL MEDICAL ALERTS"
-                                       FontFamily="Segoe UI"
+                                       FontFamily="{StaticResource FontFamilyPrimary}"
                                        FontSize="11"
-                                       FontWeight="Bold"
-                                       Foreground="#15803D"
+                                       FontWeight="SemiBold"
+                                       Foreground="{StaticResource StatusSuccessBrush}"
                                        TextTrimming="None" />
                         </Border>
 
                         <!-- Allergy Pill -->
                         <Border Visibility="{Binding HasAllergies, ElementName=RootBanner, Converter={StaticResource BoolToVis}}"
                                 ToolTip="{Binding FullAllergyToolTip, ElementName=RootBanner}"
-                                Background="#DC2626"
+                                Background="{StaticResource StatusErrorBgBrush}"
+                                BorderBrush="{StaticResource StatusErrorBrush}"
+                                BorderThickness="1"
                                 CornerRadius="10"
                                 Padding="9,2"
                                 Margin="6,0,0,0"
                                 VerticalAlignment="Center">
                             <TextBlock Text="{Binding FormattedAllergyText, ElementName=RootBanner}"
-                                       FontFamily="Segoe UI"
+                                       FontFamily="{StaticResource FontFamilyPrimary}"
                                        FontSize="11"
                                        FontWeight="Bold"
-                                       Foreground="#FFFFFF"
+                                       Foreground="{StaticResource StatusErrorBrush}"
                                        TextTrimming="None" />
                         </Border>
 
                         <!-- Anticoagulants Pill -->
                         <Border Visibility="{Binding OnAnticoagulants, ElementName=RootBanner, Converter={StaticResource BoolToVis}}"
-                                Background="#B91C1C"
+                                Background="{StaticResource StatusErrorBgBrush}"
+                                BorderBrush="{StaticResource StatusErrorBrush}"
+                                BorderThickness="1"
                                 CornerRadius="10"
                                 Padding="9,2"
                                 Margin="6,0,0,0"
                                 VerticalAlignment="Center">
                             <TextBlock Text="ANTICOAGULANTS (BLEEDING RISK)"
-                                       FontFamily="Segoe UI"
+                                       FontFamily="{StaticResource FontFamilyPrimary}"
                                        FontSize="11"
                                        FontWeight="Bold"
-                                       Foreground="#FFFFFF"
+                                       Foreground="{StaticResource StatusErrorBrush}"
                                        TextTrimming="None" />
                         </Border>
 
                         <!-- Diabetes Pill -->
                         <Border Visibility="{Binding HasDiabetes, ElementName=RootBanner, Converter={StaticResource BoolToVis}}"
-                                Background="#D97706"
+                                Background="{StaticResource StatusWarningBgBrush}"
+                                BorderBrush="{StaticResource StatusWarningBrush}"
+                                BorderThickness="1"
                                 CornerRadius="10"
                                 Padding="9,2"
                                 Margin="6,0,0,0"
                                 VerticalAlignment="Center">
                             <TextBlock Text="DIABETES"
-                                       FontFamily="Segoe UI"
+                                       FontFamily="{StaticResource FontFamilyPrimary}"
                                        FontSize="11"
                                        FontWeight="Bold"
-                                       Foreground="#FFFFFF"
+                                       Foreground="{StaticResource StatusWarningBrush}"
                                        TextTrimming="None" />
                         </Border>
 
                         <!-- Pregnancy Pill -->
                         <Border Visibility="{Binding IsPregnant, ElementName=RootBanner, Converter={StaticResource BoolToVis}}"
-                                Background="#BE185D"
+                                Background="{StaticResource StatusInfoBgBrush}"
+                                BorderBrush="{StaticResource StatusInfoBrush}"
+                                BorderThickness="1"
                                 CornerRadius="10"
                                 Padding="9,2"
                                 Margin="6,0,0,0"
                                 VerticalAlignment="Center">
                             <TextBlock Text="PREGNANT"
-                                       FontFamily="Segoe UI"
+                                       FontFamily="{StaticResource FontFamilyPrimary}"
                                        FontSize="11"
                                        FontWeight="Bold"
-                                       Foreground="#FFFFFF"
+                                       Foreground="{StaticResource StatusInfoBrush}"
                                        TextTrimming="None" />
                         </Border>
                     </StackPanel>
@@ -213,7 +223,7 @@
                            Foreground="{Binding AlertNotesForeground, ElementName=RootBanner}"
                            FontWeight="{Binding AlertNotesFontWeight, ElementName=RootBanner}"
                            ToolTip="{Binding FullAlertNotesToolTip, ElementName=RootBanner}"
-                           FontFamily="Segoe UI"
+                           FontFamily="{StaticResource FontFamilyPrimary}"
                            FontSize="11.5"
                            Margin="0,4,0,0"
                            VerticalAlignment="Center"

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
+using Occlusa.Desktop.Themes;
 
 namespace Occlusa.Desktop.Controls;
 
@@ -89,7 +90,7 @@ public partial class MedicalAlertsBanner : UserControl
         nameof(FormattedAlertNotesText), typeof(string), typeof(MedicalAlertsBanner), new PropertyMetadata(string.Empty));
 
     public static readonly DependencyProperty AlertNotesForegroundProperty = DependencyProperty.Register(
-        nameof(AlertNotesForeground), typeof(Brush), typeof(MedicalAlertsBanner), new PropertyMetadata(CreateBrush(100, 116, 139)));
+        nameof(AlertNotesForeground), typeof(Brush), typeof(MedicalAlertsBanner), new PropertyMetadata(CalmThemePalette.TextSecondaryBrush));
 
     public static readonly DependencyProperty AlertNotesFontWeightProperty = DependencyProperty.Register(
         nameof(AlertNotesFontWeight), typeof(FontWeight), typeof(MedicalAlertsBanner), new PropertyMetadata(FontWeights.Normal));
@@ -104,22 +105,22 @@ public partial class MedicalAlertsBanner : UserControl
         nameof(MyKadBadgeText), typeof(string), typeof(MedicalAlertsBanner), new PropertyMetadata("Manual IC"));
 
     public static readonly DependencyProperty MyKadBadgeBackgroundProperty = DependencyProperty.Register(
-        nameof(MyKadBadgeBackground), typeof(Brush), typeof(MedicalAlertsBanner), new PropertyMetadata(CreateBrush(241, 245, 249)));
+        nameof(MyKadBadgeBackground), typeof(Brush), typeof(MedicalAlertsBanner), new PropertyMetadata(CalmThemePalette.BgSubtleBrush));
 
     public static readonly DependencyProperty MyKadBadgeBorderProperty = DependencyProperty.Register(
-        nameof(MyKadBadgeBorder), typeof(Brush), typeof(MedicalAlertsBanner), new PropertyMetadata(CreateBrush(203, 213, 225)));
+        nameof(MyKadBadgeBorder), typeof(Brush), typeof(MedicalAlertsBanner), new PropertyMetadata(CalmThemePalette.BorderDefaultBrush));
 
     public static readonly DependencyProperty MyKadBadgeForegroundProperty = DependencyProperty.Register(
-        nameof(MyKadBadgeForeground), typeof(Brush), typeof(MedicalAlertsBanner), new PropertyMetadata(CreateBrush(71, 85, 105)));
+        nameof(MyKadBadgeForeground), typeof(Brush), typeof(MedicalAlertsBanner), new PropertyMetadata(CalmThemePalette.TextSecondaryBrush));
 
     public static readonly DependencyProperty BannerBackgroundProperty = DependencyProperty.Register(
-        nameof(BannerBackground), typeof(Brush), typeof(MedicalAlertsBanner), new PropertyMetadata(CreateBrush(248, 250, 252)));
+        nameof(BannerBackground), typeof(Brush), typeof(MedicalAlertsBanner), new PropertyMetadata(CalmThemePalette.BgSubtleBrush));
 
     public static readonly DependencyProperty BannerBorderBrushProperty = DependencyProperty.Register(
-        nameof(BannerBorderBrush), typeof(Brush), typeof(MedicalAlertsBanner), new PropertyMetadata(CreateBrush(216, 225, 234)));
+        nameof(BannerBorderBrush), typeof(Brush), typeof(MedicalAlertsBanner), new PropertyMetadata(CalmThemePalette.BorderDefaultBrush));
 
     public static readonly DependencyProperty BannerAccentBrushProperty = DependencyProperty.Register(
-        nameof(BannerAccentBrush), typeof(Brush), typeof(MedicalAlertsBanner), new PropertyMetadata(CreateBrush(148, 163, 184)));
+        nameof(BannerAccentBrush), typeof(Brush), typeof(MedicalAlertsBanner), new PropertyMetadata(CalmThemePalette.BorderDefaultBrush));
 
     public MedicalAlertsBanner()
     {
@@ -327,16 +328,16 @@ public partial class MedicalAlertsBanner : UserControl
         if (IsMyKadVerified)
         {
             MyKadBadgeText = "✓ MyKad Verified";
-            MyKadBadgeBackground = CreateBrush(220, 252, 231);
-            MyKadBadgeBorder = CreateBrush(134, 239, 172);
-            MyKadBadgeForeground = CreateBrush(21, 128, 61);
+            MyKadBadgeBackground = CalmThemePalette.StatusSuccessBgBrush;
+            MyKadBadgeBorder = CalmThemePalette.StatusSuccessBrush;
+            MyKadBadgeForeground = CalmThemePalette.StatusSuccessBrush;
         }
         else
         {
             MyKadBadgeText = "Manual IC (Unverified)";
-            MyKadBadgeBackground = CreateBrush(255, 251, 235);
-            MyKadBadgeBorder = CreateBrush(252, 211, 77);
-            MyKadBadgeForeground = CreateBrush(180, 83, 9);
+            MyKadBadgeBackground = CalmThemePalette.StatusWarningBgBrush;
+            MyKadBadgeBorder = CalmThemePalette.StatusWarningBrush;
+            MyKadBadgeForeground = CalmThemePalette.StatusWarningBrush;
         }
 
         if (!hasPatient)
@@ -344,11 +345,11 @@ public partial class MedicalAlertsBanner : UserControl
             ShowClearBadge = false;
             FormattedAlertNotesText = string.Empty;
             FullAlertNotesToolTip = null;
-            AlertNotesForeground = CreateBrush(100, 116, 139);
+            AlertNotesForeground = CalmThemePalette.TextSecondaryBrush;
             AlertNotesFontWeight = FontWeights.Normal;
-            BannerBackground = CreateBrush(248, 250, 252);
-            BannerBorderBrush = CreateBrush(216, 225, 234);
-            BannerAccentBrush = CreateBrush(148, 163, 184);
+            BannerBackground = CalmThemePalette.BgSubtleBrush;
+            BannerBorderBrush = CalmThemePalette.BorderDefaultBrush;
+            BannerAccentBrush = CalmThemePalette.BorderDefaultBrush;
             return;
         }
 
@@ -359,35 +360,35 @@ public partial class MedicalAlertsBanner : UserControl
         {
             FormattedAlertNotesText = $"Clinical Safety Note: {CompactSingleLine(trimmedNotes, 130)}";
             FullAlertNotesToolTip = $"Clinical Safety Note: {trimmedNotes}";
-            AlertNotesForeground = CreateBrush(153, 27, 27);
+            AlertNotesForeground = CalmThemePalette.StatusErrorBrush;
             AlertNotesFontWeight = FontWeights.SemiBold;
         }
         else if (anyCriticalAlert)
         {
             FormattedAlertNotesText = "Clinical Safety Note: Review highlighted medical alert flags above before treatment.";
             FullAlertNotesToolTip = null;
-            AlertNotesForeground = CreateBrush(153, 27, 27);
+            AlertNotesForeground = CalmThemePalette.StatusErrorBrush;
             AlertNotesFontWeight = FontWeights.Normal;
         }
         else
         {
             FormattedAlertNotesText = "Clinical Safety Note: None recorded — standard clinical precautions apply.";
             FullAlertNotesToolTip = null;
-            AlertNotesForeground = CreateBrush(21, 128, 61);
+            AlertNotesForeground = CalmThemePalette.StatusSuccessBrush;
             AlertNotesFontWeight = FontWeights.Normal;
         }
 
         if (anyCriticalAlert)
         {
-            BannerBackground = CreateBrush(254, 242, 242);
-            BannerBorderBrush = CreateBrush(252, 165, 165);
-            BannerAccentBrush = CreateBrush(220, 38, 38);
+            BannerBackground = CalmThemePalette.StatusErrorBgBrush;
+            BannerBorderBrush = CalmThemePalette.StatusErrorBrush;
+            BannerAccentBrush = CalmThemePalette.StatusErrorBrush;
         }
         else
         {
-            BannerBackground = CreateBrush(240, 253, 244);
-            BannerBorderBrush = CreateBrush(134, 239, 172);
-            BannerAccentBrush = CreateBrush(15, 118, 110);
+            BannerBackground = CalmThemePalette.BgSurfaceBrush;
+            BannerBorderBrush = CalmThemePalette.BorderDefaultBrush;
+            BannerAccentBrush = CalmThemePalette.StatusSuccessBrush;
         }
     }
 
@@ -422,12 +423,5 @@ public partial class MedicalAlertsBanner : UserControl
         }
 
         return built.Count > 0 ? string.Join(' ', built) : words[0][..limit];
-    }
-
-    private static SolidColorBrush CreateBrush(byte r, byte g, byte b)
-    {
-        var brush = new SolidColorBrush(Color.FromRgb(r, g, b));
-        brush.Freeze();
-        return brush;
     }
 }

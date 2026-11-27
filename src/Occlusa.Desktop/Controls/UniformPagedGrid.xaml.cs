@@ -15,6 +15,7 @@ using System.Windows.Input;
 using System.Windows.Markup;
 using System.Windows.Media;
 using System.Windows.Threading;
+using Occlusa.Desktop.Themes;
 using Occlusa.Shared.Services;
 
 namespace Occlusa.Desktop.Controls;
@@ -113,7 +114,7 @@ public partial class UniformPagedGrid : UserControl
     private static readonly Typeface PrimaryBoldTypeface = new(PrimaryFontFamily, FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
     private static readonly Typeface MonoRegularTypeface = new(MonoFontFamily, FontStyles.Normal, FontWeights.Normal, FontStretches.Normal);
     private static readonly Typeface MonoBoldTypeface = new(MonoFontFamily, FontStyles.Normal, FontWeights.SemiBold, FontStretches.Normal);
-    private static readonly SolidColorBrush PrimaryTextBrush = CreateFrozenBrush(15, 23, 42);
+    private static Brush PrimaryTextBrush => CalmThemePalette.TextPrimaryBrush;
     private static readonly ConcurrentDictionary<(Type Type, string Path), PropertyInfo?[]> PropertyPathCache = new();
     private static readonly ConcurrentDictionary<Type, PropertyInfo?> ToolTipPropertyCache = new();
 
@@ -681,7 +682,7 @@ public partial class UniformPagedGrid : UserControl
         if (RowSpacing > 0)
         {
             InternalDataGrid.GridLinesVisibility = DataGridGridLinesVisibility.None;
-            InternalDataGrid.Background = new SolidColorBrush(Color.FromRgb(248, 250, 252));
+            InternalDataGrid.Background = CalmThemePalette.BgCanvasBrush;
             InternalDataGrid.RowHeight = AllowAutoRowHeight ? double.NaN : 36;
             InternalDataGrid.MinRowHeight = AllowAutoRowHeight ? 38 : 0;
 
@@ -697,7 +698,7 @@ public partial class UniformPagedGrid : UserControl
         }
 
         InternalDataGrid.GridLinesVisibility = DataGridGridLinesVisibility.Horizontal;
-        InternalDataGrid.Background = Brushes.White;
+        InternalDataGrid.Background = CalmThemePalette.BgSurfaceBrush;
 
         if (AllowAutoRowHeight)
         {
@@ -1135,7 +1136,7 @@ public partial class UniformPagedGrid : UserControl
             FlowDirection.LeftToRight,
             typeface,
             fontSize,
-            Brushes.Black,
+            CalmThemePalette.TextPrimaryBrush,
             pixelsPerDip);
         return formatted.WidthIncludingTrailingWhitespace;
     }
@@ -1303,12 +1304,5 @@ public partial class UniformPagedGrid : UserControl
         }
 
         return null;
-    }
-
-    private static SolidColorBrush CreateFrozenBrush(byte r, byte g, byte b)
-    {
-        var brush = new SolidColorBrush(Color.FromRgb(r, g, b));
-        brush.Freeze();
-        return brush;
     }
 }

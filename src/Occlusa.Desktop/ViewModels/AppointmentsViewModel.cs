@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
+using Occlusa.Desktop.Themes;
 using Occlusa.Shared.Models;
 using Occlusa.Shared.Services;
 
@@ -322,20 +323,20 @@ public partial class AppointmentsViewModel : ObservableObject
 
     private static readonly CardPalette[] DentistPalettes =
     [
-        CreatePalette("#E8F7F5", "#B7E4DD", "#0F766E", "#0F3D39", "#2C6B65", "#FFFFFF", "#0F766E"),
-        CreatePalette("#EAF4FE", "#BCD9FA", "#0369A1", "#0C3554", "#2D5D80", "#FFFFFF", "#0369A1"),
-        CreatePalette("#F2EEFE", "#D3C6FA", "#6D28D9", "#36196B", "#5B428A", "#FFFFFF", "#6D28D9"),
-        CreatePalette("#ECFDF3", "#B5ECCD", "#15803D", "#124024", "#316B46", "#FFFFFF", "#15803D")
+        new(CalmThemePalette.BrandTintBrush, CalmThemePalette.BorderDefaultBrush, CalmThemePalette.BrandPrimaryBrush, CalmThemePalette.TextPrimaryBrush, CalmThemePalette.TextSecondaryBrush, CalmThemePalette.BgSurfaceBrush, CalmThemePalette.BrandHoverBrush),
+        new(CalmThemePalette.StatusInfoBgBrush, CalmThemePalette.BorderDefaultBrush, CalmThemePalette.StatusInfoBrush, CalmThemePalette.TextPrimaryBrush, CalmThemePalette.TextSecondaryBrush, CalmThemePalette.BgSurfaceBrush, CalmThemePalette.StatusInfoBrush),
+        new(CalmThemePalette.StatusSuccessBgBrush, CalmThemePalette.BorderDefaultBrush, CalmThemePalette.StatusSuccessBrush, CalmThemePalette.TextPrimaryBrush, CalmThemePalette.TextSecondaryBrush, CalmThemePalette.BgSurfaceBrush, CalmThemePalette.StatusSuccessBrush),
+        new(CalmThemePalette.BgSubtleBrush, CalmThemePalette.BorderDefaultBrush, CalmThemePalette.TextSecondaryBrush, CalmThemePalette.TextPrimaryBrush, CalmThemePalette.TextSecondaryBrush, CalmThemePalette.BgSurfaceBrush, CalmThemePalette.TextSecondaryBrush)
     ];
 
     private static readonly CardPalette AiPendingPalette =
-        CreatePalette("#FFFBEB", "#FDE68A", "#D97706", "#78350F", "#92400E", "#FEF3C7", "#B45309");
+        new(CalmThemePalette.StatusWarningBgBrush, CalmThemePalette.StatusWarningBrush, CalmThemePalette.StatusWarningBrush, CalmThemePalette.TextPrimaryBrush, CalmThemePalette.TextSecondaryBrush, CalmThemePalette.BgSurfaceBrush, CalmThemePalette.StatusWarningBrush);
 
     private static readonly CardPalette WalkInPalette =
-        CreatePalette("#FFF7ED", "#FDBA74", "#EA580C", "#7C2D12", "#9A3412", "#FFEDD5", "#C2410C");
+        new(CalmThemePalette.StatusWarningBgBrush, CalmThemePalette.BorderDefaultBrush, CalmThemePalette.StatusWarningBrush, CalmThemePalette.TextPrimaryBrush, CalmThemePalette.TextSecondaryBrush, CalmThemePalette.BgSurfaceBrush, CalmThemePalette.StatusWarningBrush);
 
     private static readonly CardPalette CancelledPalette =
-        CreatePalette("#F8FAFC", "#E2E8F0", "#94A3B8", "#64748B", "#94A3B8", "#F1F5F9", "#64748B");
+        new(CalmThemePalette.StatusErrorBgBrush, CalmThemePalette.BorderDefaultBrush, CalmThemePalette.StatusErrorBrush, CalmThemePalette.TextSecondaryBrush, CalmThemePalette.TextSecondaryBrush, CalmThemePalette.BgSurfaceBrush, CalmThemePalette.StatusErrorBrush);
 
     private List<AppointmentQueueItemDto> _allAppointments = new();
     private List<DentistDto> _dentists = new();
@@ -1412,30 +1413,6 @@ public partial class AppointmentsViewModel : ObservableObject
 
     private static string FormatCountLabel(int count) =>
         count == 1 ? "1 appointment" : $"{count} appointments";
-
-    private static Brush FreezeBrush(string hex)
-    {
-        var brush = (SolidColorBrush)new BrushConverter().ConvertFromString(hex)!;
-        brush.Freeze();
-        return brush;
-    }
-
-    private static CardPalette CreatePalette(
-        string backgroundHex,
-        string borderHex,
-        string accentHex,
-        string primaryTextHex,
-        string secondaryTextHex,
-        string badgeBgHex,
-        string badgeFgHex) =>
-        new(
-            FreezeBrush(backgroundHex),
-            FreezeBrush(borderHex),
-            FreezeBrush(accentHex),
-            FreezeBrush(primaryTextHex),
-            FreezeBrush(secondaryTextHex),
-            FreezeBrush(badgeBgHex),
-            FreezeBrush(badgeFgHex));
 
     private sealed record CardPalette(
         Brush Background,

@@ -1,6 +1,7 @@
 using System.Globalization;
 using System.Windows.Media;
 using CommunityToolkit.Mvvm.ComponentModel;
+using Occlusa.Desktop.Themes;
 using Occlusa.Shared.Models;
 using Occlusa.Shared.Services;
 
@@ -70,20 +71,20 @@ internal static class RowTextHelper
 /// </summary>
 public sealed partial class QueueRowItem : ObservableObject
 {
-    private static readonly StatusPillPalette WaitingPalette = CreatePalette("#FFFBEB", "#FDE68A", "#D97706", "#92400E");
-    private static readonly StatusPillPalette LongWaitPalette = CreatePalette("#FEF2F2", "#FECACA", "#DC2626", "#991B1B");
-    private static readonly StatusPillPalette InChairPalette = CreatePalette("#E6F4F1", "#99F6E4", "#0F766E", "#0F514B");
-    private static readonly StatusPillPalette CheckoutPalette = CreatePalette("#EFF6FF", "#BFDBFE", "#2563EB", "#1E40AF");
-    private static readonly StatusPillPalette AiPendingPalette = CreatePalette("#FEF3C7", "#FCD34D", "#B45309", "#78350F");
-    private static readonly StatusPillPalette ScheduledPalette = CreatePalette("#F1F5F9", "#CBD5E1", "#64748B", "#334155");
-    private static readonly StatusPillPalette CompletedPalette = CreatePalette("#F0FDF4", "#BBF7D0", "#16A34A", "#166534");
-    private static readonly StatusPillPalette CancelledPalette = CreatePalette("#F8FAFC", "#E2E8F0", "#94A3B8", "#64748B");
+    private static readonly StatusPillPalette WaitingPalette = new(CalmThemePalette.StatusWarningBgBrush, CalmThemePalette.BorderDefaultBrush, CalmThemePalette.StatusWarningBrush, CalmThemePalette.StatusWarningBrush);
+    private static readonly StatusPillPalette LongWaitPalette = new(CalmThemePalette.StatusErrorBgBrush, CalmThemePalette.StatusErrorBrush, CalmThemePalette.StatusErrorBrush, CalmThemePalette.StatusErrorBrush);
+    private static readonly StatusPillPalette InChairPalette = new(CalmThemePalette.BrandTintBrush, CalmThemePalette.BrandPrimaryBrush, CalmThemePalette.BrandPrimaryBrush, CalmThemePalette.BrandHoverBrush);
+    private static readonly StatusPillPalette CheckoutPalette = new(CalmThemePalette.StatusInfoBgBrush, CalmThemePalette.BorderDefaultBrush, CalmThemePalette.StatusInfoBrush, CalmThemePalette.StatusInfoBrush);
+    private static readonly StatusPillPalette AiPendingPalette = new(CalmThemePalette.StatusWarningBgBrush, CalmThemePalette.StatusWarningBrush, CalmThemePalette.StatusWarningBrush, CalmThemePalette.StatusWarningBrush);
+    private static readonly StatusPillPalette ScheduledPalette = new(CalmThemePalette.BgSubtleBrush, CalmThemePalette.BorderDefaultBrush, CalmThemePalette.TextSecondaryBrush, CalmThemePalette.TextSecondaryBrush);
+    private static readonly StatusPillPalette CompletedPalette = new(CalmThemePalette.StatusSuccessBgBrush, CalmThemePalette.BorderDefaultBrush, CalmThemePalette.StatusSuccessBrush, CalmThemePalette.StatusSuccessBrush);
+    private static readonly StatusPillPalette CancelledPalette = new(CalmThemePalette.StatusErrorBgBrush, CalmThemePalette.BorderDefaultBrush, CalmThemePalette.StatusErrorBrush, CalmThemePalette.StatusErrorBrush);
 
-    private static readonly StatusPillPalette ReminderConfirmedPalette = CreatePalette("#F0FDF4", "#BBF7D0", "#16A34A", "#166534");
-    private static readonly StatusPillPalette ReminderSentPalette = CreatePalette("#EFF6FF", "#BFDBFE", "#2563EB", "#1E40AF");
-    private static readonly StatusPillPalette ReminderNotSentPalette = CreatePalette("#FFFBEB", "#FDE68A", "#D97706", "#92400E");
-    private static readonly StatusPillPalette ReminderNoReplyPalette = CreatePalette("#FEF2F2", "#FECACA", "#DC2626", "#991B1B");
-    private static readonly StatusPillPalette ReminderQuietPalette = CreatePalette("#F8FAFC", "#E2E8F0", "#94A3B8", "#64748B");
+    private static readonly StatusPillPalette ReminderConfirmedPalette = new(CalmThemePalette.StatusSuccessBgBrush, CalmThemePalette.BorderDefaultBrush, CalmThemePalette.StatusSuccessBrush, CalmThemePalette.StatusSuccessBrush);
+    private static readonly StatusPillPalette ReminderSentPalette = new(CalmThemePalette.StatusInfoBgBrush, CalmThemePalette.BorderDefaultBrush, CalmThemePalette.StatusInfoBrush, CalmThemePalette.StatusInfoBrush);
+    private static readonly StatusPillPalette ReminderNotSentPalette = new(CalmThemePalette.StatusWarningBgBrush, CalmThemePalette.BorderDefaultBrush, CalmThemePalette.StatusWarningBrush, CalmThemePalette.StatusWarningBrush);
+    private static readonly StatusPillPalette ReminderNoReplyPalette = new(CalmThemePalette.StatusErrorBgBrush, CalmThemePalette.StatusErrorBrush, CalmThemePalette.StatusErrorBrush, CalmThemePalette.StatusErrorBrush);
+    private static readonly StatusPillPalette ReminderQuietPalette = new(CalmThemePalette.BgSubtleBrush, CalmThemePalette.BorderDefaultBrush, CalmThemePalette.TextSecondaryBrush, CalmThemePalette.TextSecondaryBrush);
 
     private readonly bool _showWaitTimers;
 
@@ -363,16 +364,6 @@ public sealed partial class QueueRowItem : ObservableObject
         lines.Add(doubleClickTarget);
         return string.Join(Environment.NewLine, lines);
     }
-
-    private static Brush FreezeBrush(string hex)
-    {
-        var brush = (SolidColorBrush)new BrushConverter().ConvertFromString(hex)!;
-        brush.Freeze();
-        return brush;
-    }
-
-    private static StatusPillPalette CreatePalette(string bgHex, string borderHex, string dotHex, string fgHex) =>
-        new(FreezeBrush(bgHex), FreezeBrush(borderHex), FreezeBrush(dotHex), FreezeBrush(fgHex));
 
     private sealed record StatusPillPalette(Brush Background, Brush Border, Brush Dot, Brush Foreground);
 }

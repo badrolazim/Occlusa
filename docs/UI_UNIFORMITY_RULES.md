@@ -41,7 +41,7 @@
 
 ---
 
-## 2. Theme Setup (`Themes/UniformTheme.xaml`)
+## 2. Theme Setup (`Themes/UniformTheme.xaml` & `Themes/CalmThemePalette.cs`)
 
 Merge `Themes/UniformTheme.xaml` inside `App.xaml`:
 
@@ -55,19 +55,20 @@ Merge `Themes/UniformTheme.xaml` inside `App.xaml`:
 </Application.Resources>
 ```
 
-### Key Resource Tokens
+### Calm Dental 60-30-10 Color System (Canonical Tokens)
 
-| Category | Resource Keys |
+All UI surfaces, controls, and ViewModels MUST resolve colors strictly from these 17 centralized tokens in `UniformTheme.xaml` / `CalmThemePalette.cs` (zero ad-hoc hex values or pure `#000000` text):
+
+| Category | Resource Keys & Exact Hex |
 | :--- | :--- |
-| **Surfaces** | `SurfaceCanvasBrush`, `SurfaceCardBrush`, `SurfaceSubtleBrush`, `SurfaceHoverBrush`, `SurfaceSelectedBrush` |
-| **Borders** | `BorderHairlineBrush`, `BorderStrongBrush` |
-| **Brand** | `BrandPrimaryBrush`, `BrandPrimaryHoverBrush`, `BrandPrimarySoftBrush`, `BrandSecondaryBrush`, `BrandSecondarySoftBrush` |
-| **Text** | `TextPrimaryBrush`, `TextSecondaryBrush`, `TextMutedBrush`, `TextInverseBrush` |
-| **Clinical / Status** | `DangerBrush`, `DangerBgBrush`, `DangerBorderBrush`, `WarningBrush`, `WarningBgBrush`, `WarningBorderBrush`, `SuccessBrush`, `SuccessBgBrush`, `SuccessBorderBrush`, `InfoBrush`, `InfoBgBrush`, `InfoBorderBrush` |
-| **Odontogram** | `ToothHealthyBrush`, `ToothCariesBrush`, `ToothFillingBrush`, `ToothCrownBrush`, `ToothRootCanalBrush`, `ToothExtractionBrush`, `ToothMissingBrush`, `ToothImplantBrush` |
-| **Typography** | `FontFamilyPrimary`, `FontFamilyMono`, `FontSizePageTitle` (20), `FontSizeModalTitle` (17), `FontSizeSectionTitle` (15), `FontSizeBody` (12.5), `FontSizeTableCell` (12), `FontSizeTableHeader` (11.5), `FontSizeCaption` (11) |
-| **Buttons** | `UniformPrimaryButtonStyle`, `UniformSecondaryButtonStyle`, `UniformDangerButtonStyle`, `UniformWarningButtonStyle`, `UniformGhostButtonStyle`, `UniformIconCloseButtonStyle` |
-| **Navigation** | `UniformNavTabRadioStyle` |
+| **Core Surfaces (60/30)** | `BgCanvasBrush` (`#F7FAFA`), `BgSurfaceBrush` (`#FFFFFF`), `BgSubtleBrush` (`#EDF3F3` — sidebar, table headers, row hover, disabled inputs), `BorderDefaultBrush` (`#D8E3E3`) |
+| **Typography (30%)** | `TextPrimaryBrush` (`#182929`), `TextSecondaryBrush` (`#566B6B`), `TextInverseBrush` (`#FFFFFF`) |
+| **Brand Accent (10%)** | `BrandPrimaryBrush` (`#069494`), `BrandHoverBrush` (`#057878`), `BrandTintBrush` (`#E3F4F4` — active sidebar item, selected table rows, soft brand badges) |
+| **Semantic Feedback** | Success: `StatusSuccessBrush` (`#2B825B`) / `StatusSuccessBgBrush` (`#EAF6F0`); Info: `StatusInfoBrush` (`#2E6FA3`) / `StatusInfoBgBrush` (`#EBF3FA`); Warning: `StatusWarningBrush` (`#C47B1B`) / `StatusWarningBgBrush` (`#FDF4E7`); Error: `StatusErrorBrush` (`#C44545`) / `StatusErrorBgBrush` (`#FBECEC`) |
+| **Odontogram** | `ToothHealthyBrush` (`#FFFFFF`), `ToothRootBrush` (`#FDF4E7`), `ToothCariesBrush` (`#FBECEC`), `ToothFillingBrush` (`#EBF3FA`), `ToothCrownBrush` (`#EAF6F0`), `ToothRootCanalBrush` (`#FDF4E7`), `ToothExtractionBrush` (`#FBECEC`), `ToothMissingBrush` (`#EDF3F3`), `ToothImplantBrush` (`#E3F4F4`) |
+| **Typography Sizes** | `FontFamilyPrimary`, `FontFamilyMono`, `FontSizePageTitle` (20), `FontSizeModalTitle` (17), `FontSizeSectionTitle` (15), `FontSizeBody` (12.5), `FontSizeTableCell` (12), `FontSizeTableHeader` (11.5), `FontSizeCaption` (11) |
+| **Buttons** | `UniformPrimaryButtonStyle` (max 1 per view/modal), `UniformSecondaryButtonStyle`, `UniformDangerButtonStyle` (soft inline `#FBECEC`/`#C44545`), `UniformDangerSolidButtonStyle` (final confirmation dialogs only), `UniformWarningButtonStyle` (soft `#FDF4E7`/`#C47B1B`), `UniformGhostButtonStyle`, `UniformIconCloseButtonStyle` |
+| **Navigation** | `UniformNavTabRadioStyle`, `UniformNavTabIconPathStyle` (active `#069494` icons on `#E3F4F4` tint inside `#EDF3F3` sidebar) |
 | **Containers & Inputs** | `UniformCardBorderStyle`, `UniformSubtleCardBorderStyle`, `UniformInputTextBoxStyle`, `UniformMultiLineTextBoxStyle`, `UniformComboBoxStyle`, `UniformCheckBoxStyle` |
 | **TextBlock Styles** | `UniformPageTitleTextStyle`, `UniformSectionTitleTextStyle`, `UniformModalTitleTextStyle`, `UniformLabelTextStyle`, `UniformBodyTextStyle`, `UniformMutedTextStyle`, `UniformMonoTextStyle` |
 
@@ -165,3 +166,4 @@ Every `.xaml` file under `src\Occlusa.Desktop\` MUST pass all checks:
 - [ ] Every modal (`Views\*Modal.xaml`) uses `ModalDialogShell` (`ShowDialog()`), has NO back-navigation buttons, and sets `HasUnsavedChanges` on editable clinical/billing/preference modals (`PatientDetailModal`, `VisitRecordModal`, `AppointmentDetailModal`, `AppointmentReminderModal`, `UserPreferencesModal`, `InvoiceCheckoutModal`, `BillingCatalogItemModal`, `TreatmentSuggestionRuleModal`).
 - [ ] `VisitRecordModal.xaml` contains zero monetary fee inputs (`FeeInput`, `Fee (RM)`)—clinical charting stays strictly decoupled from invoicing.
 - [ ] Workspace tab containers never combine `Visibility="{Binding Is*Workspace, ...}"` and `DataContext="{Binding ...}"` on the same XAML tag (wrap child `DataContext` containers inside an outer `<Grid Visibility="...">` bound to `MainViewModel`).
+- [ ] Calm Dental 60-30-10 color system enforced: zero hardcoded hex values or direct framework brushes (`Brushes.*`, `Colors.*`, `Color.From*`) outside `Themes/`, zero off-palette hex values inside `Themes/`, soft semantic fills for routine pills/alerts/inline destructive actions, and at most one `UniformPrimaryButtonStyle` CTA per active workspace view or modal.

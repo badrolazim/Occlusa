@@ -9,7 +9,8 @@
         MinHeight="520"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
-        Background="{StaticResource SurfaceCanvasBrush}"
+        Background="{StaticResource BgCanvasBrush}"
+        Foreground="{StaticResource TextPrimaryBrush}"
         ScrollViewer.VerticalScrollBarVisibility="Disabled"
         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
 
@@ -72,13 +73,15 @@
                                                                FontWeight="Bold"
                                                                Foreground="{StaticResource TextPrimaryBrush}" />
                                                     <Border DockPanel.Dock="Right"
-                                                            Background="{StaticResource BrandPrimaryBrush}"
+                                                            Background="{StaticResource BrandTintBrush}"
+                                                            BorderBrush="{StaticResource BorderDefaultBrush}"
+                                                            BorderThickness="1"
                                                             CornerRadius="9"
                                                             Padding="7,1">
                                                         <TextBlock Text="Default"
                                                                    FontSize="10"
                                                                    FontWeight="SemiBold"
-                                                                   Foreground="{StaticResource TextInverseBrush}" />
+                                                                   Foreground="{StaticResource BrandHoverBrush}" />
                                                     </Border>
                                                 </DockPanel>
                                                 <TextBlock Text="Full-width single-line queue (Time · Patient · Treatment · Doctor · Room · Reminder · Status), 1 smart next-step button, finished visits hidden."
@@ -194,11 +197,11 @@
                        VerticalAlignment="Center">
                 <TextBlock.Style>
                     <Style TargetType="TextBlock" BasedOn="{StaticResource UniformBodyTextStyle}">
-                        <Setter Property="Foreground" Value="{StaticResource BrandPrimaryBrush}" />
+                        <Setter Property="Foreground" Value="{StaticResource BrandHoverBrush}" />
                         <Setter Property="FontWeight" Value="SemiBold" />
                         <Style.Triggers>
                             <DataTrigger Binding="{Binding IsStatusError}" Value="True">
-                                <Setter Property="Foreground" Value="{StaticResource DangerBrush}" />
+                                <Setter Property="Foreground" Value="{StaticResource StatusErrorBrush}" />
                             </DataTrigger>
                         </Style.Triggers>
                     </Style>

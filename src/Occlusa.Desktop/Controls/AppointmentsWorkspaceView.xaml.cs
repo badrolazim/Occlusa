@@ -3,6 +3,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using Occlusa.Desktop.Themes;
 using Occlusa.Desktop.ViewModels;
 using Occlusa.Shared.Models;
 using Occlusa.Shared.Services;
@@ -17,16 +18,16 @@ public partial class AppointmentsWorkspaceView : UserControl
 {
     private const string AppointmentDragFormat = "Occlusa.Appointment";
 
-    private static readonly Brush ValidGhostBackground = CreateFrozenBrush("#CCFBF1");
-    private static readonly Brush ValidGhostBorder = CreateFrozenBrush("#0F766E");
-    private static readonly Brush ValidGhostText = CreateFrozenBrush("#0F3D39");
+    private static Brush ValidGhostBackground => CalmThemePalette.BrandTintBrush;
+    private static Brush ValidGhostBorder => CalmThemePalette.BrandPrimaryBrush;
+    private static Brush ValidGhostText => CalmThemePalette.TextPrimaryBrush;
 
-    private static readonly Brush BlockedGhostBackground = CreateFrozenBrush("#FEE2E2");
-    private static readonly Brush BlockedGhostBorder = CreateFrozenBrush("#DC2626");
-    private static readonly Brush BlockedGhostText = CreateFrozenBrush("#991B1B");
+    private static Brush BlockedGhostBackground => CalmThemePalette.StatusErrorBgBrush;
+    private static Brush BlockedGhostBorder => CalmThemePalette.StatusErrorBrush;
+    private static Brush BlockedGhostText => CalmThemePalette.StatusErrorBrush;
 
-    private static readonly Brush DropTargetHighlightBorder = CreateFrozenBrush("#0F766E");
-    private static readonly Brush DropTargetHighlightBackground = CreateFrozenBrush("#E6F4F1");
+    private static Brush DropTargetHighlightBorder => CalmThemePalette.BrandPrimaryBrush;
+    private static Brush DropTargetHighlightBackground => CalmThemePalette.BrandTintBrush;
 
     private Window? _hostWindow;
     private Point _dragStartPoint;
@@ -640,12 +641,5 @@ public partial class AppointmentsWorkspaceView : UserControl
         }
 
         return null;
-    }
-
-    private static Brush CreateFrozenBrush(string hex)
-    {
-        var brush = (SolidColorBrush)new BrushConverter().ConvertFromString(hex)!;
-        brush.Freeze();
-        return brush;
     }
 }

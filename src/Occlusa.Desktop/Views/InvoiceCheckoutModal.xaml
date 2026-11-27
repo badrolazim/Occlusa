@@ -9,7 +9,8 @@
         MinHeight="760"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
-        Background="{StaticResource SurfaceCanvasBrush}"
+        Background="{StaticResource BgCanvasBrush}"
+        Foreground="{StaticResource TextPrimaryBrush}"
         ScrollViewer.VerticalScrollBarVisibility="Disabled"
         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
 
@@ -134,7 +135,7 @@
                                     <TextBlock DockPanel.Dock="Left"
                                                Text="{Binding SuggestionHeaderText}"
                                                Style="{StaticResource UniformLabelTextStyle}"
-                                               Foreground="{StaticResource BrandPrimaryBrush}"
+                                               Foreground="{StaticResource BrandHoverBrush}"
                                                VerticalAlignment="Center" />
                                     <TextBlock DockPanel.Dock="Right"
                                                Text="Click any chip to add (⚠ checks Medical Alerts)"
@@ -241,7 +242,7 @@
                                     <StackPanel Grid.Column="10" Orientation="Horizontal" VerticalAlignment="Center">
                                         <Button Content="+ Add"
                                                 Command="{Binding AddLineItemCommand}"
-                                                Style="{StaticResource UniformPrimaryButtonStyle}"
+                                                Style="{StaticResource UniformSecondaryButtonStyle}"
                                                 Height="30"
                                                 Padding="10,0"
                                                 Margin="0,0,5,0" />
@@ -255,10 +256,9 @@
                                         <Button Content="Remove"
                                                 Command="{Binding RemoveSelectedLineCommand}"
                                                 IsEnabled="{Binding HasSelectedLine}"
-                                                Style="{StaticResource UniformGhostButtonStyle}"
-                                                Foreground="{StaticResource DangerBrush}"
+                                                Style="{StaticResource UniformDangerButtonStyle}"
                                                 Height="30"
-                                                Padding="7,0" />
+                                                Padding="8,0" />
                                     </StackPanel>
                                 </Grid>
                             </StackPanel>
@@ -310,7 +310,7 @@
                                             <TextBlock Text="Patient Payable (Net)" Style="{StaticResource UniformLabelTextStyle}" />
                                             <TextBlock Text="{Binding ProjectedPayable, StringFormat='RM {0:N2}'}"
                                                        Style="{StaticResource UniformSectionTitleTextStyle}"
-                                                       Foreground="{StaticResource BrandPrimaryBrush}"
+                                                       Foreground="{StaticResource BrandHoverBrush}"
                                                        Margin="0,2,0,0" />
                                         </StackPanel>
                                     </Border>
@@ -566,7 +566,7 @@
         <controls:ModalDialogShell.FooterLeftContent>
             <TextBlock Text="{Binding StatusMessage}"
                        Style="{StaticResource UniformBodyTextStyle}"
-                       Foreground="{StaticResource BrandPrimaryBrush}"
+                       Foreground="{StaticResource BrandHoverBrush}"
                        FontWeight="SemiBold"
                        VerticalAlignment="Center" />
         </controls:ModalDialogShell.FooterLeftContent>

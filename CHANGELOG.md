@@ -6,6 +6,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.8.0] - 2026-11-27
+### Added
+- **Calm Dental App Color System (`Themes/UniformTheme.xaml`, `Themes/CalmThemePalette.cs`, `.agents/rules/calm-dental-color-system.md`):** Centralized all desktop UI colors into the strict 17-token 60-30-10 clinical palette (`#F7FAFA` canvas, `#FFFFFF` cards, `#EDF3F3` subtle surfaces/sidebars/headers, `#D8E3E3` borders, `#182929`/`#566B6B` typography, `#069494`/`#057878`/`#E3F4F4` teal accent & soft tint, plus calm Success `#2B825B`/`#EAF6F0`, Info `#2E6FA3`/`#EBF3FA`, Warning `#C47B1B`/`#FDF4E7`, and Error `#C44545`/`#FBECEC` semantic pairs) with a frozen C# token accessor (`CalmThemePalette`) and an `always_on` workspace rule.
+- **Solid Destructive Confirmation Style (`UniformDangerSolidButtonStyle`) & Active Nav Icon Style (`UniformNavTabIconPathStyle`):** Added a dedicated solid destructive style reserved strictly for final confirmation dialogs while defaulting inline destructive actions (`UniformDangerButtonStyle`) to soft fill (`#FBECEC` / `#C44545`), plus active teal (`#069494`) navigation rail icon styling.
+- **Automated Color-System Contract Test (`106` total tests in `Occlusa.Tests`):** Added `CalmDentalColorSystem_EnforcesCentralizedPaletteAndSinglePrimaryCta` in `PatientVisitsAndOdontogramTests.cs` verifying zero hardcoded hexes or framework brushes outside `Themes/`, zero off-palette hex values inside `Themes/`, and at most one `UniformPrimaryButtonStyle` CTA per modal.
+
+### Changed
+- **Light Clinical Navigation Sidebar (`MainWindow.xaml`, `UniformTheme.xaml`):** Replaced the dark slate sidebar with a calm `#EDF3F3` secondary surface, `#FFFFFF` branch/staff selectors and connection card with `1px solid #D8E3E3` borders, `#E3F4F4` active item highlight, `#069494` active icons, and calm soft-filled Emergency / AI-Pending alert buttons.
+- **Unified Component & Status Styling Across All Views, Controls & ViewModels:**
+  - Replaced all ad-hoc hex/RGB brushes across `UniformPagedGrid`, `MedicalAlertsBanner`, `ModalDialogShell`, `AppointmentsWorkspaceView`, `TimelineBackdropControl`, `AnatomicalToothControl`, `AppointmentsViewModel`, `MainDisplayRows`, `VisitRecordViewModel`, and `ValueConverters` with centralized `CalmThemePalette` / `StaticResource` tokens.
+  - Updated `UniformPagedGrid` table headers and subtle row hovers to `#EDF3F3`, selected rows to `#E3F4F4`, and card borders to `1px solid #D8E3E3`.
+  - Converted solid saturated alert pills in `MedicalAlertsBanner` and solid orange/red inline buttons into calm soft-fill semantic pairs.
+  - Enforced strictly one primary CTA (`UniformPrimaryButtonStyle`) per active workspace view and modal (`MainWindow`, `AppointmentDetailModal`, `InvoiceCheckoutModal`, `PatientDetailModal`, `VisitRecordModal`, `WhatsAppConsoleModal`), eliminated pure `#000000` default text across all windows and `DatePicker` controls, and tuned light-background teal text to `#057878` for WCAG AA contrast.
+  - Mapped all 8 odontogram conditions and legend swatches onto distinct, clinically legible tokens within the 17-color palette.
+- Updated `docs/UI_UNIFORMITY_RULES.md` and `README.md` to document the Calm Dental 60-30-10 color system and `CalmThemePalette`.
+
 ## [0.7.0] - 2026-11-26
 ### Added
 - **Panel-Fitted, Priority-Adaptive Single-Line Table Engine (`ResponsiveTableColumnPlanner`, `UniformPagedGrid`):** Replaced the legacy 3–4 column cap with a deterministic priority-based responsive column planner (`Priority="1"`..`"4"`, `MeasureBindingPath`, `MeasureExtraWidth`, `ResponsiveColumns`, `VisibleColumnCount`) backed by DPI-aware WPF `FormattedText` width measurement. Tables automatically fill 100% of their host panel width (`1280px`, `1920x1080`, `2560x1440`, and narrow modal sub-panels) with maximum high-value atomic columns on strict single-line `36px` rows—auto-hiding lower-priority columns earlier whenever adding another column would clip or truncate to `...`.

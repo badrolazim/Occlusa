@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Media;
+using Occlusa.Desktop.Themes;
 
 namespace Occlusa.Desktop.Controls;
 
@@ -9,10 +10,10 @@ namespace Occlusa.Desktop.Controls;
 /// </summary>
 public sealed class TimelineBackdropControl : FrameworkElement
 {
-    private static readonly Pen HourPen = CreateFrozenPen(Color.FromRgb(0xED, 0xF2, 0xF7), 0.9);
-    private static readonly Pen HalfHourPen = CreateFrozenPen(Color.FromRgb(0xF5, 0xF7, 0xFA), 0.75, new DashStyle([3, 4], 0));
-    private static readonly Brush NowDotBrush = CreateFrozenBrush(Color.FromRgb(0x0F, 0x76, 0x6E));
-    private static readonly Pen NowPen = CreateFrozenPen(Color.FromRgb(0x0F, 0x76, 0x6E), 1.5);
+    private static readonly Pen HourPen = CreateFrozenPen(CalmThemePalette.BorderDefaultColor, 0.9);
+    private static readonly Pen HalfHourPen = CreateFrozenPen(CalmThemePalette.BgSubtleColor, 0.75, new DashStyle([3, 4], 0));
+    private static readonly Brush NowDotBrush = CreateFrozenBrush(CalmThemePalette.BrandPrimaryColor);
+    private static readonly Pen NowPen = CreateFrozenPen(CalmThemePalette.BrandPrimaryColor, 1.5);
 
     public static readonly DependencyProperty TotalRowsProperty = DependencyProperty.Register(
         nameof(TotalRows),

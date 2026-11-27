@@ -32,8 +32,8 @@ graph TD
 | :--- | :--- | :--- |
 | **Shared Domain & Math** | `src/Occlusa.Shared` | Cross-platform `net8.0` DTOs, enums, `AppointmentCalendarHelper` (calendar grids, slot availability, treatment capability & flexible patient matching), `ResponsiveTableColumnPlanner` (priority-adaptive single-line column budgeting), deterministic `BillingCalculator`, Malaysian `MyKadParser`, and `EmergencyTriageClassifier`. |
 | **Web API & SignalR Hub** | `src/Occlusa.Api` | ASP.NET Core 8 REST API, SignalR `/hubs/queue`, `InMemoryOcclusaRepository` (0-config fallback) / `NpgsqlSupabaseRepository`, and WhatsApp AI Receptionist. |
-| **Native WPF Desktop** | `src/Occlusa.Desktop` | `net8.0-windows` desktop client with panel-fitted, priority-adaptive single-line paged tables (`UniformPagedGrid` + `ResponsiveTableColumnPlanner`: zero scrollbars, zero ellipsis truncation, zero clipping), 1280p/1080p/1440p responsiveness, `LocalApiHostService` embedded in-process Kestrel host with auto-recovery, true modal dialogs with unsaved-changes guard, modal-pinned medical alerts, full-width Simple-by-Default / Detailed opt-in Live Queue with appointment reminders & per-user `⚙ My View` settings, shared Walk-In intake & Active Staff attribution, per-visit anatomical 52-tooth FDI odontogram (5-surface charting), 15-minute proportional Appointments timeline with drag-and-drop rescheduling, and PC/SC MyKad reader. |
-| **xUnit Test Suite** | `src/Occlusa.Tests` | 105 deterministic unit and Kestrel HTTP pipeline tests covering responsive priority-adaptive table column planning, Simple/Detailed Live Queue filtering, hybrid WhatsApp/manual reminders & EN/BM auto-confirmation, per-user workspace preferences, Live Queue sorting, reception note formatting & walk-in note lifecycle persistence, Walk-In slot blocking, staff attribution, appointments, 15-minute timeline layout & overlap splitting, dentist-locked drag rescheduling, treatment capability filtering, patient lookup, unified Master Catalogue syncing, decoupled billing & OTC 0% commission, shared patient credit wallet, smart invoice suggestions, NRIC parsing, and WhatsApp emergency triage. |
+| **Native WPF Desktop** | `src/Occlusa.Desktop` | `net8.0-windows` desktop client styled with the centralized **Calm Dental 60-30-10 Color System** (`Themes/UniformTheme.xaml` + `Themes/CalmThemePalette.cs`), panel-fitted priority-adaptive single-line paged tables (`UniformPagedGrid` + `ResponsiveTableColumnPlanner`: zero scrollbars, zero ellipsis truncation, zero clipping), 1280p/1080p/1440p responsiveness, `LocalApiHostService` embedded in-process Kestrel host with auto-recovery, true modal dialogs with unsaved-changes guard, modal-pinned medical alerts, full-width Simple-by-Default / Detailed opt-in Live Queue with appointment reminders & per-user `⚙ My View` settings, shared Walk-In intake & Active Staff attribution, per-visit anatomical 52-tooth FDI odontogram (5-surface charting), 15-minute proportional Appointments timeline with drag-and-drop rescheduling, and PC/SC MyKad reader. |
+| **xUnit Test Suite** | `src/Occlusa.Tests` | 106 deterministic unit, UI contract, and Kestrel HTTP pipeline tests covering Calm Dental color-system & single-primary-CTA enforcement, responsive priority-adaptive table column planning, Simple/Detailed Live Queue filtering, hybrid WhatsApp/manual reminders & EN/BM auto-confirmation, per-user workspace preferences, Live Queue sorting, reception note formatting & walk-in note lifecycle persistence, Walk-In slot blocking, staff attribution, appointments, 15-minute timeline layout & overlap splitting, dentist-locked drag rescheduling, treatment capability filtering, patient lookup, unified Master Catalogue syncing, decoupled billing & OTC 0% commission, shared patient credit wallet, smart invoice suggestions, NRIC parsing, and WhatsApp emergency triage. |
 | **Supabase Schema & RLS** | `supabase/migrations/` | PostgreSQL schema migrations (`001` core schema & RLS, `002` dentists/treatments/appointments relations, `003` dentist treatment capabilities, `004` live queue walk-ins & staff attribution, `005` patient visits & per-visit odontograms, `006` unified Master Catalogue, decoupled billing, shared patient credit wallet & doctor invoice settings, `007` appointment reminder tracking & per-user workspace view preferences) with clinic-group clinical sharing, branch-isolated financials, and immutable append-only audit logs. |
 | **Architecture Docs** | `docs/` | UI uniformity rules (`docs/UI_UNIFORMITY_RULES.md`), Appointments scheduling specification (`docs/architecture/APPOINTMENTS_SCHEDULING.md`), and step-by-step Clinical Notes & Invoicing walkthrough (`docs/NOTES_AND_INVOICING_WALKTHROUGH.md`). |
 | **Backup Verification** | `scripts/verify-daily-backup.ps1` | Daily AES-256 encrypted `pg_dump` / dry-run archive verification with SHA-256 checksums and API logging. |
@@ -43,11 +43,14 @@ graph TD
 ## Project Structure
 
 ```text
+├── .agents/
+│   └── rules/
+│       └── calm-dental-color-system.md    # Always-on 60-30-10 Calm Dental color system rule
 ├── docs/
 │   ├── architecture/
 │   │   └── APPOINTMENTS_SCHEDULING.md     # Relational calendar & 4-step booking architecture
 │   ├── NOTES_AND_INVOICING_WALKTHROUGH.md # Step-by-step clinical notes & invoicing guide
-│   └── UI_UNIFORMITY_RULES.md             # Zero-scrollbar / zero-ellipsis desktop UI contract
+│   └── UI_UNIFORMITY_RULES.md             # Zero-scrollbar / zero-ellipsis & Calm Dental UI contract
 ├── scripts/
 │   └── verify-daily-backup.ps1        # Encrypted backup verification runner
 ├── src/
@@ -63,13 +66,13 @@ graph TD
 │   ├── Occlusa.Desktop/               # Native WPF desktop client (MVVM)
 │   │   ├── Controls/
 │   │   ├── Services/
-│   │   ├── Themes/
+│   │   ├── Themes/                    # UniformTheme.xaml & CalmThemePalette.cs (60-30-10 tokens)
 │   │   ├── ViewModels/
 │   │   └── Views/
 │   ├── Occlusa.Shared/                # Pure domain models & scheduling/billing helpers
 │   │   ├── Models/
 │   │   └── Services/
-│   └── Occlusa.Tests/                 # xUnit verification suite (105 tests)
+│   └── Occlusa.Tests/                 # xUnit verification suite (106 tests)
 ├── supabase/
 │   └── migrations/
 │       ├── 001_occlusa_tier1_tier2_schema_rls.sql
@@ -98,6 +101,7 @@ graph TD
    - Routine scope only (hours, clinic locations, standard Consultation/Scaling/Filling rates & slots). Complex/surgical requests (implants, wisdom tooth surgery, full-mouth rehab, braces, sedation) are blocked from self-booking and routed to front-desk callback.
    - Emergency red-flag symptoms (severe pain, facial swelling, uncontrolled bleeding, trauma, airway/swallowing difficulty) immediately halt booking, set `IsEmergencyEscalated = true`, and emit `EmergencyEscalated` via SignalR.
 6. **Treatment-Driven 4-Step Front-Desk Appointment Booking:** Appointments match front-desk workflow order (`Treatment` -> eligible `Dentist` via `SupportedTreatmentIds` -> target `Date` & 3x3 hourly slot availability grid -> flexible `IC`/`Name`/`Phone` auto-suggest lookup with inline new-patient registration), keeping `MedicalAlertsBanner` hidden on the main Appointments overview until a specific patient is selected inside a modal or clinical workspace.
+7. **Calm Dental 60-30-10 Color System:** All desktop XAML and code-behind colors resolve exclusively from the centralized 17-token palette in `Themes/UniformTheme.xaml` and `Themes/CalmThemePalette.cs` (`#F7FAFA` canvas, `#FFFFFF` cards, `#EDF3F3` sidebar/table headers/row hovers, `#D8E3E3` borders, `#182929`/`#566B6B` text with zero pure `#000000`, `#069494`/`#057878`/`#E3F4F4` teal brand accents, and soft semantic feedback pairs), enforcing strictly one primary CTA per active view/modal and verified automatically by `Occlusa.Tests`.
 
 ---
 

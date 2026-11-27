@@ -9,14 +9,14 @@
         <BooleanToVisibilityConverter x:Key="BoolToVis" />
 
         <Style x:Key="UniformColumnHeaderStyle" TargetType="DataGridColumnHeader">
-            <Setter Property="Background" Value="#F1F5F9" />
-            <Setter Property="Foreground" Value="#334155" />
-            <Setter Property="FontFamily" Value="Segoe UI" />
+            <Setter Property="Background" Value="{StaticResource BgSubtleBrush}" />
+            <Setter Property="Foreground" Value="{StaticResource TextSecondaryBrush}" />
+            <Setter Property="FontFamily" Value="{StaticResource FontFamilyPrimary}" />
             <Setter Property="FontSize" Value="11.5" />
             <Setter Property="FontWeight" Value="SemiBold" />
             <Setter Property="Height" Value="36" />
             <Setter Property="Padding" Value="10,0" />
-            <Setter Property="BorderBrush" Value="#E2E8F0" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderDefaultBrush}" />
             <Setter Property="BorderThickness" Value="0,0,0,1" />
             <Setter Property="HorizontalContentAlignment" Value="Left" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
@@ -37,16 +37,16 @@
 
         <Style x:Key="UniformDataGridRowStyle" TargetType="DataGridRow">
             <Setter Property="Height" Value="36" />
-            <Setter Property="Background" Value="#FFFFFF" />
+            <Setter Property="Background" Value="{StaticResource BgSurfaceBrush}" />
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="Cursor" Value="Hand" />
             <Style.Triggers>
                 <Trigger Property="IsMouseOver" Value="True">
-                    <Setter Property="Background" Value="#F0FDFA" />
+                    <Setter Property="Background" Value="{StaticResource BgSubtleBrush}" />
                 </Trigger>
                 <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="#CCFBF1" />
-                    <Setter Property="Foreground" Value="#0F172A" />
+                    <Setter Property="Background" Value="{StaticResource BrandTintBrush}" />
+                    <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
                 </Trigger>
             </Style.Triggers>
         </Style>
@@ -58,7 +58,7 @@
 
         <Style x:Key="UniformSpacedAutoHeightDataGridRowStyle" TargetType="DataGridRow" BasedOn="{StaticResource UniformAutoHeightDataGridRowStyle}">
             <Setter Property="Margin" Value="0,2,0,2" />
-            <Setter Property="BorderBrush" Value="#E2E8F0" />
+            <Setter Property="BorderBrush" Value="{StaticResource BorderDefaultBrush}" />
             <Setter Property="BorderThickness" Value="0,1,0,1" />
         </Style>
 
@@ -66,19 +66,19 @@
             <Setter Property="BorderThickness" Value="0" />
             <Setter Property="FocusVisualStyle" Value="{x:Null}" />
             <Setter Property="Background" Value="Transparent" />
-            <Setter Property="Foreground" Value="#0F172A" />
+            <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
             <Setter Property="VerticalContentAlignment" Value="Center" />
             <Style.Triggers>
                 <Trigger Property="IsSelected" Value="True">
                     <Setter Property="Background" Value="Transparent" />
-                    <Setter Property="Foreground" Value="#0F172A" />
+                    <Setter Property="Foreground" Value="{StaticResource TextPrimaryBrush}" />
                 </Trigger>
             </Style.Triggers>
         </Style>
     </UserControl.Resources>
 
-    <Border Background="#FFFFFF"
-            BorderBrush="#E2E8F0"
+    <Border Background="{StaticResource BgSurfaceBrush}"
+            BorderBrush="{StaticResource BorderDefaultBrush}"
             BorderThickness="1"
             CornerRadius="8">
         <Grid>
@@ -91,8 +91,8 @@
             <!-- Optional Header Bar -->
             <Border Grid.Row="0"
                     Visibility="{Binding HasHeaderText, ElementName=RootGridControl, Converter={StaticResource BoolToVis}}"
-                    Background="#F8FAFC"
-                    BorderBrush="#E2E8F0"
+                    Background="{StaticResource BgCanvasBrush}"
+                    BorderBrush="{StaticResource BorderDefaultBrush}"
                     BorderThickness="0,0,0,1"
                     CornerRadius="8,8,0,0"
                     Padding="14,9">
@@ -102,17 +102,17 @@
                                Visibility="{Binding IsHeaderHorizontal, ElementName=RootGridControl, Converter={StaticResource BoolToVis}}">
                         <TextBlock DockPanel.Dock="Left"
                                    Text="{Binding Title, ElementName=RootGridControl}"
-                                   FontFamily="Segoe UI"
+                                   FontFamily="{StaticResource FontFamilyPrimary}"
                                    FontSize="13.5"
                                    FontWeight="SemiBold"
-                                   Foreground="#0F172A"
+                                   Foreground="{StaticResource TextPrimaryBrush}"
                                    VerticalAlignment="Center"
                                    TextTrimming="None" />
                         <TextBlock DockPanel.Dock="Right"
                                    Text="{Binding Subtitle, ElementName=RootGridControl}"
-                                   FontFamily="Segoe UI"
+                                   FontFamily="{StaticResource FontFamilyPrimary}"
                                    FontSize="11.5"
-                                   Foreground="#64748B"
+                                   Foreground="{StaticResource TextSecondaryBrush}"
                                    VerticalAlignment="Center"
                                    TextTrimming="None" />
                     </DockPanel>
@@ -120,15 +120,15 @@
                     <!-- Stacked header fallback when FitColumnsToContent is explicitly enabled -->
                     <StackPanel Visibility="{Binding FitColumnsToContent, ElementName=RootGridControl, Converter={StaticResource BoolToVis}}">
                         <TextBlock Text="{Binding Title, ElementName=RootGridControl}"
-                                   FontFamily="Segoe UI"
+                                   FontFamily="{StaticResource FontFamilyPrimary}"
                                    FontSize="13.5"
                                    FontWeight="SemiBold"
-                                   Foreground="#0F172A"
+                                   Foreground="{StaticResource TextPrimaryBrush}"
                                    TextTrimming="None" />
                         <TextBlock Text="{Binding Subtitle, ElementName=RootGridControl}"
-                                   FontFamily="Segoe UI"
+                                   FontFamily="{StaticResource FontFamilyPrimary}"
                                    FontSize="11.5"
-                                   Foreground="#64748B"
+                                   Foreground="{StaticResource TextSecondaryBrush}"
                                    Margin="0,2,0,0"
                                    TextWrapping="Wrap"
                                    TextTrimming="None" />
@@ -153,8 +153,8 @@
                           SelectionUnit="FullRow"
                           HeadersVisibility="Column"
                           GridLinesVisibility="Horizontal"
-                          HorizontalGridLinesBrush="#E2E8F0"
-                          Background="#FFFFFF"
+                          HorizontalGridLinesBrush="{StaticResource BorderDefaultBrush}"
+                          Background="{StaticResource BgSurfaceBrush}"
                           BorderThickness="0"
                           RowHeight="36"
                           ColumnHeaderStyle="{StaticResource UniformColumnHeaderStyle}"
@@ -168,14 +168,14 @@
                           MouseDoubleClick="InternalDataGrid_MouseDoubleClick" />
 
                 <!-- Empty State Overlay -->
-                <Border Background="#FFFFFF"
+                <Border Background="{StaticResource BgSurfaceBrush}"
                         Visibility="{Binding IsEmpty, ElementName=RootGridControl, Converter={StaticResource BoolToVis}}"
                         Margin="0,36,0,0"
                         Padding="20">
                     <TextBlock Text="{Binding EmptyMessage, ElementName=RootGridControl}"
-                               FontFamily="Segoe UI"
+                               FontFamily="{StaticResource FontFamilyPrimary}"
                                FontSize="12.5"
-                               Foreground="#64748B"
+                               Foreground="{StaticResource TextSecondaryBrush}"
                                HorizontalAlignment="Center"
                                VerticalAlignment="Center"
                                TextAlignment="Center"
@@ -186,8 +186,8 @@
 
             <!-- Clean Pagination Footer -->
             <Border Grid.Row="2"
-                    Background="#F8FAFC"
-                    BorderBrush="#E2E8F0"
+                    Background="{StaticResource BgCanvasBrush}"
+                    BorderBrush="{StaticResource BorderDefaultBrush}"
                     BorderThickness="0,1,0,0"
                     CornerRadius="0,0,8,8"
                     Padding="14,0">
@@ -207,10 +207,10 @@
 
                     <TextBlock Grid.Column="1"
                                Text="{Binding PaginationSummary, ElementName=RootGridControl}"
-                               FontFamily="Segoe UI"
+                               FontFamily="{StaticResource FontFamilyPrimary}"
                                FontSize="12"
                                FontWeight="SemiBold"
-                               Foreground="#475569"
+                               Foreground="{StaticResource TextSecondaryBrush}"
                                HorizontalAlignment="Center"
                                VerticalAlignment="Center"
                                TextTrimming="None" />

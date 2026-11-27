@@ -734,4 +734,61 @@ public class PatientVisitsAndOdontogramTests
         Assert.Contains("CREATE TABLE IF NOT EXISTS public.user_workspace_preferences", migration007, StringComparison.Ordinal);
         Assert.Contains("ALTER TABLE public.user_workspace_preferences ENABLE ROW LEVEL SECURITY", migration007, StringComparison.Ordinal);
     }
+
+    [Fact]
+    public void CalmDentalColorSystem_EnforcesCentralizedPaletteAndSinglePrimaryCta()
+    {
+        var allowedHexPalette = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            "#F7FAFA", "#FFFFFF", "#EDF3F3", "#D8E3E3",
+            "#182929", "#566B6B", "#069494", "#057878", "#E3F4F4",
+            "#2B825B", "#EAF6F0", "#2E6FA3", "#EBF3FA",
+            "#C47B1B", "#FDF4E7", "#C44545", "#FBECEC"
+        };
+
+        var repoRoot = ResolveRepoRoot();
+        var desktopRoot = Path.Combine(repoRoot, "src", "Occlusa.Desktop");
+        var themesRoot = Path.Combine(desktopRoot, "Themes") + Path.DirectorySeparatorChar;
+        var desktopFiles = Directory.GetFiles(desktopRoot, "*.*", SearchOption.AllDirectories)
+            .Where(f => (f.EndsWith(".xaml", StringComparison.OrdinalIgnoreCase)
+                         || f.EndsWith(".cs", StringComparison.OrdinalIgnoreCase))
+                        && !f.Contains($"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}")
+                        && !f.Contains($"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}"))
+            .ToArray();
+
+        Assert.True(File.Exists(Path.Combine(desktopRoot, "Themes", "UniformTheme.xaml")));
+        Assert.True(File.Exists(Path.Combine(desktopRoot, "Themes", "CalmThemePalette.cs")));
+
+        var hexRegex = new Regex(@"#[0-9A-Fa-f]{6}\b");
+        var disallowedDirectBrushRegex = new Regex(@"\b(Brushes\.|Colors\.|Color\.From|DropShadowEffect)\b");
+
+        foreach (var file in desktopFiles)
+        {
+            var content = File.ReadAllText(file);
+            bool isThemeFile = file.StartsWith(themesRoot, StringComparison.OrdinalIgnoreCase);
+
+            if (isThemeFile)
+            {
+                foreach (Match match in hexRegex.Matches(content))
+                {
+                    Assert.True(
+                        allowedHexPalette.Contains(match.Value),
+                        $"Disallowed off-palette hex {match.Value} in {Path.GetFileName(file)}.");
+                }
+            }
+            else
+            {
+                Assert.DoesNotMatch(hexRegex, content);
+                Assert.DoesNotMatch(disallowedDirectBrushRegex, content);
+            }
+
+            if (Path.GetFileName(file).EndsWith("Modal.xaml", StringComparison.OrdinalIgnoreCase))
+            {
+                int primaryCtaCount = Regex.Matches(content, @"UniformPrimaryButtonStyle").Count;
+                Assert.True(
+                    primaryCtaCount <= 1,
+                    $"{Path.GetFileName(file)} declares {primaryCtaCount} primary CTA buttons (max 1 allowed).");
+            }
+        }
+    }
 }

@@ -9,7 +9,8 @@
         MinHeight="740"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
-        Background="{StaticResource SurfaceCanvasBrush}"
+        Background="{StaticResource BgCanvasBrush}"
+        Foreground="{StaticResource TextPrimaryBrush}"
         ScrollViewer.VerticalScrollBarVisibility="Disabled"
         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
 
@@ -175,7 +176,7 @@
         <controls:ModalDialogShell.FooterLeftContent>
             <TextBlock Text="{Binding StatusMessage}"
                        Style="{StaticResource UniformBodyTextStyle}"
-                       Foreground="{StaticResource BrandPrimaryBrush}"
+                       Foreground="{StaticResource BrandHoverBrush}"
                        FontWeight="SemiBold"
                        VerticalAlignment="Center" />
         </controls:ModalDialogShell.FooterLeftContent>

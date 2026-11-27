@@ -9,7 +9,8 @@
         MinHeight="480"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
-        Background="{StaticResource SurfaceCanvasBrush}"
+        Background="{StaticResource BgCanvasBrush}"
+        Foreground="{StaticResource TextPrimaryBrush}"
         ScrollViewer.VerticalScrollBarVisibility="Disabled"
         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
 
@@ -61,7 +62,7 @@
                             <TextBlock Text="{Binding CurrentReminderBadge}"
                                        FontSize="13.5"
                                        FontWeight="Bold"
-                                       Foreground="{StaticResource BrandPrimaryBrush}"
+                                       Foreground="{StaticResource BrandHoverBrush}"
                                        TextTrimming="None" />
                             <TextBlock Text="{Binding CurrentReminderSummary}"
                                        Style="{StaticResource UniformMutedTextStyle}"
@@ -140,8 +141,7 @@
                             <Button Content="No Reply"
                                     Command="{Binding MarkNoReplyCommand}"
                                     IsEnabled="{Binding CanAct}"
-                                    Style="{StaticResource UniformGhostButtonStyle}"
-                                    Foreground="{StaticResource DangerBrush}"
+                                    Style="{StaticResource UniformDangerButtonStyle}"
                                     Height="32"
                                     FontSize="11.5" />
                         </UniformGrid>
@@ -156,11 +156,11 @@
                        VerticalAlignment="Center">
                 <TextBlock.Style>
                     <Style TargetType="TextBlock" BasedOn="{StaticResource UniformBodyTextStyle}">
-                        <Setter Property="Foreground" Value="{StaticResource BrandPrimaryBrush}" />
+                        <Setter Property="Foreground" Value="{StaticResource BrandHoverBrush}" />
                         <Setter Property="FontWeight" Value="SemiBold" />
                         <Style.Triggers>
                             <DataTrigger Binding="{Binding IsStatusError}" Value="True">
-                                <Setter Property="Foreground" Value="{StaticResource DangerBrush}" />
+                                <Setter Property="Foreground" Value="{StaticResource StatusErrorBrush}" />
                             </DataTrigger>
                         </Style.Triggers>
                     </Style>

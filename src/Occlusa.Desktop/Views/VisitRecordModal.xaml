@@ -9,7 +9,8 @@
         MinHeight="770"
         WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False"
-        Background="{StaticResource SurfaceCanvasBrush}"
+        Background="{StaticResource BgCanvasBrush}"
+        Foreground="{StaticResource TextPrimaryBrush}"
         ScrollViewer.VerticalScrollBarVisibility="Disabled"
         ScrollViewer.HorizontalScrollBarVisibility="Disabled">
 
@@ -175,17 +176,17 @@
 
                                 <!-- Compact Anatomical Legend -->
                                 <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                                    <Border Width="9" Height="9" CornerRadius="2" Background="#EF4444" Margin="0,0,4,0" VerticalAlignment="Center" />
+                                    <Border Width="9" Height="9" CornerRadius="2" Background="{StaticResource StatusErrorBrush}" Margin="0,0,4,0" VerticalAlignment="Center" />
                                     <TextBlock Text="Caries" Style="{StaticResource UniformMutedTextStyle}" Margin="0,0,9,0" VerticalAlignment="Center" />
-                                    <Border Width="9" Height="9" CornerRadius="2" Background="#0EA5E9" Margin="0,0,4,0" VerticalAlignment="Center" />
+                                    <Border Width="9" Height="9" CornerRadius="2" Background="{StaticResource StatusInfoBrush}" Margin="0,0,4,0" VerticalAlignment="Center" />
                                     <TextBlock Text="Filling" Style="{StaticResource UniformMutedTextStyle}" Margin="0,0,9,0" VerticalAlignment="Center" />
-                                    <Border Width="9" Height="9" CornerRadius="2" Background="#8B5CF6" Margin="0,0,4,0" VerticalAlignment="Center" />
+                                    <Border Width="9" Height="9" CornerRadius="2" Background="{StaticResource StatusSuccessBrush}" Margin="0,0,4,0" VerticalAlignment="Center" />
                                     <TextBlock Text="Crown" Style="{StaticResource UniformMutedTextStyle}" Margin="0,0,9,0" VerticalAlignment="Center" />
-                                    <Border Width="9" Height="9" CornerRadius="2" Background="#F97316" Margin="0,0,4,0" VerticalAlignment="Center" />
+                                    <Border Width="9" Height="9" CornerRadius="2" Background="{StaticResource StatusWarningBrush}" Margin="0,0,4,0" VerticalAlignment="Center" />
                                     <TextBlock Text="RCT" Style="{StaticResource UniformMutedTextStyle}" Margin="0,0,9,0" VerticalAlignment="Center" />
-                                    <Border Width="9" Height="9" CornerRadius="2" Background="#14B8A6" Margin="0,0,4,0" VerticalAlignment="Center" />
+                                    <Border Width="9" Height="9" CornerRadius="2" Background="{StaticResource BrandPrimaryBrush}" Margin="0,0,4,0" VerticalAlignment="Center" />
                                     <TextBlock Text="Implant" Style="{StaticResource UniformMutedTextStyle}" Margin="0,0,9,0" VerticalAlignment="Center" />
-                                    <Border Width="9" Height="9" CornerRadius="2" Background="#CBD5E1" Margin="0,0,4,0" VerticalAlignment="Center" />
+                                    <Border Width="9" Height="9" CornerRadius="2" Background="{StaticResource BorderDefaultBrush}" Margin="0,0,4,0" VerticalAlignment="Center" />
                                     <TextBlock Text="Missing" Style="{StaticResource UniformMutedTextStyle}" VerticalAlignment="Center" />
                                 </StackPanel>
                             </DockPanel>
@@ -324,49 +325,49 @@
                                             <!-- Top Surface (B on upper, L on lower) -->
                                             <Polygon Points="12,12 108,12 80,40 40,40"
                                                      Fill="{Binding SurfaceTopFill}"
-                                                     Stroke="#475569"
+                                                     Stroke="{StaticResource TextSecondaryBrush}"
                                                      StrokeThickness="1.8"
                                                      Cursor="Hand"
                                                      MouseLeftButtonDown="SurfaceTop_MouseDown" />
-                                            <TextBlock Canvas.Left="54" Canvas.Top="18" Text="{Binding SurfaceTopLabel}" FontFamily="Consolas" FontSize="13" FontWeight="Bold" IsHitTestVisible="False" />
+                                            <TextBlock Canvas.Left="54" Canvas.Top="18" Text="{Binding SurfaceTopLabel}" FontFamily="{StaticResource FontFamilyMono}" FontSize="13" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" IsHitTestVisible="False" />
 
                                             <!-- Bottom Surface (L on upper, B on lower) -->
                                             <Polygon Points="12,108 40,80 80,80 108,108"
                                                      Fill="{Binding SurfaceBottomFill}"
-                                                     Stroke="#475569"
+                                                     Stroke="{StaticResource TextSecondaryBrush}"
                                                      StrokeThickness="1.8"
                                                      Cursor="Hand"
                                                      MouseLeftButtonDown="SurfaceBottom_MouseDown" />
-                                            <TextBlock Canvas.Left="54" Canvas.Top="86" Text="{Binding SurfaceBottomLabel}" FontFamily="Consolas" FontSize="13" FontWeight="Bold" IsHitTestVisible="False" />
+                                            <TextBlock Canvas.Left="54" Canvas.Top="86" Text="{Binding SurfaceBottomLabel}" FontFamily="{StaticResource FontFamilyMono}" FontSize="13" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" IsHitTestVisible="False" />
 
                                             <!-- Left Surface (Midline-aware M or D) -->
                                             <Polygon Points="12,12 40,40 40,80 12,108"
                                                      Fill="{Binding SurfaceLeftFill}"
-                                                     Stroke="#475569"
+                                                     Stroke="{StaticResource TextSecondaryBrush}"
                                                      StrokeThickness="1.8"
                                                      Cursor="Hand"
                                                      MouseLeftButtonDown="SurfaceLeft_MouseDown" />
-                                            <TextBlock Canvas.Left="20" Canvas.Top="52" Text="{Binding SurfaceLeftLabel}" FontFamily="Consolas" FontSize="13" FontWeight="Bold" IsHitTestVisible="False" />
+                                            <TextBlock Canvas.Left="20" Canvas.Top="52" Text="{Binding SurfaceLeftLabel}" FontFamily="{StaticResource FontFamilyMono}" FontSize="13" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" IsHitTestVisible="False" />
 
                                             <!-- Right Surface (Midline-aware M or D) -->
                                             <Polygon Points="108,12 108,108 80,80 80,40"
                                                      Fill="{Binding SurfaceRightFill}"
-                                                     Stroke="#475569"
+                                                     Stroke="{StaticResource TextSecondaryBrush}"
                                                      StrokeThickness="1.8"
                                                      Cursor="Hand"
                                                      MouseLeftButtonDown="SurfaceRight_MouseDown" />
-                                            <TextBlock Canvas.Left="88" Canvas.Top="52" Text="{Binding SurfaceRightLabel}" FontFamily="Consolas" FontSize="13" FontWeight="Bold" IsHitTestVisible="False" />
+                                            <TextBlock Canvas.Left="88" Canvas.Top="52" Text="{Binding SurfaceRightLabel}" FontFamily="{StaticResource FontFamilyMono}" FontSize="13" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" IsHitTestVisible="False" />
 
                                             <!-- Center Surface (Occlusal / Incisal) -->
                                             <Rectangle Canvas.Left="40" Canvas.Top="40"
                                                        Width="40" Height="40"
                                                        RadiusX="4" RadiusY="4"
                                                        Fill="{Binding SurfaceCenterFill}"
-                                                       Stroke="#334155"
+                                                       Stroke="{StaticResource TextPrimaryBrush}"
                                                        StrokeThickness="1.9"
                                                        Cursor="Hand"
                                                        MouseLeftButtonDown="SurfaceCenter_MouseDown" />
-                                            <TextBlock Canvas.Left="54" Canvas.Top="52" Text="O" FontFamily="Consolas" FontSize="13" FontWeight="Bold" IsHitTestVisible="False" />
+                                            <TextBlock Canvas.Left="54" Canvas.Top="52" Text="O" FontFamily="{StaticResource FontFamilyMono}" FontSize="13" FontWeight="Bold" Foreground="{StaticResource TextPrimaryBrush}" IsHitTestVisible="False" />
                                         </Canvas>
                                     </Viewbox>
 
@@ -472,7 +473,7 @@
                                     <Button Content="3. Mark Completed"
                                             Command="{Binding StageAndSaveToothCommand}"
                                             CommandParameter="Completed"
-                                            Style="{StaticResource UniformPrimaryButtonStyle}" />
+                                            Style="{StaticResource UniformSecondaryButtonStyle}" />
                                 </StackPanel>
                             </Grid>
                         </Grid>
@@ -634,7 +635,7 @@
                            Margin="0,0,14,0" />
                 <TextBlock Text="{Binding StatusMessage}"
                            Style="{StaticResource UniformBodyTextStyle}"
-                           Foreground="{StaticResource BrandPrimaryBrush}"
+                           Foreground="{StaticResource BrandHoverBrush}"
                            FontWeight="SemiBold"
                            VerticalAlignment="Center" />
             </StackPanel>

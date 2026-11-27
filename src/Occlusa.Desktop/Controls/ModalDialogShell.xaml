@@ -34,35 +34,35 @@
                     <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
                         <!-- Dirty State Indicator -->
                         <Border Visibility="{Binding HasUnsavedChanges, ElementName=RootShell, Converter={StaticResource BoolToVis}}"
-                                Background="{StaticResource WarningBgBrush}"
-                                BorderBrush="{StaticResource WarningBorderBrush}"
+                                Background="{StaticResource StatusWarningBgBrush}"
+                                BorderBrush="{StaticResource StatusWarningBrush}"
                                 BorderThickness="1"
                                 CornerRadius="11"
                                 Padding="10,4"
                                 Margin="0,0,8,0"
                                 VerticalAlignment="Center">
                             <TextBlock Text="● Unsaved Changes"
-                                       FontFamily="Segoe UI"
+                                       FontFamily="{StaticResource FontFamilyPrimary}"
                                        FontSize="11"
                                        FontWeight="SemiBold"
-                                       Foreground="#B45309"
+                                       Foreground="{StaticResource StatusWarningBrush}"
                                        TextTrimming="None" />
                         </Border>
 
                         <!-- Optional Header Badge -->
                         <Border Visibility="{Binding HasBadgeText, ElementName=RootShell, Converter={StaticResource BoolToVis}}"
-                                Background="{StaticResource BrandPrimarySoftBrush}"
-                                BorderBrush="#99F6E4"
+                                Background="{StaticResource BrandTintBrush}"
+                                BorderBrush="{StaticResource BorderDefaultBrush}"
                                 BorderThickness="1"
                                 CornerRadius="11"
                                 Padding="10,4"
                                 Margin="0,0,10,0"
                                 VerticalAlignment="Center">
                             <TextBlock Text="{Binding BadgeText, ElementName=RootShell}"
-                                       FontFamily="Segoe UI"
+                                       FontFamily="{StaticResource FontFamilyPrimary}"
                                        FontSize="11"
                                        FontWeight="SemiBold"
-                                       Foreground="{StaticResource BrandPrimaryBrush}"
+                                       Foreground="{StaticResource BrandHoverBrush}"
                                        TextTrimming="None" />
                         </Border>
 
